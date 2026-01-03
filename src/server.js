@@ -2,6 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
+// Import route handlers
+import authRoutes from './routes/auth.js';
+import clientsRoutes from './routes/clients.js';
+import patientsRoutes from './routes/patients.js';
+import opportunitiesRoutes from './routes/opportunities.js';
+import analyticsRoutes from './routes/analytics.js';
+
 dotenv.config({ path: '.env.local' });
 
 const app = express();
@@ -20,28 +27,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-// ===== AUTH ENDPOINTS =====
-app.get('/api/auth/me', (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  
-  if (!token) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  
-  res.json({ message: 'Authenticated', token });
-});
-
-// ===== CLIENTS ENDPOINT =====
-app.get('/api/clients', async (req, res) => {
-  try {
-    res.json({ 
-      success: true, 
-      message: 'Clients endpoint working'
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// ===== ROUTE HANDLERS =====
+app.use('/api/auth', authRoutes);
+app.use('/api/clients', clientsRoutes);
+app.use('/api/patients', patientsRoutes);
+app.use('/api/opportunities', opportunitiesRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // ===== ERROR HANDLER =====
 app.use((err, req, res, next) => {

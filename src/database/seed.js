@@ -1,0 +1,153 @@
+import { randomUUID } from 'crypto';
+import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
+import pool from './index.js';
+
+dotenv.config();
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+
+async function seed() {
+  try {
+    console.log('🌱 Starting seed...');
+
+    // 1. Create or get Supabase Auth user
+    console.log('Setting up Supabase Auth user...');
+    let authUser;
+
+    const { data: existingUsers } = await supabase.auth.admin.listUsers();
+    const existingUser = existingUsers?.users?.find(u => u.email === 'demo@therxos.app');
+
+    if (existingUser) {
+      authUser = existingUser;
+      console.log('✅ Auth user already exists:', authUser.id);
+    } else {
+      const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
+        email: 'demo@therxos.app',
+        password: 'demo1234',
+        email_confirm: true,
+      });
+
+      if (createError) {
+        console.error('❌ Auth user creation failed:', createError);
+        throw createError;
+      }
+      authUser = newUser.user;
+      console.log('✅ Auth user created:', authUser.id);
+    }
+
+    // 2. Get or create pharmacy
+    console.log('Setting up pharmacy...');
+    let pharmacy;
+
+    // Use the existing pharmacy_id you showed in the screenshot
+    const pharmacyId = '64f3aac2-bba1-4357-8945-a44a0bcc6431';
+    
+    const existingPharmacyResult = await pool.query(
+      'SELECT * FROM pharmacies WHERE pharmacy_id = $1 LIMIT 1',
+      [pharmacyId]
+    );
+
+    if (existingPharmacyResult.rows.length > 0) {
+      pharmacy = existingPharmacyResult.rows[0];
+      console.log('✅ Pharmacy already exists:', pharmacy.pharmacy_id);
+    } else {
+      const pharmacyResult = await pool.query(
+        `
+        INSERT INTO pharmacies (pharmacy_id, npi, pharmacy_name, state, city, address)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *
+        `,
+        [pharmacyId, '1234567890', 'Demo Pharmacy', 'FL', 'Miami', '123 Main St']
+      );
+      pharmacy = pharmacyResult.rows[0];
+      console.log('✅ Pharmacy created:', pharmacy.pharmacy_id);
+    }
+
+    // 3. Seed NDC reference data
+    console.log('Seeding NDC reference data...');
+    const ndcData = [
+      { ndc: '50090529001', description: 'Lisinopril 10mg', strength: '10mg', form: 'tablet', route: 'oral' },
+      { ndc: '00378050001', description: 'Atorvastatin 20mg', strength: '20mg', form: 'tablet', route: 'oral' },
+      { ndc: '00093751930', description: 'Metformin 500mg', strength: '500mg', form: 'tablet', route: 'oral' },
+      { ndc: '00054418925', description: 'Omeprazole 20mg', strength: '20mg', form: 'capsule', route: 'oral' },
+      { ndc: '00054439507', description: 'Levothyroxine 50mcg', strength: '50mcg', form: 'tablet', route: 'oral' },
+      { ndc: '00093375030', description: 'Losartan 50mg', strength: '50mg', form: 'tablet', route: 'oral' },
+      { ndc: '00069007901', description: 'Amoxicillin 500mg', strength: '500mg', form: 'capsule', route: 'oral' },
+      { ndc: '00172419410', description: 'Albuterol 90mcg', strength: '90mcg', form: 'inhaler', route: 'inhalation' },
+      { ndc: '50458513010', description: 'Sertraline 50mg', strength: '50mg', form: 'tablet', route: 'oral' },
+      { ndc: '00006046130', description: 'Ibuprofen 200mg', strength: '200mg', form: 'tablet', route: 'oral' },
+    ];
+
+    for (const ndc of ndcData) {
+      await pool.query(
+        `
+        INSERT INTO ndc_reference (ndc, drug_name, generic_name, strength, form, route)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (ndc) DO NOTHING
+        `,
+        [ndc.ndc, ndc.description, ndc.description, ndc.strength, ndc.form, ndc.route]
+      );
+    }
+    console.log(`✅ ${ndcData.length} NDCs seeded`);
+
+        // 4. Create or get sample patients
+    console.log('Setting up sample patients...');
+    const patientDobs = [
+      '1960-05-15',
+      '1975-08-22',
+      '1958-03-10',
+      '1980-12-05',
+      '1965-07-18',
+    ];
+
+    const patientIds = [];
+    for (let i = 0; i < patientDobs.length; i++) {
+      // Create a unique hash for each patient
+      const crypto = await import('crypto');
+      const patientHash = crypto.createHash('sha256')
+        .update(`${pharmacy.pharmacy_id}-${patientDobs[i]}-${i}`)
+        .digest('hex');
+      
+      // Check if patient already exists
+      const existingPatientResult = await pool.query(
+        'SELECT patient_id FROM patients WHERE patient_hash = $1',
+        [patientHash]
+      );
+
+      if (existingPatientResult.rows.length > 0) {
+        patientIds.push(existingPatientResult.rows[0].patient_id);
+      } else {
+        const result = await pool.query(
+          `
+          INSERT INTO patients (pharmacy_id, patient_hash, date_of_birth, primary_insurance_bin)
+          VALUES ($1, $2, $3, $4)
+          RETURNING patient_id
+          `,
+          [pharmacy.pharmacy_id, patientHash, patientDobs[i], 'ABC']
+        );
+        patientIds.push(result.rows[0].patient_id);
+      }
+    }
+    console.log(`✅ ${patientIds.length} patients ready`);
+
+    console.log(`✅ ${patientIds.length} patients created`);
+
+        // 5. Skip prescriptions for now - schema needs verification
+    console.log('⏭️  Skipping prescriptions (schema verification needed)');
+
+
+    console.log('\n🎉 Seed completed!');
+    console.log('📋 Demo: demo@therxos.app / demo1234');
+    process.exit(0);
+  } catch (error) {
+    console.error('\n❌ Seed failed:');
+    console.error('Full error:', error);
+    process.exit(1);
+  }
+}
+
+seed();

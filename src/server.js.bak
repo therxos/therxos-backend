@@ -1,0 +1,155 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+
+dotenv.config({ path: '.env.local' });
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// ===== MIDDLEWARE =====
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// ===== HEALTH CHECK =====
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ===== AUTH ENDPOINTS =====
+app.get('/api/auth/me', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  res.json({ message: 'Authenticated', token });
+});
+
+// ===== CLIENTS ENDPOINT =====
+app.get('/api/clients', async (req, res) => {
+  try {
+    res.json({ 
+      success: true, 
+      message: 'Clients endpoint working'
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== ANALYTICS ENDPOINTS =====
+
+// Dashboard metrics
+app.get('/api/analytics/dashboard', (req, res) => {
+  const days = parseInt(req.query.days) || 30;
+  
+  res.json({
+    data: {
+      pending_opportunities: 12,
+      pending_margin: 4250,
+      realized_margin: 8900,
+      active_patients: 342,
+      action_rate: 67,
+      med_sync_patients: 89,
+      rx_count: 1240,
+    }
+  });
+});
+
+// Opportunities by type
+app.get('/api/analytics/by-type', (req, res) => {
+  const status = req.query.status || 'new';
+  
+  res.json({
+    data: [
+      {
+        opportunity_type: 'ndc_optimization',
+        count: '5',
+        total_margin: '1200'
+      },
+      {
+        opportunity_type: 'brand_to_generic',
+        count: '4',
+        total_margin: '950'
+      },
+      {
+        opportunity_type: 'therapeutic_interchange',
+        count: '2',
+        total_margin: '850'
+      },
+      {
+        opportunity_type: 'missing_therapy',
+        count: '1',
+        total_margin: '250'
+      }
+    ]
+  });
+});
+
+// Performance metrics
+app.get('/api/analytics/performance', (req, res) => {
+  const days = parseInt(req.query.days) || 30;
+  
+  res.json({
+    data: {
+      changes: {
+        opportunities: 12,
+        potential_margin: 8,
+        realized_margin: 15
+      }
+    }
+  });
+});
+
+// Top patients with opportunities
+app.get('/api/analytics/top-patients', (req, res) => {
+  const limit = parseInt(req.query.limit) || 5;
+  
+  res.json({
+    data: [
+      {
+        patient_id: 'P001',
+        patient_hash: 'abc123def456',
+        chronic_conditions: ['Diabetes', 'Hypertension', 'High Cholesterol'],
+        opportunity_count: 4,
+        total_margin: 1200,
+        last_visit: '2026-01-02'
+      },
+      {
+        patient_id: 'P002',
+        patient_hash: 'xyz789uvw012',
+        chronic_conditions: ['COPD', 'Asthma'],
+        opportunity_count: 3,
+        total_margin: 850,
+        last_visit: '2026-01-01'
+      },
+      {
+        patient_id: 'P003',
+        patient_hash: 'def456ghi789',
+        chronic_conditions: ['Diabetes', 'Depression'],
+        opportunity_count: 2,
+        total_margin: 600,
+        last_visit: '2025-12-31'
+      }
+    ]
+  });
+});
+
+// ===== ERROR HANDLER =====
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: err.message });
+});
+
+// ===== START SERVER =====
+app.listen(PORT, () => {
+  console.log(`✓ Server running on port ${PORT}`);
+  console.log(`✓ Environment: ${process.env.NODE_ENV}`);
+  console.log(`✓ API available at http://localhost:${PORT}`);
+});
