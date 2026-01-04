@@ -10,7 +10,7 @@ const router = express.Router();
 // Get opportunities for authenticated user's pharmacy
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { status, type, priority, search, sortBy = 'margin', sortOrder = 'desc', limit = 50, offset = 0 } = req.query;
+    const { status, type, priority, search, sortBy = 'margin', sortOrder = 'desc', limit = 1000, offset = 0 } = req.query;
     const pharmacyId = req.user.pharmacyId;
 
     if (!pharmacyId) {
@@ -20,9 +20,13 @@ router.get('/', authenticateToken, async (req, res) => {
     let query = `
       SELECT o.*, 
         p.patient_hash,
+        p.date_of_birth as patient_dob,
         p.chronic_conditions,
         p.primary_insurance_bin,
-        pr.drug_name as current_drug
+        COALESCE(pr.insurance_bin, p.primary_insurance_bin) as insurance_bin,
+        COALESCE(pr.insurance_group, '') as insurance_group,
+        pr.drug_name as current_drug,
+        pr.prescriber_name
       FROM opportunities o
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
