@@ -150,20 +150,14 @@ async function ingestData(clientEmail, csvFilePath) {
     if (!row.patient_name) continue;
     const hash = generatePatientHash(row.patient_name, row.patient_dob || '');
     
+    // Parse the prescription date to compare for "most recent"
+    const rxDate = parseDate(row.date_written) || '1900-01-01';
+    
     if (!patientMap.has(hash)) {
       // Parse name - format is "Last, First" or "Last,First"
       const nameParts = (row.patient_name || '').split(',').map(s => s.trim());
       const lastName = nameParts[0] || '';
       const firstName = nameParts[1] || '';
-      
-      // Format Contract ID + PBP as H2501-001
-      // Contract ID should be 1 letter + 4 digits, PBP should be 3 digits
-      let contractPbp = null;
-      if (row.contract_id && row.plan_name) {
-        const contractId = String(row.contract_id).trim();
-        const pbp = String(row.plan_name).trim().padStart(3, '0'); // Pad to 3 digits
-        contractPbp = `${contractId}-${pbp}`;
-      }
       
       patientMap.set(hash, {
         patient_id: uuidv4(),
@@ -171,13 +165,26 @@ async function ingestData(clientEmail, csvFilePath) {
         first_name: firstName,
         last_name: lastName,
         dob: parseDate(row.patient_dob),
+        // Insurance from most recent prescription
         insurance_bin: row.insurance_bin || null,
         insurance_group: row.group_number || null,  // GROUP goes here, NOT PCN
-        insurance_pcn: null,  // PCN is rarely in PioneerRx exports
-        contract_pbp: contractPbp,
+        most_recent_rx_date: rxDate,  // Track to know which insurance is newest
         conditions: new Set(),
         prescriptions: [],  // Track patient's meds for profile_data
       });
+    } else {
+      // Patient exists - check if this prescription is more recent
+      const patient = patientMap.get(hash);
+      if (rxDate > patient.most_recent_rx_date) {
+        // Update insurance to the most recent prescription's insurance
+        if (row.insurance_bin) {
+          patient.insurance_bin = row.insurance_bin;
+        }
+        if (row.group_number) {
+          patient.insurance_group = row.group_number;
+        }
+        patient.most_recent_rx_date = rxDate;
+      }
     }
     
     // Add this prescription to patient's med list
@@ -226,17 +233,20 @@ async function ingestData(clientEmail, csvFilePath) {
     ]);
     
     try {
+      // Insurance data comes from the MOST RECENT prescription in the file
+      // Always overwrite - patients change insurance (especially at year start)
       await pool.query(`
         INSERT INTO patients (patient_id, pharmacy_id, patient_hash, first_name, last_name, date_of_birth, chronic_conditions, primary_insurance_bin, primary_insurance_group, profile_data)
         VALUES ${values}
         ON CONFLICT (pharmacy_id, patient_hash) 
         DO UPDATE SET 
-          first_name = EXCLUDED.first_name,
-          last_name = EXCLUDED.last_name,
+          first_name = COALESCE(EXCLUDED.first_name, patients.first_name),
+          last_name = COALESCE(EXCLUDED.last_name, patients.last_name),
           chronic_conditions = EXCLUDED.chronic_conditions,
-          primary_insurance_bin = COALESCE(EXCLUDED.primary_insurance_bin, patients.primary_insurance_bin),
-          primary_insurance_group = COALESCE(EXCLUDED.primary_insurance_group, patients.primary_insurance_group),
-          profile_data = EXCLUDED.profile_data
+          primary_insurance_bin = EXCLUDED.primary_insurance_bin,
+          primary_insurance_group = EXCLUDED.primary_insurance_group,
+          profile_data = EXCLUDED.profile_data,
+          updated_at = NOW()
       `, params);
       patientsInserted += batch.length;
       process.stdout.write(`   Inserted ${patientsInserted}/${patientMap.size} patients...\r`);

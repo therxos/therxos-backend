@@ -126,23 +126,33 @@ function parseBinRestriction(restriction) {
 }
 
 // Parse Group restriction like "ONLY COS", "ALL EXCEPT PDPIND", "ALL"
+// Also handles BIN-specific: "610097:ALL EXCEPT COS, PDPIND, 610011:ONLY RXMEDD"
 function parseGroupRestriction(restriction, bin) {
   if (!restriction) return { type: 'ALL', groups: [] };
   const upper = restriction.toUpperCase().trim();
   
   if (upper === 'ALL') return { type: 'ALL', groups: [] };
   
-  // Handle BIN-specific restrictions like "610097:ONLY COS, PDPIND"
+  // Handle BIN-specific restrictions like "610097:ALL EXCEPT COS, PDPIND, 610011:ONLY RXMEDD"
+  // We need to split by BIN boundaries, not by commas
   if (upper.includes(':')) {
-    const parts = upper.split(',').map(p => p.trim());
-    for (const part of parts) {
-      if (part.includes(':')) {
-        const [binPart, groupPart] = part.split(':').map(p => p.trim());
+    // Find all BIN:RULE patterns using regex
+    // Match patterns like "610097:ALL EXCEPT COS, PDPIND" or "610011:ONLY RXMEDD"
+    const binPatterns = upper.match(/(\d{6})\s*:\s*([^:]+?)(?=\s*,?\s*\d{6}\s*:|$)/g);
+    
+    if (binPatterns) {
+      for (const pattern of binPatterns) {
+        const colonIdx = pattern.indexOf(':');
+        const binPart = pattern.substring(0, colonIdx).trim();
+        const groupPart = pattern.substring(colonIdx + 1).trim().replace(/,\s*$/, ''); // Remove trailing comma
+        
         if (binPart === bin) {
+          // Recursively parse the group rule part (without BIN prefix)
           return parseGroupRestriction(groupPart, null);
         }
       }
     }
+    // If no matching BIN found, default to ALL (trigger applies to all groups for this BIN)
     return { type: 'ALL', groups: [] };
   }
   
@@ -154,6 +164,20 @@ function parseGroupRestriction(restriction, bin) {
   if (upper.startsWith('ALL EXCEPT ')) {
     const groups = upper.replace('ALL EXCEPT ', '').split(',').map(g => g.trim()).filter(g => g);
     return { type: 'EXCEPT', groups };
+  }
+  
+  // Handle just "EXCEPT X, Y" without ALL prefix
+  if (upper.startsWith('EXCEPT ')) {
+    const groups = upper.replace('EXCEPT ', '').split(',').map(g => g.trim()).filter(g => g);
+    return { type: 'EXCEPT', groups };
+  }
+  
+  // If it's just a list of groups without ONLY/EXCEPT, treat as ONLY
+  if (upper.match(/^[A-Z0-9,\s]+$/)) {
+    const groups = upper.split(',').map(g => g.trim()).filter(g => g);
+    if (groups.length > 0) {
+      return { type: 'ONLY', groups };
+    }
   }
   
   return { type: 'ALL', groups: [] };
@@ -482,6 +506,14 @@ async function runTriggerScanner(clientEmail, triggerCsvPath) {
   
   const uniqueOpps = Array.from(dedupMap.values());
   console.log(`   ${uniqueOpps.length} unique opportunities after deduplication`);
+  
+  // FIRST: Delete existing 'new' opportunities for this pharmacy to avoid duplicates on re-run
+  // We only delete 'new' status - submitted/actioned/captured opportunities are preserved
+  const deleteResult = await pool.query(`
+    DELETE FROM opportunities 
+    WHERE pharmacy_id = $1 AND status = 'new'
+  `, [pharmacy_id]);
+  console.log(`   Cleared ${deleteResult.rowCount} existing unactioned opportunities`);
   
   // Insert opportunities
   let inserted = 0;

@@ -30,6 +30,8 @@ router.get('/', authenticateToken, async (req, res) => {
         p.primary_insurance_group,
         COALESCE(pr.insurance_bin, p.primary_insurance_bin, '') as insurance_bin,
         COALESCE(pr.insurance_group, p.primary_insurance_group, '') as insurance_group,
+        pr.contract_id,
+        pr.plan_name,
         pr.drug_name as current_drug,
         pr.prescriber_name,
         COALESCE(o.potential_margin_gain, 0) as potential_margin_gain,
