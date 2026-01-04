@@ -225,4 +225,139 @@ router.get('/ingestion-status', authenticateToken, async (req, res) => {
   }
 });
 
+// GP/Rx Metrics - pharmacy-wide, by BIN, by Group, by Prescriber
+router.get('/gp-metrics', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+
+    // Pharmacy-wide GP/Rx
+    const pharmacyWide = await db.query(`
+      SELECT
+        COUNT(*) as total_rx_count,
+        COALESCE(SUM(insurance_pay + patient_pay), 0) as total_gross_profit,
+        CASE 
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(insurance_pay + patient_pay), 0) / COUNT(*)
+          ELSE 0 
+        END as gp_per_rx
+      FROM prescriptions
+      WHERE pharmacy_id = $1
+        AND dispensed_date >= NOW() - INTERVAL '365 days'
+    `, [pharmacyId]);
+
+    // Total opportunity impact
+    const opportunityImpact = await db.query(`
+      SELECT COALESCE(SUM(annual_margin_gain), 0) as opportunity_impact
+      FROM opportunities
+      WHERE pharmacy_id = $1 AND status = 'new'
+    `, [pharmacyId]);
+
+    // Calculate projected GP/Rx
+    const totalRx = parseInt(pharmacyWide.rows[0].total_rx_count) || 1;
+    const totalGP = parseFloat(pharmacyWide.rows[0].total_gross_profit) || 0;
+    const oppImpact = parseFloat(opportunityImpact.rows[0].opportunity_impact) || 0;
+    const projectedGpPerRx = (totalGP + oppImpact) / totalRx;
+
+    // GP/Rx by BIN
+    const byBin = await db.query(`
+      SELECT
+        COALESCE(pr.insurance_bin, 'Unknown') as bin,
+        COUNT(*) as rx_count,
+        COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) as gross_profit,
+        CASE 
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) / COUNT(*)
+          ELSE 0 
+        END as gp_per_rx,
+        COUNT(DISTINCT o.opportunity_id) as opportunity_count,
+        COALESCE(SUM(DISTINCT o.annual_margin_gain), 0) as opportunity_value
+      FROM prescriptions pr
+      LEFT JOIN opportunities o ON o.prescription_id = pr.prescription_id AND o.status = 'new'
+      WHERE pr.pharmacy_id = $1
+        AND pr.dispensed_date >= NOW() - INTERVAL '365 days'
+      GROUP BY COALESCE(pr.insurance_bin, 'Unknown')
+      ORDER BY gross_profit DESC
+    `, [pharmacyId]);
+
+    // GP/Rx by BIN + Group
+    const byGroup = await db.query(`
+      SELECT
+        COALESCE(pr.insurance_bin, 'Unknown') as bin,
+        COALESCE(pr.insurance_group, 'Unknown') as "group",
+        COUNT(*) as rx_count,
+        COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) as gross_profit,
+        CASE 
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) / COUNT(*)
+          ELSE 0 
+        END as gp_per_rx,
+        COUNT(DISTINCT o.opportunity_id) as opportunity_count,
+        COALESCE(SUM(DISTINCT o.annual_margin_gain), 0) as opportunity_value
+      FROM prescriptions pr
+      LEFT JOIN opportunities o ON o.prescription_id = pr.prescription_id AND o.status = 'new'
+      WHERE pr.pharmacy_id = $1
+        AND pr.dispensed_date >= NOW() - INTERVAL '365 days'
+      GROUP BY COALESCE(pr.insurance_bin, 'Unknown'), COALESCE(pr.insurance_group, 'Unknown')
+      ORDER BY gross_profit DESC
+      LIMIT 50
+    `, [pharmacyId]);
+
+    // GP/Rx by Prescriber
+    const byPrescriber = await db.query(`
+      SELECT
+        COALESCE(pr.prescriber_name, 'Unknown') as prescriber_name,
+        COUNT(*) as rx_count,
+        COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) as gross_profit,
+        CASE 
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) / COUNT(*)
+          ELSE 0 
+        END as gp_per_rx,
+        COUNT(DISTINCT o.opportunity_id) as opportunity_count,
+        COALESCE(SUM(DISTINCT o.annual_margin_gain), 0) as opportunity_value
+      FROM prescriptions pr
+      LEFT JOIN opportunities o ON o.prescription_id = pr.prescription_id AND o.status = 'new'
+      WHERE pr.pharmacy_id = $1
+        AND pr.dispensed_date >= NOW() - INTERVAL '365 days'
+      GROUP BY COALESCE(pr.prescriber_name, 'Unknown')
+      ORDER BY rx_count DESC
+      LIMIT 50
+    `, [pharmacyId]);
+
+    res.json({
+      pharmacy_wide: {
+        total_rx_count: parseInt(pharmacyWide.rows[0].total_rx_count) || 0,
+        total_gross_profit: parseFloat(pharmacyWide.rows[0].total_gross_profit) || 0,
+        gp_per_rx: parseFloat(pharmacyWide.rows[0].gp_per_rx) || 0,
+        opportunity_impact: oppImpact,
+        projected_gp_per_rx: projectedGpPerRx,
+      },
+      by_bin: byBin.rows.map(r => ({
+        bin: r.bin,
+        rx_count: parseInt(r.rx_count) || 0,
+        gross_profit: parseFloat(r.gross_profit) || 0,
+        gp_per_rx: parseFloat(r.gp_per_rx) || 0,
+        opportunity_count: parseInt(r.opportunity_count) || 0,
+        opportunity_value: parseFloat(r.opportunity_value) || 0,
+      })),
+      by_group: byGroup.rows.map(r => ({
+        bin: r.bin,
+        group: r.group,
+        rx_count: parseInt(r.rx_count) || 0,
+        gross_profit: parseFloat(r.gross_profit) || 0,
+        gp_per_rx: parseFloat(r.gp_per_rx) || 0,
+        opportunity_count: parseInt(r.opportunity_count) || 0,
+        opportunity_value: parseFloat(r.opportunity_value) || 0,
+      })),
+      by_prescriber: byPrescriber.rows.map(r => ({
+        prescriber_name: r.prescriber_name,
+        rx_count: parseInt(r.rx_count) || 0,
+        gross_profit: parseFloat(r.gross_profit) || 0,
+        gp_per_rx: parseFloat(r.gp_per_rx) || 0,
+        opportunity_count: parseInt(r.opportunity_count) || 0,
+        opportunity_value: parseFloat(r.opportunity_value) || 0,
+      })),
+    });
+  } catch (error) {
+    logger.error('GP metrics error', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to get GP metrics' });
+  }
+});
+
 export default router;

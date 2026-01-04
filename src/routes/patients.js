@@ -91,8 +91,8 @@ router.get('/:patientId', authenticateToken, async (req, res) => {
     const isMedSyncCandidate = parseInt(medSyncCheck.rows[0].chronic_med_count) >= 3;
 
     res.json({
-      ...patient.rows[0],
-      medications: medications.rows,
+      patient: patient.rows[0],
+      prescriptions: medications.rows,
       opportunities: opportunities.rows,
       drugClasses,
       isMedSyncCandidate,
