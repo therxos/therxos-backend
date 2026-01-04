@@ -17,6 +17,7 @@ router.get('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'No pharmacy associated with user' });
     }
 
+    // Query using columns that exist in the patients and prescriptions tables
     let query = `
       SELECT o.*, 
         p.patient_hash,
@@ -25,10 +26,10 @@ router.get('/', authenticateToken, async (req, res) => {
         p.date_of_birth as patient_dob,
         p.chronic_conditions,
         p.primary_insurance_bin,
-        COALESCE(pr.insurance_bin, p.primary_insurance_bin) as insurance_bin,
-        COALESCE(pr.insurance_group, '') as insurance_group,
-        pr.contract_id,
-        pr.plan_name,
+        p.primary_insurance_pcn,
+        p.primary_insurance_group,
+        COALESCE(pr.insurance_bin, p.primary_insurance_bin, '') as insurance_bin,
+        COALESCE(pr.insurance_group, p.primary_insurance_group, '') as insurance_group,
         pr.drug_name as current_drug,
         pr.prescriber_name,
         COALESCE(o.potential_margin_gain, 0) as potential_margin_gain,

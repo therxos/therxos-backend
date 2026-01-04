@@ -156,20 +156,38 @@ async function ingestData(clientEmail, csvFilePath) {
       const lastName = nameParts[0] || '';
       const firstName = nameParts[1] || '';
       
+      // Format Contract ID + PBP as H2501-001
+      // Contract ID should be 1 letter + 4 digits, PBP should be 3 digits
+      let contractPbp = null;
+      if (row.contract_id && row.plan_name) {
+        const contractId = String(row.contract_id).trim();
+        const pbp = String(row.plan_name).trim().padStart(3, '0'); // Pad to 3 digits
+        contractPbp = `${contractId}-${pbp}`;
+      }
+      
       patientMap.set(hash, {
         patient_id: uuidv4(),
         hash,
         first_name: firstName,
         last_name: lastName,
         dob: parseDate(row.patient_dob),
-        insurance_bin: row.insurance_bin,
-        group_number: row.group_number,
+        insurance_bin: row.insurance_bin || null,
+        insurance_group: row.group_number || null,  // GROUP goes here, NOT PCN
+        insurance_pcn: null,  // PCN is rarely in PioneerRx exports
+        contract_pbp: contractPbp,
         conditions: new Set(),
+        prescriptions: [],  // Track patient's meds for profile_data
       });
     }
     
+    // Add this prescription to patient's med list
+    const patient = patientMap.get(hash);
+    if (row.drug_name && !patient.prescriptions.includes(row.drug_name)) {
+      patient.prescriptions.push(row.drug_name);
+    }
+    
     const conditions = inferConditions(row.therapeutic_class);
-    conditions.forEach(c => patientMap.get(hash).conditions.add(c));
+    conditions.forEach(c => patient.conditions.add(c));
   }
   
   console.log(`   Found ${patientMap.size} unique patients`);
@@ -190,8 +208,8 @@ async function ingestData(clientEmail, csvFilePath) {
   let patientsInserted = 0;
   for (const batch of patientBatches) {
     const values = batch.map((p, i) => {
-      const offset = i * 8;
-      return `($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5}, $${offset+6}, $${offset+7}, $${offset+8})`;
+      const offset = i * 10;
+      return `($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5}, $${offset+6}, $${offset+7}, $${offset+8}, $${offset+9}, $${offset+10})`;
     }).join(', ');
     
     const params = batch.flatMap(p => [
@@ -202,19 +220,23 @@ async function ingestData(clientEmail, csvFilePath) {
       p.last_name,
       p.dob,
       [...p.conditions],
-      p.insurance_bin
+      p.insurance_bin,
+      p.insurance_group,  // GROUP (not PCN!)
+      JSON.stringify({ medications: p.prescriptions })  // profile_data with med list
     ]);
     
     try {
       await pool.query(`
-        INSERT INTO patients (patient_id, pharmacy_id, patient_hash, first_name, last_name, date_of_birth, chronic_conditions, primary_insurance_bin)
+        INSERT INTO patients (patient_id, pharmacy_id, patient_hash, first_name, last_name, date_of_birth, chronic_conditions, primary_insurance_bin, primary_insurance_group, profile_data)
         VALUES ${values}
         ON CONFLICT (pharmacy_id, patient_hash) 
         DO UPDATE SET 
           first_name = EXCLUDED.first_name,
           last_name = EXCLUDED.last_name,
           chronic_conditions = EXCLUDED.chronic_conditions,
-          primary_insurance_bin = COALESCE(EXCLUDED.primary_insurance_bin, patients.primary_insurance_bin)
+          primary_insurance_bin = COALESCE(EXCLUDED.primary_insurance_bin, patients.primary_insurance_bin),
+          primary_insurance_group = COALESCE(EXCLUDED.primary_insurance_group, patients.primary_insurance_group),
+          profile_data = EXCLUDED.profile_data
       `, params);
       patientsInserted += batch.length;
       process.stdout.write(`   Inserted ${patientsInserted}/${patientMap.size} patients...\r`);
@@ -249,6 +271,17 @@ async function ingestData(clientEmail, csvFilePath) {
     const patientId = patientLookup.get(patientHash);
     if (!patientId) continue;
     
+    // Format Contract ID + PBP as H2501-001
+    let contractId = null;
+    let planName = null;
+    if (row.contract_id) {
+      contractId = String(row.contract_id).trim();
+    }
+    if (row.plan_name) {
+      // Pad PBP to 3 digits (e.g., 1 -> 001)
+      planName = String(row.plan_name).trim().padStart(3, '0');
+    }
+    
     rxBatch.push({
       prescription_id: uuidv4(),
       pharmacy_id,
@@ -261,6 +294,8 @@ async function ingestData(clientEmail, csvFilePath) {
       dispensed_date: parseDate(row.date_written) || new Date().toISOString().split('T')[0],
       insurance_bin: row.insurance_bin,
       insurance_group: row.group_number,
+      contract_id: contractId,
+      plan_name: planName,
       patient_pay: parseAmount(row.patient_pay),
       insurance_pay: parseAmount(row.insurance_pay),
       prescriber_name: row.prescriber_name,
@@ -270,7 +305,6 @@ async function ingestData(clientEmail, csvFilePath) {
         pdc: row.pdc,
         awp: parseAmount(row.awp),
         net_profit: parseAmount(row.net_profit),
-        plan_name: row.plan_name
       })
     });
     
@@ -308,8 +342,8 @@ async function ingestData(clientEmail, csvFilePath) {
   
   for (const batch of dedupedBatches) {
     const values = batch.map((rx, i) => {
-      const o = i * 16;
-      return `($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9},$${o+10},$${o+11},$${o+12},$${o+13},$${o+14},$${o+15},$${o+16})`;
+      const o = i * 18;
+      return `($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9},$${o+10},$${o+11},$${o+12},$${o+13},$${o+14},$${o+15},$${o+16},$${o+17},$${o+18})`;
     }).join(', ');
     
     const params = batch.flatMap(rx => [
@@ -324,6 +358,8 @@ async function ingestData(clientEmail, csvFilePath) {
       rx.dispensed_date,
       rx.insurance_bin,
       rx.insurance_group,
+      rx.contract_id,
+      rx.plan_name,
       rx.patient_pay,
       rx.insurance_pay,
       rx.prescriber_name,
@@ -336,10 +372,12 @@ async function ingestData(clientEmail, csvFilePath) {
         INSERT INTO prescriptions (
           prescription_id, pharmacy_id, patient_id, rx_number, ndc, drug_name,
           quantity_dispensed, days_supply, dispensed_date, insurance_bin, insurance_group,
-          patient_pay, insurance_pay, prescriber_name, daw_code, raw_data
+          contract_id, plan_name, patient_pay, insurance_pay, prescriber_name, daw_code, raw_data
         ) VALUES ${values}
         ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO UPDATE SET
           drug_name = EXCLUDED.drug_name,
+          contract_id = EXCLUDED.contract_id,
+          plan_name = EXCLUDED.plan_name,
           raw_data = EXCLUDED.raw_data
       `, params);
       rxInserted += batch.length;
