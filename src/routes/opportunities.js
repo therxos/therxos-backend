@@ -27,7 +27,6 @@ router.get('/', authenticateToken, async (req, res) => {
         p.primary_insurance_bin,
         COALESCE(pr.insurance_bin, p.primary_insurance_bin) as insurance_bin,
         COALESCE(pr.insurance_group, '') as insurance_group,
-        COALESCE(pr.insurance_pcn, '') as insurance_pcn,
         pr.contract_id,
         pr.plan_name,
         pr.drug_name as current_drug,
