@@ -241,10 +241,12 @@ app.get('/api/pharmacy/:pharmacyId/stats', async (req, res) => {
     const stats = await db.query(`
       SELECT
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted') as new_opportunities,
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'actioned' AND actioned_at >= NOW() - INTERVAL '30 days') as actioned_this_month,
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Completed', 'Approved') AND updated_at >= NOW() - INTERVAL '30 days') as actioned_this_month,
         (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted') as potential_margin,
-        (SELECT COALESCE(SUM(actual_margin_realized), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'actioned' AND actioned_at >= NOW() - INTERVAL '30 days') as realized_margin,
+        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Completed', 'Approved')) as captured_value,
         (SELECT COUNT(*) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '30 days') as prescriptions_this_month,
+        (SELECT COUNT(*) FROM patients WHERE pharmacy_id = $1) as total_patients,
+        (SELECT COUNT(DISTINCT patient_id) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted') as patients_with_opportunities,
         (SELECT COUNT(DISTINCT patient_id) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '30 days') as active_patients
     `, [pharmacyId]);
 
