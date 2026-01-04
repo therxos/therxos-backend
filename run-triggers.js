@@ -507,11 +507,11 @@ async function runTriggerScanner(clientEmail, triggerCsvPath) {
   const uniqueOpps = Array.from(dedupMap.values());
   console.log(`   ${uniqueOpps.length} unique opportunities after deduplication`);
   
-  // FIRST: Delete existing 'new' opportunities for this pharmacy to avoid duplicates on re-run
-  // We only delete 'new' status - submitted/actioned/captured opportunities are preserved
+  // FIRST: Delete existing 'Not Submitted' opportunities for this pharmacy to avoid duplicates on re-run
+  // We only delete 'Not Submitted' status - Submitted/Approved/Completed opportunities are preserved
   const deleteResult = await pool.query(`
     DELETE FROM opportunities 
-    WHERE pharmacy_id = $1 AND status = 'new'
+    WHERE pharmacy_id = $1 AND status = 'Not Submitted'
   `, [pharmacy_id]);
   console.log(`   Cleared ${deleteResult.rowCount} existing unactioned opportunities`);
   
@@ -541,7 +541,7 @@ async function runTriggerScanner(clientEmail, triggerCsvPath) {
         opp.potential_margin_gain * opp.annual_fills,
         `${opp.clinical_rationale}\n\nAction: ${opp.action}`,
         opp.clinical_priority.toLowerCase(),
-        'new'
+        'Not Submitted'
       ]);
       inserted++;
     } catch (error) {
@@ -559,7 +559,7 @@ async function runTriggerScanner(clientEmail, triggerCsvPath) {
       SUM(potential_margin_gain) as monthly_margin,
       SUM(annual_margin_gain) as annual_margin
     FROM opportunities 
-    WHERE pharmacy_id = $1 AND status = 'new'
+    WHERE pharmacy_id = $1 AND status = 'Not Submitted'
   `, [pharmacy_id]);
   
   const stats = totals.rows[0];

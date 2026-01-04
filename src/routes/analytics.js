@@ -16,8 +16,8 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
     const overview = await db.query(`
       SELECT
         -- Opportunity stats
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'new') as pending_opportunities,
-        (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'new') as pending_margin,
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted') as pending_opportunities,
+        (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted') as pending_margin,
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'actioned' AND actioned_at >= NOW() - INTERVAL '${days} days') as actioned_count,
         (SELECT COALESCE(SUM(actual_margin_realized), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'actioned' AND actioned_at >= NOW() - INTERVAL '${days} days') as realized_margin,
         
@@ -49,7 +49,7 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
 router.get('/opportunities/by-type', authenticateToken, async (req, res) => {
   try {
     const pharmacyId = req.user.pharmacyId;
-    const { status = 'new' } = req.query;
+    const { status = 'Not Submitted' } = req.query;
 
     const result = await db.query(`
       SELECT 
@@ -128,7 +128,7 @@ router.get('/top-patients', authenticateToken, async (req, res) => {
         COALESCE(SUM(o.potential_margin_gain), 0) as total_margin,
         (SELECT MAX(dispensed_date) FROM prescriptions WHERE patient_id = p.patient_id) as last_visit
       FROM patients p
-      JOIN opportunities o ON o.patient_id = p.patient_id AND o.status = 'new'
+      JOIN opportunities o ON o.patient_id = p.patient_id AND o.status = 'Not Submitted'
       WHERE p.pharmacy_id = $1
       GROUP BY p.patient_id, p.patient_hash, p.chronic_conditions
       ORDER BY total_margin DESC
@@ -248,7 +248,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
     const opportunityImpact = await db.query(`
       SELECT COALESCE(SUM(annual_margin_gain), 0) as opportunity_impact
       FROM opportunities
-      WHERE pharmacy_id = $1 AND status = 'new'
+      WHERE pharmacy_id = $1 AND status = 'Not Submitted'
     `, [pharmacyId]);
 
     // Calculate projected GP/Rx
@@ -270,7 +270,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
         COUNT(DISTINCT o.opportunity_id) as opportunity_count,
         COALESCE(SUM(DISTINCT o.annual_margin_gain), 0) as opportunity_value
       FROM prescriptions pr
-      LEFT JOIN opportunities o ON o.prescription_id = pr.prescription_id AND o.status = 'new'
+      LEFT JOIN opportunities o ON o.prescription_id = pr.prescription_id AND o.status = 'Not Submitted'
       WHERE pr.pharmacy_id = $1
         AND pr.dispensed_date >= NOW() - INTERVAL '365 days'
       GROUP BY COALESCE(pr.insurance_bin, 'Unknown')
@@ -291,7 +291,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
         COUNT(DISTINCT o.opportunity_id) as opportunity_count,
         COALESCE(SUM(DISTINCT o.annual_margin_gain), 0) as opportunity_value
       FROM prescriptions pr
-      LEFT JOIN opportunities o ON o.prescription_id = pr.prescription_id AND o.status = 'new'
+      LEFT JOIN opportunities o ON o.prescription_id = pr.prescription_id AND o.status = 'Not Submitted'
       WHERE pr.pharmacy_id = $1
         AND pr.dispensed_date >= NOW() - INTERVAL '365 days'
       GROUP BY COALESCE(pr.insurance_bin, 'Unknown'), COALESCE(pr.insurance_group, 'Unknown')
@@ -312,7 +312,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
         COUNT(DISTINCT o.opportunity_id) as opportunity_count,
         COALESCE(SUM(DISTINCT o.annual_margin_gain), 0) as opportunity_value
       FROM prescriptions pr
-      LEFT JOIN opportunities o ON o.prescription_id = pr.prescription_id AND o.status = 'new'
+      LEFT JOIN opportunities o ON o.prescription_id = pr.prescription_id AND o.status = 'Not Submitted'
       WHERE pr.pharmacy_id = $1
         AND pr.dispensed_date >= NOW() - INTERVAL '365 days'
       GROUP BY COALESCE(pr.prescriber_name, 'Unknown')

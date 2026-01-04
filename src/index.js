@@ -240,9 +240,9 @@ app.get('/api/pharmacy/:pharmacyId/stats', async (req, res) => {
 
     const stats = await db.query(`
       SELECT
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'new') as new_opportunities,
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted') as new_opportunities,
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'actioned' AND actioned_at >= NOW() - INTERVAL '30 days') as actioned_this_month,
-        (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'new') as potential_margin,
+        (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted') as potential_margin,
         (SELECT COALESCE(SUM(actual_margin_realized), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'actioned' AND actioned_at >= NOW() - INTERVAL '30 days') as realized_margin,
         (SELECT COUNT(*) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '30 days') as prescriptions_this_month,
         (SELECT COUNT(DISTINCT patient_id) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '30 days') as active_patients
@@ -251,7 +251,7 @@ app.get('/api/pharmacy/:pharmacyId/stats', async (req, res) => {
     const byType = await db.query(`
       SELECT opportunity_type, COUNT(*) as count, SUM(potential_margin_gain) as margin
       FROM opportunities
-      WHERE pharmacy_id = $1 AND status = 'new'
+      WHERE pharmacy_id = $1 AND status = 'Not Submitted'
       GROUP BY opportunity_type
     `, [pharmacyId]);
 

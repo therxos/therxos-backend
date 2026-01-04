@@ -15,8 +15,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     let query = `
       SELECT p.*,
-        (SELECT COUNT(*) FROM opportunities o WHERE o.patient_id = p.patient_id AND o.status = 'new') as opportunity_count,
-        (SELECT SUM(potential_margin_gain) FROM opportunities o WHERE o.patient_id = p.patient_id AND o.status = 'new') as potential_margin,
+        (SELECT COUNT(*) FROM opportunities o WHERE o.patient_id = p.patient_id AND o.status = 'Not Submitted') as opportunity_count,
+        (SELECT SUM(potential_margin_gain) FROM opportunities o WHERE o.patient_id = p.patient_id AND o.status = 'Not Submitted') as potential_margin,
         (SELECT MAX(dispensed_date) FROM prescriptions pr WHERE pr.patient_id = p.patient_id) as last_fill_date,
         (SELECT COUNT(*) FROM prescriptions pr WHERE pr.patient_id = p.patient_id AND pr.dispensed_date >= NOW() - INTERVAL '12 months') as rx_count_12m
       FROM patients p
@@ -30,7 +30,7 @@ router.get('/', authenticateToken, async (req, res) => {
       params.push(`%${search}%`);
     }
     if (hasOpportunities === 'true') {
-      query += ` AND EXISTS (SELECT 1 FROM opportunities o WHERE o.patient_id = p.patient_id AND o.status = 'new')`;
+      query += ` AND EXISTS (SELECT 1 FROM opportunities o WHERE o.patient_id = p.patient_id AND o.status = 'Not Submitted')`;
     }
     if (condition) {
       query += ` AND $${paramIndex++} = ANY(p.chronic_conditions)`;

@@ -175,13 +175,14 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
     if (status) {
       updates.status = status;
       
-      if (status === 'reviewed') {
+      // V1-compatible statuses: Not Submitted, Submitted, Approved, Denied, Completed, Didn't Work
+      if (status === 'Submitted') {
         updates.reviewed_by = req.user.userId;
         updates.reviewed_at = new Date();
-      } else if (status === 'actioned') {
+      } else if (status === 'Completed' || status === 'Approved') {
         updates.actioned_by = req.user.userId;
         updates.actioned_at = new Date();
-      } else if (status === 'dismissed') {
+      } else if (status === 'Denied') {
         updates.dismissed_reason = dismissedReason;
       }
     }
@@ -288,13 +289,13 @@ router.get('/summary/stats', authenticateToken, async (req, res) => {
 
     const stats = await db.query(`
       SELECT
-        COUNT(*) FILTER (WHERE status = 'new') as new_count,
+        COUNT(*) FILTER (WHERE status = 'Not Submitted') as new_count,
         COUNT(*) FILTER (WHERE status = 'reviewed') as reviewed_count,
         COUNT(*) FILTER (WHERE status = 'actioned') as actioned_count,
         COUNT(*) FILTER (WHERE status = 'dismissed') as dismissed_count,
-        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status = 'new'), 0) as new_margin,
+        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status = 'Not Submitted'), 0) as new_margin,
         COALESCE(SUM(actual_margin_realized) FILTER (WHERE status = 'actioned'), 0) as realized_margin,
-        COUNT(DISTINCT patient_id) FILTER (WHERE status = 'new') as patients_with_opportunities
+        COUNT(DISTINCT patient_id) FILTER (WHERE status = 'Not Submitted') as patients_with_opportunities
       FROM opportunities
       WHERE pharmacy_id = $1
         AND created_at >= NOW() - INTERVAL '${parseInt(days)} days'
@@ -307,7 +308,7 @@ router.get('/summary/stats', authenticateToken, async (req, res) => {
         SUM(potential_margin_gain) as total_margin
       FROM opportunities
       WHERE pharmacy_id = $1
-        AND status = 'new'
+        AND status = 'Not Submitted'
       GROUP BY opportunity_type
       ORDER BY total_margin DESC
     `, [pharmacyId]);
