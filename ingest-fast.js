@@ -151,9 +151,16 @@ async function ingestData(clientEmail, csvFilePath) {
     const hash = generatePatientHash(row.patient_name, row.patient_dob || '');
     
     if (!patientMap.has(hash)) {
+      // Parse name - format is "Last, First" or "Last,First"
+      const nameParts = (row.patient_name || '').split(',').map(s => s.trim());
+      const lastName = nameParts[0] || '';
+      const firstName = nameParts[1] || '';
+      
       patientMap.set(hash, {
         patient_id: uuidv4(),
         hash,
+        first_name: firstName,
+        last_name: lastName,
         dob: parseDate(row.patient_dob),
         insurance_bin: row.insurance_bin,
         group_number: row.group_number,
@@ -183,14 +190,16 @@ async function ingestData(clientEmail, csvFilePath) {
   let patientsInserted = 0;
   for (const batch of patientBatches) {
     const values = batch.map((p, i) => {
-      const offset = i * 6;
-      return `($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5}, $${offset+6})`;
+      const offset = i * 8;
+      return `($${offset+1}, $${offset+2}, $${offset+3}, $${offset+4}, $${offset+5}, $${offset+6}, $${offset+7}, $${offset+8})`;
     }).join(', ');
     
     const params = batch.flatMap(p => [
       p.patient_id,
       pharmacy_id,
       p.hash,
+      p.first_name,
+      p.last_name,
       p.dob,
       [...p.conditions],
       p.insurance_bin
@@ -198,10 +207,14 @@ async function ingestData(clientEmail, csvFilePath) {
     
     try {
       await pool.query(`
-        INSERT INTO patients (patient_id, pharmacy_id, patient_hash, date_of_birth, chronic_conditions, primary_insurance_bin)
+        INSERT INTO patients (patient_id, pharmacy_id, patient_hash, first_name, last_name, date_of_birth, chronic_conditions, primary_insurance_bin)
         VALUES ${values}
-        ON CONFLICT (pharmacy_id, patient_hash) DO UPDATE SET
-          chronic_conditions = EXCLUDED.chronic_conditions
+        ON CONFLICT (pharmacy_id, patient_hash) 
+        DO UPDATE SET 
+          first_name = EXCLUDED.first_name,
+          last_name = EXCLUDED.last_name,
+          chronic_conditions = EXCLUDED.chronic_conditions,
+          primary_insurance_bin = COALESCE(EXCLUDED.primary_insurance_bin, patients.primary_insurance_bin)
       `, params);
       patientsInserted += batch.length;
       process.stdout.write(`   Inserted ${patientsInserted}/${patientMap.size} patients...\r`);

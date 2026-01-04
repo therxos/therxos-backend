@@ -20,6 +20,8 @@ router.get('/', authenticateToken, async (req, res) => {
     let query = `
       SELECT o.*, 
         p.patient_hash,
+        p.first_name as patient_first_name,
+        p.last_name as patient_last_name,
         p.date_of_birth as patient_dob,
         p.chronic_conditions,
         p.primary_insurance_bin,
