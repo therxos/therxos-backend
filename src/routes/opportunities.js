@@ -26,7 +26,9 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(pr.insurance_bin, p.primary_insurance_bin) as insurance_bin,
         COALESCE(pr.insurance_group, '') as insurance_group,
         pr.drug_name as current_drug,
-        pr.prescriber_name
+        pr.prescriber_name,
+        COALESCE(o.potential_margin_gain, 0) as potential_margin_gain,
+        COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0) as annual_margin_gain
       FROM opportunities o
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
