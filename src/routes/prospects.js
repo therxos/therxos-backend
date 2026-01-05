@@ -6,7 +6,7 @@ import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import { v4 as uuidv4 } from 'uuid';
 import Stripe from 'stripe';
-import db from '../database/connection.js';
+import db from '../database/index.js';
 
 const router = express.Router();
 
