@@ -16,6 +16,8 @@ import clientRoutes from './routes/clients.js';
 import opportunityRoutes from './routes/opportunities.js';
 import patientRoutes from './routes/patients.js';
 import analyticsRoutes from './routes/analytics.js';
+import prospectsRoutes from './routes/prospects.js';
+import adminRoutes from './routes/admin.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -67,6 +69,9 @@ app.use('/api/clients', clientRoutes);
 app.use('/api/opportunities', opportunityRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/prospects', prospectsRoutes);
+app.use('/api/checkout', prospectsRoutes); // Checkout routes are in prospects.js
+app.use('/api/admin', adminRoutes);
 
 // CSV Upload endpoint
 app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
@@ -297,5 +302,3 @@ app.listen(PORT, () => {
 });
 
 export default app;
-/ /   f o r c e   r e d e p l o y  
- 
