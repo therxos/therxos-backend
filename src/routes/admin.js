@@ -48,20 +48,20 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
 // GET /api/admin/stats - Get platform-wide stats
 router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    // Exclude Hero Pharmacy (demo) from stats
+    // Exclude Hero Pharmacy and any demo pharmacies from stats
     const stats = await db.query(`
       SELECT
-        (SELECT COUNT(*) FROM pharmacies WHERE pharmacy_name != 'Hero Pharmacy (Demo)' AND pharmacy_name NOT LIKE '%Demo%') as total_pharmacies,
-        (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status = 'active' AND p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as active_pharmacies,
-        (SELECT COUNT(*) FROM users u JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id WHERE p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as total_users,
-        (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as total_opportunities,
-        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as total_value,
-        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as captured_value
+        (SELECT COUNT(*) FROM pharmacies WHERE pharmacy_name NOT ILIKE '%hero%' AND pharmacy_name NOT ILIKE '%demo%') as total_pharmacies,
+        (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status = 'active' AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as active_pharmacies,
+        (SELECT COUNT(*) FROM users u JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_users,
+        (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_opportunities,
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_value,
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as captured_value
     `);
-    
-    // Calculate MRR and ARR (assume $299/mo per active pharmacy)
+
+    // Calculate MRR and ARR ($599/mo per active pharmacy)
     const activePharmacies = stats.rows[0]?.active_pharmacies || 0;
-    const mrr = activePharmacies * 299;
+    const mrr = activePharmacies * 599;
     const arr = mrr * 12;
     
     res.json({
