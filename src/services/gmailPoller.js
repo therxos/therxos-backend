@@ -185,7 +185,7 @@ export async function autoCompleteOpportunities(pharmacyId, newPrescriptions) {
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       WHERE o.pharmacy_id = $1
       AND o.status IN ('Submitted', 'Pending', 'submitted', 'pending')
-      AND o.recommended_drug IS NOT NULL
+      AND (o.recommended_drug IS NOT NULL OR o.recommended_drug_name IS NOT NULL)
     `, [pharmacyId]);
 
     if (opportunities.rows.length === 0) {
@@ -195,34 +195,50 @@ export async function autoCompleteOpportunities(pharmacyId, newPrescriptions) {
 
     logger.info(`Checking ${opportunities.rows.length} opportunities against ${newPrescriptions.length} new prescriptions`, { pharmacyId });
 
+    // Helper to clean names - remove (BP), extra spaces, non-alpha chars
+    const cleanName = (name) => (name || '').toLowerCase().replace(/\([^)]*\)/g, '').replace(/[^a-z]/g, '').trim();
+
+    // Helper to clean drug names - remove NDC in parentheses, normalize
+    const cleanDrug = (drug) => (drug || '').toLowerCase().replace(/\([^)]*\)/g, '').replace(/[^a-z0-9\s]/g, '').trim();
+
     // For each opportunity, check if the recommended drug was dispensed
     for (const opp of opportunities.rows) {
-      const recommendedDrug = (opp.recommended_drug || opp.recommended_drug_name || '').toLowerCase();
+      // Get recommended drug from either column, clean it
+      const recommendedDrugRaw = opp.recommended_drug || opp.recommended_drug_name || '';
+      const recommendedDrug = cleanDrug(recommendedDrugRaw);
       if (!recommendedDrug) continue;
+
+      // Get first significant word of recommended drug for matching
+      const recommendedWords = recommendedDrug.split(/\s+/).filter(w => w.length > 2);
+      const recommendedFirstWord = recommendedWords[0] || '';
 
       // Find matching prescription by patient + drug
       const matchingRx = newPrescriptions.find(rx => {
-        // Match patient by name and DOB
-        const rxPatFirst = (rx.patient_first || '').toLowerCase().replace(/[^a-z]/g, '');
-        const rxPatLast = (rx.patient_last || '').toLowerCase().replace(/[^a-z]/g, '');
-        const oppPatFirst = (opp.pat_first || '').toLowerCase().replace(/[^a-z]/g, '');
-        const oppPatLast = (opp.pat_last || '').toLowerCase().replace(/[^a-z]/g, '');
+        // Match patient by name (cleaned of annotations like "(BP)")
+        const rxPatFirst = cleanName(rx.patient_first);
+        const rxPatLast = cleanName(rx.patient_last);
+        const oppPatFirst = cleanName(opp.pat_first);
+        const oppPatLast = cleanName(opp.pat_last);
 
+        // At least one name part must match
         const patientMatches = (
-          (rxPatFirst.includes(oppPatFirst) || oppPatFirst.includes(rxPatFirst)) &&
-          (rxPatLast.includes(oppPatLast) || oppPatLast.includes(rxPatLast))
+          (rxPatFirst && oppPatFirst && (rxPatFirst.includes(oppPatFirst) || oppPatFirst.includes(rxPatFirst))) &&
+          (rxPatLast && oppPatLast && (rxPatLast.includes(oppPatLast) || oppPatLast.includes(rxPatLast)))
         );
 
         if (!patientMatches) return false;
 
         // Check if dispensed drug matches recommended drug
-        const dispensedDrug = (rx.drug_name || '').toLowerCase();
+        const dispensedDrug = cleanDrug(rx.drug_name);
+        const dispensedWords = dispensedDrug.split(/\s+/).filter(w => w.length > 2);
+        const dispensedFirstWord = dispensedWords[0] || '';
 
-        // Match if drug name contains recommended drug or vice versa
-        // This handles cases like "Atorvastatin 40mg" matching "atorvastatin"
+        // Match if first significant word matches, or one contains the other
         const drugMatches = (
-          dispensedDrug.includes(recommendedDrug.split(' ')[0]) ||
-          recommendedDrug.includes(dispensedDrug.split(' ')[0])
+          (recommendedFirstWord && dispensedFirstWord &&
+           (dispensedFirstWord.includes(recommendedFirstWord) || recommendedFirstWord.includes(dispensedFirstWord))) ||
+          dispensedDrug.includes(recommendedFirstWord) ||
+          recommendedDrug.includes(dispensedFirstWord)
         );
 
         return drugMatches;
