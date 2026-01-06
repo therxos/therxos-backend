@@ -359,10 +359,17 @@ export async function pollForSPPReports(options = {}) {
     const summary = {
       runId,
       emailsProcessed: allResults.length,
+      attachmentsProcessed: allResults.reduce((sum, r) => sum + r.attachmentsProcessed, 0),
       totalRecordsIngested: allResults.reduce((sum, r) => sum + r.recordsIngested, 0),
       totalOpportunitiesCompleted: allResults.reduce((sum, r) => sum + r.opportunitiesCompleted, 0),
       totalNewOpportunities: allResults.reduce((sum, r) => sum + r.newOpportunitiesFound, 0),
-      errors: allResults.flatMap(r => r.errors)
+      errors: allResults.flatMap(r => r.errors),
+      details: allResults.map(r => ({
+        messageId: r.messageId,
+        attachments: r.attachmentsProcessed,
+        records: r.recordsIngested,
+        errors: r.errors
+      }))
     };
 
     logger.info('SPP email poll completed', summary);
