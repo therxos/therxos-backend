@@ -157,7 +157,7 @@ async function scanNDCOptimization(pharmacyId, prescriptions, batchId) {
         clinical_priority: marginGain > 10 ? 'high' : 'medium',
         requires_prescriber_approval: isBrandToGeneric && rx.daw_code !== '0',
         scan_batch_id: batchId,
-        status: 'new'
+        status: 'Not Submitted'
       });
     } catch (error) {
       logger.error('NDC optimization scan error', { rxId: rx.prescription_id, error: error.message });
@@ -221,7 +221,7 @@ async function scanTherapeuticInterchange(pharmacyId, prescriptions, batchId) {
         clinical_priority: patientSavings > 20 ? 'high' : 'medium',
         requires_prescriber_approval: true,
         scan_batch_id: batchId,
-        status: 'new'
+        status: 'Not Submitted'
       });
     } catch (error) {
       logger.error('Therapeutic interchange scan error', { rxId: rx.prescription_id, error: error.message });
@@ -287,7 +287,7 @@ async function scanMissingTherapy(pharmacyId, patients, batchId) {
           clinical_priority: protocol.priority <= 2 ? 'high' : protocol.priority <= 4 ? 'medium' : 'low',
           requires_prescriber_approval: true,
           scan_batch_id: batchId,
-          status: 'new'
+          status: 'Not Submitted'
         });
       }
     } catch (error) {
@@ -423,7 +423,7 @@ async function scanRxAudit(pharmacyId, prescriptions, batchId) {
           clinical_rationale: flag.message,
           clinical_priority: flag.severity === 'critical' ? 'critical' : 'high',
           scan_batch_id: batchId,
-          status: 'new'
+          status: 'Not Submitted'
         });
       }
     } catch (error) {
@@ -500,7 +500,7 @@ export async function runOpportunityScan(options = {}) {
           SELECT opportunity_id FROM opportunities
           WHERE pharmacy_id = $1 AND patient_id = $2 AND opportunity_type = $3
           AND (current_ndc = $4 OR recommended_ndc = $5)
-          AND status IN ('new', 'reviewed') AND created_at >= NOW() - INTERVAL '30 days'
+          AND status IN ('Not Submitted', 'Submitted', 'Pending') AND created_at >= NOW() - INTERVAL '30 days'
           LIMIT 1
         `, [opp.pharmacy_id, opp.patient_id, opp.opportunity_type, opp.current_ndc, opp.recommended_ndc]);
         
