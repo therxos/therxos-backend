@@ -164,6 +164,11 @@ function detectPMSSystem(headers) {
  * Map a column name to our standardized field
  */
 function findColumnValue(row, fieldMappings) {
+  // Handle undefined or non-array mappings
+  if (!fieldMappings || !Array.isArray(fieldMappings)) {
+    return null;
+  }
+
   for (const possibleName of fieldMappings) {
     // Try exact match
     if (row[possibleName] !== undefined) {
