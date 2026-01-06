@@ -44,10 +44,12 @@ router.get('/gmail/callback', async (req, res) => {
     await handleGmailOAuthCallback(code);
 
     // Redirect to admin panel with success message
-    res.redirect('/admin?gmail_connected=true');
+    const frontendUrl = process.env.FRONTEND_URL || 'https://beta.therxos.com';
+    res.redirect(`${frontendUrl}/admin?gmail_connected=true`);
   } catch (error) {
     logger.error('Gmail OAuth callback error', { error: error.message });
-    res.redirect('/admin?gmail_error=' + encodeURIComponent(error.message));
+    const frontendUrl = process.env.FRONTEND_URL || 'https://beta.therxos.com';
+    res.redirect(`${frontendUrl}/admin?gmail_error=` + encodeURIComponent(error.message));
   }
 });
 
