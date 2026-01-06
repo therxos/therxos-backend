@@ -86,7 +86,7 @@ async function searchForSPPEmails(gmail, options = {}) {
 }
 
 /**
- * Extract CSV attachments from an email
+ * Extract CSV attachments from an email (recursively searches nested parts)
  */
 async function extractCSVAttachments(gmail, messageId) {
   const message = await gmail.users.messages.get({
@@ -96,30 +96,70 @@ async function extractCSVAttachments(gmail, messageId) {
   });
 
   const attachments = [];
-  const parts = message.data.payload?.parts || [];
 
-  for (const part of parts) {
-    if (part.filename && part.filename.toLowerCase().endsWith('.csv')) {
-      const attachmentId = part.body?.attachmentId;
+  // Recursively find all parts with CSV attachments
+  async function processParts(parts) {
+    if (!parts) return;
 
-      if (attachmentId) {
-        const attachment = await gmail.users.messages.attachments.get({
-          userId: 'me',
-          messageId: messageId,
-          id: attachmentId
-        });
+    for (const part of parts) {
+      // Check if this part has nested parts
+      if (part.parts) {
+        await processParts(part.parts);
+      }
 
-        // Decode base64 attachment
-        const data = Buffer.from(attachment.data.data, 'base64');
+      // Check if this part is a CSV attachment
+      if (part.filename && part.filename.toLowerCase().endsWith('.csv')) {
+        const attachmentId = part.body?.attachmentId;
 
-        attachments.push({
-          filename: part.filename,
-          data: data,
-          size: part.body.size
-        });
+        if (attachmentId) {
+          const attachment = await gmail.users.messages.attachments.get({
+            userId: 'me',
+            messageId: messageId,
+            id: attachmentId
+          });
+
+          // Decode base64 attachment
+          const data = Buffer.from(attachment.data.data, 'base64');
+
+          attachments.push({
+            filename: part.filename,
+            data: data,
+            size: part.body.size
+          });
+
+          logger.info('Found CSV attachment', { filename: part.filename, size: part.body.size });
+        }
       }
     }
   }
+
+  // Start with top-level parts or the payload itself
+  const topParts = message.data.payload?.parts || [];
+  await processParts(topParts);
+
+  // Also check if the payload itself is a CSV (single-part message)
+  if (message.data.payload?.filename?.toLowerCase().endsWith('.csv')) {
+    const attachmentId = message.data.payload.body?.attachmentId;
+    if (attachmentId) {
+      const attachment = await gmail.users.messages.attachments.get({
+        userId: 'me',
+        messageId: messageId,
+        id: attachmentId
+      });
+      const data = Buffer.from(attachment.data.data, 'base64');
+      attachments.push({
+        filename: message.data.payload.filename,
+        data: data,
+        size: message.data.payload.body.size
+      });
+    }
+  }
+
+  logger.info('Extracted attachments from email', {
+    messageId,
+    attachmentCount: attachments.length,
+    filenames: attachments.map(a => a.filename)
+  });
 
   return {
     messageId,
@@ -247,6 +287,12 @@ async function processSPPEmail(gmail, messageId, pharmacyId) {
 
     for (const attachment of emailData.attachments) {
       try {
+        logger.info('Processing attachment', {
+          jobId,
+          filename: attachment.filename,
+          dataSize: attachment.data.length
+        });
+
         // Ingest the CSV data
         const ingestionResult = await ingestCSV(attachment.data, {
           pharmacyId,
@@ -255,8 +301,26 @@ async function processSPPEmail(gmail, messageId, pharmacyId) {
           pmsSystem: 'spp'
         });
 
+        logger.info('Ingestion result', {
+          jobId,
+          filename: attachment.filename,
+          stats: ingestionResult.stats,
+          validationErrors: ingestionResult.validationErrors?.slice(0, 5)
+        });
+
         results.attachmentsProcessed++;
         results.recordsIngested += ingestionResult.stats.inserted;
+
+        // Add debug info
+        if (!results.debug) results.debug = [];
+        results.debug.push({
+          filename: attachment.filename,
+          totalRecords: ingestionResult.stats.totalRecords,
+          inserted: ingestionResult.stats.inserted,
+          duplicates: ingestionResult.stats.duplicates,
+          validationErrors: ingestionResult.stats.errors,
+          sampleErrors: ingestionResult.validationErrors?.slice(0, 3)
+        });
 
         // Get the newly ingested prescriptions for auto-complete matching
         const newRxResult = await db.query(`
@@ -364,6 +428,7 @@ export async function pollForSPPReports(options = {}) {
       totalOpportunitiesCompleted: allResults.reduce((sum, r) => sum + r.opportunitiesCompleted, 0),
       totalNewOpportunities: allResults.reduce((sum, r) => sum + r.newOpportunitiesFound, 0),
       errors: allResults.flatMap(r => r.errors),
+      debug: allResults.flatMap(r => r.debug || []),
       details: allResults.map(r => ({
         messageId: r.messageId,
         attachments: r.attachmentsProcessed,
