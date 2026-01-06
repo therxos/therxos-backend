@@ -360,4 +360,177 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
   }
 });
 
+// Monthly activity report
+router.get('/monthly', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { month, year } = req.query;
+    
+    const monthNum = parseInt(month) || (new Date().getMonth() + 1);
+    const yearNum = parseInt(year) || new Date().getFullYear();
+    
+    // Start and end of month
+    const startDate = `${yearNum}-${monthNum.toString().padStart(2, '0')}-01`;
+    const endDate = new Date(yearNum, monthNum, 0).toISOString().split('T')[0]; // Last day of month
+    
+    // Overall stats for the month
+    const statsResult = await db.query(`
+      SELECT
+        COUNT(*) as total_opportunities,
+        COUNT(*) FILTER (WHERE created_at >= $2 AND created_at <= $3) as new_opportunities,
+        COUNT(*) FILTER (WHERE status IN ('Submitted', 'Pending', 'Approved', 'Completed') AND updated_at >= $2 AND updated_at <= $3) as submitted,
+        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured') AND updated_at >= $2 AND updated_at <= $3) as captured,
+        COUNT(*) FILTER (WHERE status IN ('Rejected', 'Declined') AND updated_at >= $2 AND updated_at <= $3) as rejected,
+        COALESCE(SUM(annual_margin_gain), 0) as total_value,
+        COALESCE(SUM(annual_margin_gain) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured')), 0) as captured_value
+      FROM opportunities
+      WHERE pharmacy_id = $1
+        AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
+    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
+    
+    const stats = statsResult.rows[0];
+    
+    // Calculate rates
+    const submissionRate = stats.total_opportunities > 0 
+      ? stats.submitted / stats.total_opportunities 
+      : 0;
+    const captureRate = stats.submitted > 0 
+      ? stats.captured / stats.submitted 
+      : 0;
+    
+    // By status
+    const byStatusResult = await db.query(`
+      SELECT 
+        status,
+        COUNT(*) as count,
+        COALESCE(SUM(annual_margin_gain), 0) as value
+      FROM opportunities
+      WHERE pharmacy_id = $1
+        AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
+      GROUP BY status
+      ORDER BY count DESC
+    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
+    
+    // By type
+    const byTypeResult = await db.query(`
+      SELECT 
+        COALESCE(trigger_type, 'Other') as type,
+        COUNT(*) as count,
+        COALESCE(SUM(annual_margin_gain), 0) as value,
+        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured')) as captured
+      FROM opportunities
+      WHERE pharmacy_id = $1
+        AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
+      GROUP BY trigger_type
+      ORDER BY count DESC
+    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
+    
+    // Daily activity
+    const dailyResult = await db.query(`
+      SELECT 
+        DATE(updated_at) as date,
+        COUNT(*) FILTER (WHERE status IN ('Submitted', 'Pending')) as submitted,
+        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured')) as captured
+      FROM opportunities
+      WHERE pharmacy_id = $1
+        AND updated_at >= $2 AND updated_at <= $3
+      GROUP BY DATE(updated_at)
+      ORDER BY date
+    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
+    
+    res.json({
+      month: monthNum,
+      year: yearNum,
+      total_opportunities: parseInt(stats.total_opportunities) || 0,
+      new_opportunities: parseInt(stats.new_opportunities) || 0,
+      submitted: parseInt(stats.submitted) || 0,
+      captured: parseInt(stats.captured) || 0,
+      rejected: parseInt(stats.rejected) || 0,
+      total_value: parseFloat(stats.total_value) || 0,
+      captured_value: parseFloat(stats.captured_value) || 0,
+      submission_rate: submissionRate,
+      capture_rate: captureRate,
+      by_status: byStatusResult.rows.map(r => ({
+        status: r.status,
+        count: parseInt(r.count) || 0,
+        value: parseFloat(r.value) || 0,
+      })),
+      by_type: byTypeResult.rows.map(r => ({
+        type: r.type,
+        count: parseInt(r.count) || 0,
+        value: parseFloat(r.value) || 0,
+        captured: parseInt(r.captured) || 0,
+      })),
+      daily_activity: dailyResult.rows.map(r => ({
+        date: r.date,
+        submitted: parseInt(r.submitted) || 0,
+        captured: parseInt(r.captured) || 0,
+      })),
+    });
+  } catch (error) {
+    logger.error('Monthly report error', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to get monthly report' });
+  }
+});
+
+// Export monthly report as CSV
+router.get('/monthly/export', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { month, year, format = 'csv' } = req.query;
+    
+    const monthNum = parseInt(month) || (new Date().getMonth() + 1);
+    const yearNum = parseInt(year) || new Date().getFullYear();
+    
+    const startDate = `${yearNum}-${monthNum.toString().padStart(2, '0')}-01`;
+    const endDate = new Date(yearNum, monthNum, 0).toISOString().split('T')[0];
+    
+    // Get all opportunities for the month
+    const result = await db.query(`
+      SELECT 
+        o.opportunity_id,
+        p.first_name || ' ' || p.last_name as patient_name,
+        o.trigger_type,
+        o.status,
+        o.annual_margin_gain,
+        o.created_at,
+        o.updated_at,
+        o.notes
+      FROM opportunities o
+      LEFT JOIN patients p ON p.patient_id = o.patient_id
+      WHERE o.pharmacy_id = $1
+        AND (o.created_at >= $2 AND o.created_at <= $3 OR o.updated_at >= $2 AND o.updated_at <= $3)
+      ORDER BY o.updated_at DESC
+    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
+    
+    if (format === 'csv') {
+      const headers = ['Opportunity ID', 'Patient', 'Type', 'Status', 'Annual Value', 'Created', 'Updated', 'Notes'];
+      const rows = result.rows.map(r => [
+        r.opportunity_id,
+        r.patient_name || 'Unknown',
+        r.trigger_type || 'Other',
+        r.status,
+        r.annual_margin_gain || 0,
+        r.created_at?.toISOString().split('T')[0] || '',
+        r.updated_at?.toISOString().split('T')[0] || '',
+        (r.notes || '').replace(/,/g, ';').replace(/\n/g, ' '),
+      ]);
+      
+      const csv = [
+        headers.join(','),
+        ...rows.map(row => row.join(','))
+      ].join('\n');
+      
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=therxos-report-${monthNum}-${yearNum}.csv`);
+      res.send(csv);
+    } else {
+      res.json({ opportunities: result.rows });
+    }
+  } catch (error) {
+    logger.error('Export error', { error: error.message });
+    res.status(500).json({ error: 'Failed to export report' });
+  }
+});
+
 export default router;
