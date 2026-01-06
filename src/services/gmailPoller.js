@@ -331,9 +331,9 @@ export async function pollForSPPReports(options = {}) {
     const gmail = await getGmailClient();
 
     // Get already processed email IDs
+    const intervalDays = parseInt(daysBack) + 1;
     const processedResult = await db.query(
-      'SELECT message_id FROM processed_emails WHERE processed_at >= NOW() - INTERVAL $1',
-      [`${daysBack + 1} days`]
+      `SELECT message_id FROM processed_emails WHERE processed_at >= NOW() - INTERVAL '${intervalDays} days'`
     );
     const processedIds = processedResult.rows.map(r => r.message_id);
 
