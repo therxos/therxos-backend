@@ -79,43 +79,75 @@ router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
 router.post('/impersonate', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { pharmacy_id } = req.body;
-    
-    // Get the pharmacy's admin user
+
+    // First get pharmacy info
+    const pharmacyResult = await db.query(`
+      SELECT p.*, c.client_name, c.client_id
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE p.pharmacy_id = $1
+    `, [pharmacy_id]);
+
+    if (pharmacyResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    const pharmacy = pharmacyResult.rows[0];
+
+    // Try to find an admin or owner user for this pharmacy
     const userResult = await db.query(`
       SELECT u.*, p.pharmacy_name, c.client_name
       FROM users u
       JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id
       JOIN clients c ON c.client_id = u.client_id
-      WHERE u.pharmacy_id = $1 AND u.role = 'admin'
+      WHERE u.pharmacy_id = $1 AND u.role IN ('admin', 'owner')
+      ORDER BY CASE WHEN u.role = 'owner' THEN 1 ELSE 2 END
       LIMIT 1
     `, [pharmacy_id]);
-    
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Pharmacy admin not found' });
+
+    let targetUser;
+    let isVirtualSession = false;
+
+    if (userResult.rows.length > 0) {
+      // Use existing admin/owner
+      targetUser = userResult.rows[0];
+    } else {
+      // Create virtual owner session (no actual user exists)
+      isVirtualSession = true;
+      targetUser = {
+        user_id: `virtual-${pharmacy_id}`,
+        email: `admin@${pharmacy.pharmacy_name.toLowerCase().replace(/\s+/g, '')}.virtual`,
+        first_name: 'Pharmacy',
+        last_name: 'Admin',
+        role: 'owner',
+        pharmacy_id: pharmacy.pharmacy_id,
+        client_id: pharmacy.client_id,
+        pharmacy_name: pharmacy.pharmacy_name,
+        client_name: pharmacy.client_name,
+      };
     }
-    
-    const targetUser = userResult.rows[0];
-    
-    // Create impersonation token with super admin's original user ID
+
+    // Create impersonation token
     const token = jwt.sign(
       {
         userId: targetUser.user_id,
         email: targetUser.email,
-        pharmacyId: targetUser.pharmacy_id,
-        clientId: targetUser.client_id,
+        pharmacyId: targetUser.pharmacy_id || pharmacy.pharmacy_id,
+        clientId: targetUser.client_id || pharmacy.client_id,
         role: targetUser.role,
         firstName: targetUser.first_name,
         lastName: targetUser.last_name,
-        pharmacyName: targetUser.pharmacy_name,
-        impersonatedBy: req.user.userId, // Track who is impersonating
+        pharmacyName: targetUser.pharmacy_name || pharmacy.pharmacy_name,
+        impersonatedBy: req.user.userId,
+        isVirtualSession,
       },
       process.env.JWT_SECRET,
       { expiresIn: '4h' }
     );
-    
+
     // Log impersonation
-    console.log(`Super admin ${req.user.email} impersonating ${targetUser.email} at ${targetUser.pharmacy_name}`);
-    
+    console.log(`Super admin ${req.user.email} impersonating ${isVirtualSession ? 'virtual admin' : targetUser.email} at ${pharmacy.pharmacy_name}`);
+
     res.json({
       token,
       user: {
@@ -124,8 +156,10 @@ router.post('/impersonate', authenticateToken, requireSuperAdmin, async (req, re
         firstName: targetUser.first_name,
         lastName: targetUser.last_name,
         role: targetUser.role,
-        pharmacyId: targetUser.pharmacy_id,
-        pharmacyName: targetUser.pharmacy_name,
+        pharmacyId: targetUser.pharmacy_id || pharmacy.pharmacy_id,
+        clientId: targetUser.client_id || pharmacy.client_id,
+        pharmacyName: targetUser.pharmacy_name || pharmacy.pharmacy_name,
+        clientName: targetUser.client_name || pharmacy.client_name,
       },
     });
   } catch (error) {
