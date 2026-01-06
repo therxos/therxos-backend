@@ -48,22 +48,26 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
 // GET /api/admin/stats - Get platform-wide stats
 router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
+    // Exclude Hero Pharmacy (demo) from stats
     const stats = await db.query(`
       SELECT
-        (SELECT COUNT(*) FROM pharmacies) as total_pharmacies,
-        (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status = 'active') as active_pharmacies,
-        (SELECT COUNT(*) FROM users) as total_users,
-        (SELECT COUNT(*) FROM opportunities) as total_opportunities,
-        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities) as total_value,
-        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE status IN ('Completed', 'Approved')) as captured_value
+        (SELECT COUNT(*) FROM pharmacies WHERE pharmacy_name != 'Hero Pharmacy (Demo)' AND pharmacy_name NOT LIKE '%Demo%') as total_pharmacies,
+        (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status = 'active' AND p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as active_pharmacies,
+        (SELECT COUNT(*) FROM users u JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id WHERE p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as total_users,
+        (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as total_opportunities,
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as total_value,
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name != 'Hero Pharmacy (Demo)' AND p.pharmacy_name NOT LIKE '%Demo%') as captured_value
     `);
     
-    // Calculate MRR (assume $299/mo per active pharmacy)
-    const mrr = (stats.rows[0]?.active_pharmacies || 0) * 299;
+    // Calculate MRR and ARR (assume $299/mo per active pharmacy)
+    const activePharmacies = stats.rows[0]?.active_pharmacies || 0;
+    const mrr = activePharmacies * 299;
+    const arr = mrr * 12;
     
     res.json({
       ...stats.rows[0],
       mrr,
+      arr,
     });
   } catch (error) {
     console.error('Error fetching stats:', error);
