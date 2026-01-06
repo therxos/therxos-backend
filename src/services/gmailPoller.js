@@ -319,7 +319,10 @@ async function processSPPEmail(gmail, messageId, pharmacyId) {
           inserted: ingestionResult.stats.inserted,
           duplicates: ingestionResult.stats.duplicates,
           validationErrors: ingestionResult.stats.errors,
-          sampleErrors: ingestionResult.validationErrors?.slice(0, 3)
+          sampleErrors: ingestionResult.validationErrors?.slice(0, 3).map(e => ({
+            row: e.row,
+            errors: e.errors.join(', ')
+          }))
         });
 
         // Get the newly ingested prescriptions for auto-complete matching
