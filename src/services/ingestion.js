@@ -12,6 +12,40 @@ import { logger } from '../utils/logger.js';
  * Maps PMS-specific column names to our standardized schema
  */
 const PMS_COLUMN_MAPPINGS = {
+  // Pioneer SPP Report format (nightly scheduled report)
+  spp: {
+    rx_number: ['RxNumber', 'Rx Number', 'RX_NUM'],
+    ndc: ['NDC'],
+    drug_name: ['Medication', 'Drug Name', 'DrugName'],
+    quantity_dispensed: ['Quantity', 'Qty'],
+    days_supply: ['DaySupply', 'Days Supply', 'DaysSupply'],
+    daw_code: ['DAW', 'DAW Code'],
+    prescriber_npi: ['PresNPI', 'Prescriber NPI', 'PrescriberNPI'],
+    prescriber_name: ['PresLastName', 'PresFirstName'], // Will be combined
+    prescriber_first: ['PresFirstName'],
+    prescriber_last: ['PresLastName'],
+    patient_first: ['PatFirstName', 'Patient First', 'FirstName'],
+    patient_last: ['PatLastName', 'Patient Last', 'LastName'],
+    patient_dob: ['PatDOB', 'DOB', 'Date of Birth'],
+    patient_zip: ['PatZip', 'Zip', 'ZIP'],
+    patient_phone: ['PatPhone', 'Phone'],
+    patient_address: ['PatAddr1', 'Address'],
+    patient_city: ['PatCity', 'City'],
+    patient_state: ['PatState', 'State'],
+    patient_gender: ['PatGender', 'Gender'],
+    insurance_bin: ['Primary_PBM_BIN', 'BIN', 'Insurance BIN'],
+    insurance_pcn: ['PCN', 'Insurance PCN'],
+    insurance_group: ['Group', 'Insurance Group'],
+    payer_name: ['Primary_PayerName', 'Payer Name', 'Insurance'],
+    payer_type: ['Primary_PayerType', 'Payer Type'],
+    coverage_type: ['Primary_CoverageType', 'Coverage Type'],
+    dispensed_date: ['RefDate', 'RecDate', 'Fill Date', 'Dispensed Date'],
+    status_code: ['StatusCode', 'Status'],
+    status_date: ['StatusDate'],
+    pharmacy_npi: ['PharmNPI', 'Pharmacy NPI'],
+    rx_fill: ['RxFill', 'Fill Number'],
+    unit_measure: ['UnitMeasure', 'Unit']
+  },
   pioneerrx: {
     rx_number: ['Rx Number', 'RxNumber', 'RX_NUM'],
     ndc: ['NDC', 'NDC11', 'Product NDC'],
@@ -103,18 +137,26 @@ async function parseCSV(buffer, options = {}) {
  * Detect PMS system from CSV headers
  */
 function detectPMSSystem(headers) {
-  const headerSet = new Set(headers.map(h => h.toLowerCase()));
-  
+  const headerSet = new Set(headers.map(h => h.toLowerCase().trim()));
+
+  // Check for SPP Report format (Pioneer nightly export)
+  // SPP has unique columns like PatLastName, PatFirstName, PresNPI, Primary_PBM_BIN
+  if (headerSet.has('patlastname') || headerSet.has('patfirstname') ||
+      headerSet.has('presnpi') || headerSet.has('primary_pbm_bin') ||
+      headerSet.has('refdate') || headerSet.has('recdate')) {
+    return 'spp';
+  }
+
   // Check for PioneerRx-specific columns
   if (headerSet.has('rx number') || headerSet.has('rxnumber')) {
     return 'pioneerrx';
   }
-  
+
   // Check for Rx30-specific columns
   if (headerSet.has('rx_no') || headerSet.has('script number')) {
     return 'rx30';
   }
-  
+
   return 'generic';
 }
 
@@ -172,7 +214,17 @@ function normalizeNDC(ndc) {
  */
 function parseDate(dateStr) {
   if (!dateStr) return null;
-  
+
+  const str = dateStr.toString().trim();
+
+  // Handle SPP format: YYYYMMDD or YYYYMMDDHHMMSS (e.g., "20251226" or "20251226012332")
+  if (/^\d{8,14}$/.test(str)) {
+    const year = str.substring(0, 4);
+    const month = str.substring(4, 6);
+    const day = str.substring(6, 8);
+    return `${year}-${month}-${day}`;
+  }
+
   // Try common date formats
   const formats = [
     /^(\d{4})-(\d{2})-(\d{2})/, // YYYY-MM-DD
@@ -180,12 +232,12 @@ function parseDate(dateStr) {
     /^(\d{2})-(\d{2})-(\d{4})/, // MM-DD-YYYY
     /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/ // M/D/YY or M/D/YYYY
   ];
-  
+
   for (const format of formats) {
-    const match = dateStr.match(format);
+    const match = str.match(format);
     if (match) {
       try {
-        const date = new Date(dateStr);
+        const date = new Date(str);
         if (!isNaN(date.getTime())) {
           return date.toISOString().split('T')[0];
         }
@@ -194,17 +246,17 @@ function parseDate(dateStr) {
       }
     }
   }
-  
+
   // Fallback: try direct parsing
   try {
-    const date = new Date(dateStr);
+    const date = new Date(str);
     if (!isNaN(date.getTime())) {
       return date.toISOString().split('T')[0];
     }
   } catch (e) {
     return null;
   }
-  
+
   return null;
 }
 
