@@ -373,6 +373,8 @@ export async function ingestCSV(buffer, options = {}) {
           patients.set(patientHash, {
             patient_hash: patientHash,
             pharmacy_id: pharmacyId,
+            first_name: patientFirst,
+            last_name: patientLast,
             date_of_birth: patientDob,
             zip_code: findColumnValue(row, mappings.patient_zip),
             primary_insurance_bin: findColumnValue(row, mappings.insurance_bin),
@@ -443,12 +445,21 @@ export async function ingestCSV(buffer, options = {}) {
     for (const patient of patientRecords) {
       // Check if patient exists
       const existing = await db.query(
-        'SELECT patient_id FROM patients WHERE patient_hash = $1 AND pharmacy_id = $2',
+        'SELECT patient_id, first_name, last_name FROM patients WHERE patient_hash = $1 AND pharmacy_id = $2',
         [patient.patient_hash, pharmacyId]
       );
-      
+
       if (existing.rows.length > 0) {
-        patientMap.set(patient.patient_hash, existing.rows[0].patient_id);
+        const existingPatient = existing.rows[0];
+        patientMap.set(patient.patient_hash, existingPatient.patient_id);
+
+        // Update first_name/last_name if they're missing
+        if ((!existingPatient.first_name || !existingPatient.last_name) && (patient.first_name || patient.last_name)) {
+          await db.query(
+            'UPDATE patients SET first_name = COALESCE(first_name, $1), last_name = COALESCE(last_name, $2) WHERE patient_id = $3',
+            [patient.first_name, patient.last_name, existingPatient.patient_id]
+          );
+        }
       } else {
         const newPatient = await db.insert('patients', {
           patient_id: uuidv4(),
