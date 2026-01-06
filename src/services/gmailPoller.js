@@ -59,13 +59,13 @@ async function getGmailClient() {
 }
 
 /**
- * Search for SPP report emails from Pioneer
+ * Search for SPP report emails from RxLocal
  */
 async function searchForSPPEmails(gmail, options = {}) {
   const { afterDate, maxResults = 10, processedIds = [] } = options;
 
-  // Build search query for SPP emails from Pioneer
-  let query = 'from:pioneer has:attachment filename:csv';
+  // Build search query for SPP emails from RxLocal
+  let query = 'from:Notifications@rxlocal.com subject:"SPP Export" has:attachment';
 
   if (afterDate) {
     const dateStr = afterDate.toISOString().split('T')[0].replace(/-/g, '/');
