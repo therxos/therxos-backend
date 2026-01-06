@@ -38,7 +38,9 @@ async function getGmailClient() {
     throw new Error('Gmail OAuth tokens not configured. Please complete OAuth setup at /api/gmail/auth');
   }
 
-  const tokens = JSON.parse(tokenResult.rows[0].token_data);
+  // token_data is JSONB so it may already be parsed
+  const tokenData = tokenResult.rows[0].token_data;
+  const tokens = typeof tokenData === 'string' ? JSON.parse(tokenData) : tokenData;
   oauth2Client.setCredentials(tokens);
 
   // Refresh token if expired
