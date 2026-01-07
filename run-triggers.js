@@ -425,11 +425,27 @@ async function runTriggerScanner(clientEmail, triggerCsvPath) {
   
   const { pharmacy_id, client_name } = clientResult.rows[0];
   console.log(`📦 Pharmacy: ${client_name}`);
-  
+
+  // Get pharmacy settings to check disabled triggers
+  const settingsResult = await pool.query(
+    'SELECT settings FROM pharmacies WHERE pharmacy_id = $1',
+    [pharmacy_id]
+  );
+  const pharmacySettings = settingsResult.rows[0]?.settings || {};
+  const disabledTriggers = pharmacySettings.disabledTriggers || [];
+
   // Load triggers
   console.log(`📋 Loading triggers from: ${triggerCsvPath}`);
-  const triggers = loadTriggers(triggerCsvPath);
-  console.log(`   Loaded ${triggers.length} enabled triggers\n`);
+  let triggers = loadTriggers(triggerCsvPath);
+  console.log(`   Loaded ${triggers.length} enabled triggers`);
+
+  // Filter out pharmacy-disabled triggers
+  if (disabledTriggers.length > 0) {
+    const beforeCount = triggers.length;
+    triggers = triggers.filter(t => !disabledTriggers.includes(t['Trigger ID']));
+    console.log(`   Filtered out ${beforeCount - triggers.length} pharmacy-disabled triggers`);
+  }
+  console.log(`   ${triggers.length} triggers will be processed\n`);
   
   // Get all recent prescriptions grouped by patient
   console.log('💊 Loading prescription data...');

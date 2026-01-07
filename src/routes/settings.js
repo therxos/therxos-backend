@@ -2,11 +2,98 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import db from '../database/index.js';
 import { logger } from '../utils/logger.js';
 import { authenticateToken, requireRole } from './auth.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const router = express.Router();
+
+// Parse CSV line handling quoted values
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+// Load triggers from CSV
+function loadTriggersFromCSV() {
+  const csvPath = path.join(__dirname, '../../UNIVERSAL_TRIGGER.csv');
+
+  if (!fs.existsSync(csvPath)) {
+    logger.warn('Triggers CSV not found', { path: csvPath });
+    return [];
+  }
+
+  const content = fs.readFileSync(csvPath, 'utf-8');
+  const lines = content.trim().split('\n');
+  const headers = parseCSVLine(lines[0]);
+
+  const triggers = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const values = parseCSVLine(lines[i]);
+    const trigger = {};
+    headers.forEach((header, idx) => {
+      trigger[header.trim()] = values[idx] || '';
+    });
+
+    triggers.push({
+      triggerId: trigger['Trigger ID'],
+      displayName: trigger['Display Name'],
+      category: trigger['Category'] || 'Other',
+      priority: trigger['Priority'] || 'MEDIUM',
+      recommendedMed: trigger['Recommended Med'],
+      action: trigger['Action'],
+      globalEnabled: trigger['Enabled']?.toUpperCase() === 'TRUE'
+    });
+  }
+
+  return triggers;
+}
+
+// Get available triggers list
+router.get('/triggers', authenticateToken, async (req, res) => {
+  try {
+    const triggers = loadTriggersFromCSV();
+
+    // Group by category
+    const grouped = {};
+    for (const trigger of triggers) {
+      const cat = trigger.category || 'Other';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(trigger);
+    }
+
+    res.json({
+      triggers,
+      grouped,
+      categories: Object.keys(grouped).sort()
+    });
+  } catch (error) {
+    logger.error('Get triggers error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get triggers' });
+  }
+});
 
 // Get pharmacy settings
 router.get('/pharmacy/:pharmacyId', authenticateToken, async (req, res) => {
