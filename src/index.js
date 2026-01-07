@@ -82,8 +82,8 @@ app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const { pharmacyId, clientId, sourceEmail } = req.body;
-    
+    const { pharmacyId, clientId, sourceEmail, runAutoComplete, runScan } = req.body;
+
     // If no pharmacy specified, try to resolve from email
     let resolvedPharmacy = null;
     if (!pharmacyId && sourceEmail) {
@@ -93,17 +93,56 @@ app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
       }
     }
 
+    const finalPharmacyId = pharmacyId || resolvedPharmacy?.pharmacy_id;
+
     const result = await ingestCSV(req.file.buffer, {
-      pharmacyId: pharmacyId || resolvedPharmacy?.pharmacy_id,
+      pharmacyId: finalPharmacyId,
       clientId: clientId || resolvedPharmacy?.client_id,
       sourceEmail,
-      sourceFile: req.file.originalname
+      sourceFile: req.file.originalname,
+      pmsSystem: 'spp' // Default to SPP format for manual uploads
     });
+
+    let autoCompleteResult = null;
+    let scanResult = null;
+
+    // Optionally run auto-complete after ingestion
+    if (runAutoComplete === 'true' && finalPharmacyId) {
+      try {
+        const { autoCompleteOpportunities } = await import('./services/gmailPoller.js');
+        const recentRx = await db.query(`
+          SELECT p.*, pat.first_name as patient_first, pat.last_name as patient_last
+          FROM prescriptions p
+          LEFT JOIN patients pat ON pat.patient_id = p.patient_id
+          WHERE p.pharmacy_id = $1
+          AND p.source_file = $2
+          AND p.created_at >= NOW() - INTERVAL '1 hour'
+        `, [finalPharmacyId, req.file.originalname]);
+        autoCompleteResult = await autoCompleteOpportunities(finalPharmacyId, recentRx.rows);
+      } catch (err) {
+        logger.error('Auto-complete after upload failed', { error: err.message });
+      }
+    }
+
+    // Optionally run opportunity scan after ingestion
+    if (runScan === 'true' && finalPharmacyId) {
+      try {
+        scanResult = await runOpportunityScan({
+          pharmacyIds: [finalPharmacyId],
+          scanType: 'manual_upload',
+          lookbackHours: 1
+        });
+      } catch (err) {
+        logger.error('Scan after upload failed', { error: err.message });
+      }
+    }
 
     res.json({
       success: true,
       message: 'CSV ingested successfully',
-      ...result
+      ...result,
+      autoComplete: autoCompleteResult,
+      scan: scanResult
     });
   } catch (error) {
     logger.error('CSV ingestion error', { error: error.message });
@@ -285,7 +324,38 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// Schedule nightly scans (7 AM daily)
+// Schedule nightly Gmail poll (6 AM daily - before scan)
+cron.schedule('0 6 * * *', async () => {
+  logger.info('Starting scheduled Gmail poll');
+  try {
+    // Get all active pharmacies
+    const pharmacies = await db.query(`
+      SELECT p.pharmacy_id FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE c.status = 'active'
+      AND p.pharmacy_name NOT ILIKE '%hero%'
+      AND p.pharmacy_name NOT ILIKE '%demo%'
+    `);
+
+    const { pollForSPPReports } = await import('./services/gmailPoller.js');
+
+    for (const pharmacy of pharmacies.rows) {
+      try {
+        logger.info('Polling SPP reports for pharmacy', { pharmacyId: pharmacy.pharmacy_id });
+        await pollForSPPReports({ pharmacyId: pharmacy.pharmacy_id, daysBack: 1 });
+      } catch (err) {
+        logger.error('Gmail poll failed for pharmacy', { pharmacyId: pharmacy.pharmacy_id, error: err.message });
+      }
+    }
+    logger.info('Scheduled Gmail poll completed');
+  } catch (error) {
+    logger.error('Scheduled Gmail poll failed', { error: error.message });
+  }
+}, {
+  timezone: 'America/New_York'
+});
+
+// Schedule nightly scans (7 AM daily - after Gmail poll)
 cron.schedule('0 7 * * *', async () => {
   logger.info('Starting scheduled nightly scan');
   try {
