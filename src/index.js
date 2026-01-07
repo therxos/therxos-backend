@@ -161,6 +161,10 @@ app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
       success: true,
       message: 'CSV ingested successfully',
       ...result,
+      // Add fields frontend expects
+      recordsProcessed: result.stats?.inserted || 0,
+      prescriptionsCreated: result.stats?.inserted || 0,
+      patientsCreated: result.stats?.uniquePatients || 0,
       autoComplete: autoCompleteResult,
       scan: scanResult
     });
