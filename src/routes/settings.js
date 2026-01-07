@@ -44,7 +44,7 @@ router.get('/pharmacy/:pharmacyId', authenticateToken, async (req, res) => {
 });
 
 // Update pharmacy settings
-router.put('/pharmacy/:pharmacyId', authenticateToken, requireRole('owner', 'admin'), async (req, res) => {
+router.put('/pharmacy/:pharmacyId', authenticateToken, requireRole('super_admin', 'admin'), async (req, res) => {
   try {
     const { pharmacyId } = req.params;
     const { settings } = req.body;
@@ -97,7 +97,7 @@ router.get('/pharmacy/:pharmacyId/excluded-prescribers', authenticateToken, asyn
 });
 
 // Add excluded prescriber
-router.post('/pharmacy/:pharmacyId/excluded-prescribers', authenticateToken, requireRole('owner', 'admin'), async (req, res) => {
+router.post('/pharmacy/:pharmacyId/excluded-prescribers', authenticateToken, requireRole('super_admin', 'admin'), async (req, res) => {
   try {
     const { pharmacyId } = req.params;
     const { prescriberName, prescriberNpi, prescriberDea, reason } = req.body;
@@ -133,7 +133,7 @@ router.post('/pharmacy/:pharmacyId/excluded-prescribers', authenticateToken, req
 });
 
 // Remove excluded prescriber
-router.delete('/pharmacy/:pharmacyId/excluded-prescribers/:id', authenticateToken, requireRole('owner', 'admin'), async (req, res) => {
+router.delete('/pharmacy/:pharmacyId/excluded-prescribers/:id', authenticateToken, requireRole('super_admin', 'admin'), async (req, res) => {
   try {
     const { pharmacyId, id } = req.params;
 
@@ -159,7 +159,7 @@ router.delete('/pharmacy/:pharmacyId/excluded-prescribers/:id', authenticateToke
 });
 
 // Get pharmacy users (for user management)
-router.get('/pharmacy/:pharmacyId/users', authenticateToken, requireRole('owner', 'admin'), async (req, res) => {
+router.get('/pharmacy/:pharmacyId/users', authenticateToken, requireRole('super_admin', 'admin'), async (req, res) => {
   try {
     const { pharmacyId } = req.params;
 
@@ -182,8 +182,8 @@ router.get('/pharmacy/:pharmacyId/users', authenticateToken, requireRole('owner'
   }
 });
 
-// Create new user (for pharmacy owners)
-router.post('/pharmacy/:pharmacyId/users', authenticateToken, requireRole('owner', 'admin'), async (req, res) => {
+// Create new user (for pharmacy admins)
+router.post('/pharmacy/:pharmacyId/users', authenticateToken, requireRole('super_admin', 'admin'), async (req, res) => {
   try {
     const { pharmacyId } = req.params;
     const { email, firstName, lastName, role } = req.body;
@@ -192,9 +192,9 @@ router.post('/pharmacy/:pharmacyId/users', authenticateToken, requireRole('owner
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Validate role - owners can only create roles lower than their own
+    // Validate role - admins can create pharmacist, technician, staff
     const allowedRoles = ['pharmacist', 'technician', 'staff'];
-    if (req.user.role === 'owner') {
+    if (req.user.role === 'super_admin') {
       allowedRoles.push('admin');
     }
 
@@ -244,7 +244,7 @@ router.post('/pharmacy/:pharmacyId/users', authenticateToken, requireRole('owner
 });
 
 // Update user (deactivate, change role)
-router.patch('/pharmacy/:pharmacyId/users/:userId', authenticateToken, requireRole('owner', 'admin'), async (req, res) => {
+router.patch('/pharmacy/:pharmacyId/users/:userId', authenticateToken, requireRole('super_admin', 'admin'), async (req, res) => {
   try {
     const { pharmacyId, userId } = req.params;
     const { role, isActive } = req.body;
@@ -264,7 +264,7 @@ router.patch('/pharmacy/:pharmacyId/users/:userId', authenticateToken, requireRo
 
     if (role !== undefined) {
       const allowedRoles = ['pharmacist', 'technician', 'staff'];
-      if (req.user.role === 'owner') allowedRoles.push('admin');
+      if (req.user.role === 'super_admin') allowedRoles.push('admin');
       if (!allowedRoles.includes(role)) {
         return res.status(400).json({ error: 'Invalid role' });
       }
