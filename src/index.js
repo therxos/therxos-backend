@@ -97,6 +97,10 @@ app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
 
     const finalPharmacyId = pharmacyId || resolvedPharmacy?.pharmacy_id;
 
+    if (!finalPharmacyId) {
+      return res.status(400).json({ error: 'Pharmacy ID is required' });
+    }
+
     const result = await ingestCSV(req.file.buffer, {
       pharmacyId: finalPharmacyId,
       clientId: clientId || resolvedPharmacy?.client_id,
