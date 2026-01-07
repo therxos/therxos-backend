@@ -86,16 +86,30 @@ app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
 
     const { pharmacyId, clientId, sourceEmail, runAutoComplete, runScan } = req.body;
 
+    // Try to get pharmacyId from JWT token if not in form data
+    let tokenPharmacyId = null;
+    const authHeader = req.headers['authorization'];
+    if (authHeader) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const jwt = await import('jsonwebtoken');
+        const decoded = jwt.default.verify(token, process.env.JWT_SECRET);
+        tokenPharmacyId = decoded.pharmacyId;
+      } catch (e) {
+        // Token invalid, continue without it
+      }
+    }
+
     // If no pharmacy specified, try to resolve from email
     let resolvedPharmacy = null;
-    if (!pharmacyId && sourceEmail) {
+    if (!pharmacyId && !tokenPharmacyId && sourceEmail) {
       resolvedPharmacy = await resolveClientFromEmail(sourceEmail);
       if (!resolvedPharmacy) {
         return res.status(404).json({ error: 'Could not identify pharmacy from email' });
       }
     }
 
-    const finalPharmacyId = pharmacyId || resolvedPharmacy?.pharmacy_id;
+    const finalPharmacyId = pharmacyId || tokenPharmacyId || resolvedPharmacy?.pharmacy_id;
 
     if (!finalPharmacyId) {
       return res.status(400).json({ error: 'Pharmacy ID is required' });
