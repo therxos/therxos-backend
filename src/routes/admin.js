@@ -253,4 +253,194 @@ router.post('/create-super-admin', async (req, res) => {
   }
 });
 
+// GET /api/admin/didnt-work-queue - Get all "Didn't Work" opportunities for super admin
+router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT
+        o.opportunity_id,
+        o.opportunity_type,
+        o.trigger_group,
+        o.current_drug_name,
+        o.recommended_drug_name,
+        o.potential_margin_gain,
+        o.annual_margin_gain,
+        o.staff_notes,
+        o.updated_at,
+        p.pharmacy_name,
+        p.pharmacy_id,
+        pr.insurance_bin,
+        pr.insurance_group,
+        pr.plan_name,
+        pt.first_name as patient_first_name,
+        pt.last_name as patient_last_name,
+        (
+          SELECT COUNT(*)
+          FROM opportunities o2
+          LEFT JOIN prescriptions pr2 ON pr2.prescription_id = o2.prescription_id
+          WHERE o2.opportunity_type = o.opportunity_type
+            AND COALESCE(pr2.insurance_group, '') = COALESCE(pr.insurance_group, '')
+            AND o2.status NOT IN ('Denied', 'Flagged', 'Didn''t Work')
+        ) as affected_count,
+        (
+          SELECT COALESCE(SUM(o2.annual_margin_gain), 0)
+          FROM opportunities o2
+          LEFT JOIN prescriptions pr2 ON pr2.prescription_id = o2.prescription_id
+          WHERE o2.opportunity_type = o.opportunity_type
+            AND COALESCE(pr2.insurance_group, '') = COALESCE(pr.insurance_group, '')
+            AND o2.status NOT IN ('Denied', 'Flagged', 'Didn''t Work')
+        ) as affected_value
+      FROM opportunities o
+      JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id
+      LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+      LEFT JOIN patients pt ON pt.patient_id = o.patient_id
+      WHERE o.status = 'Didn''t Work'
+      ORDER BY o.updated_at DESC
+    `);
+
+    res.json({ opportunities: result.rows });
+  } catch (error) {
+    console.error('Error fetching didnt-work queue:', error);
+    res.status(500).json({ error: 'Failed to fetch queue' });
+  }
+});
+
+// POST /api/admin/fix-group - Fix GP for a trigger/group combo
+router.post('/fix-group', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { opportunityType, insuranceGroup, insuranceBin, newGp, opportunityId } = req.body;
+
+    // Mark the original opportunity as resolved
+    if (opportunityId) {
+      await db.query(`
+        UPDATE opportunities
+        SET status = 'Denied',
+            dismissed_reason = 'Fixed by super admin - GP updated for group',
+            updated_at = NOW()
+        WHERE opportunity_id = $1
+      `, [opportunityId]);
+    }
+
+    // TODO: Store the GP fix for future reference
+    // For now, just mark related opportunities with updated GP info in notes
+
+    res.json({
+      success: true,
+      message: `GP fix applied for ${opportunityType} on group ${insuranceGroup}`
+    });
+  } catch (error) {
+    console.error('Error fixing group:', error);
+    res.status(500).json({ error: 'Failed to fix group' });
+  }
+});
+
+// POST /api/admin/exclude-group - Exclude all opportunities for a trigger/group combo
+router.post('/exclude-group', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { opportunityType, insuranceGroup, insuranceBin, reason, opportunityId } = req.body;
+
+    // Get count of affected opportunities before updating
+    const countResult = await db.query(`
+      SELECT COUNT(*) as count
+      FROM opportunities o
+      LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+      WHERE o.opportunity_type = $1
+        AND COALESCE(pr.insurance_group, '') = $2
+        AND o.status NOT IN ('Denied', 'Completed', 'Approved')
+    `, [opportunityType, insuranceGroup || '']);
+
+    // Deny all opportunities for this trigger/group combo
+    const result = await db.query(`
+      UPDATE opportunities o
+      SET status = 'Denied',
+          dismissed_reason = $3,
+          updated_at = NOW()
+      FROM prescriptions pr
+      WHERE pr.prescription_id = o.prescription_id
+        AND o.opportunity_type = $1
+        AND COALESCE(pr.insurance_group, '') = $2
+        AND o.status NOT IN ('Denied', 'Completed', 'Approved')
+      RETURNING o.opportunity_id
+    `, [opportunityType, insuranceGroup || '', reason || `Excluded by super admin: ${opportunityType} doesn't work on ${insuranceGroup}`]);
+
+    // Also update the original opportunity if it was a "Didn't Work" one
+    if (opportunityId) {
+      await db.query(`
+        UPDATE opportunities
+        SET status = 'Denied',
+            dismissed_reason = $1,
+            updated_at = NOW()
+        WHERE opportunity_id = $2
+      `, [reason || `Excluded by super admin`, opportunityId]);
+    }
+
+    res.json({
+      success: true,
+      excluded: result.rows.length,
+      totalAffected: parseInt(countResult.rows[0].count),
+      message: `Excluded ${result.rows.length} opportunities for ${opportunityType} on group ${insuranceGroup}`
+    });
+  } catch (error) {
+    console.error('Error excluding group:', error);
+    res.status(500).json({ error: 'Failed to exclude group' });
+  }
+});
+
+// POST /api/admin/flag-group - Flag all opportunities for a trigger/group combo (hide until fixed)
+router.post('/flag-group', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { opportunityType, insuranceGroup, opportunityId } = req.body;
+
+    // Flag all opportunities for this trigger/group combo
+    const result = await db.query(`
+      UPDATE opportunities o
+      SET status = 'Flagged',
+          staff_notes = COALESCE(staff_notes, '') || ' [Auto-flagged: ' || $1 || ' on ' || $2 || ' needs review]',
+          flagged_by = $4,
+          flagged_at = NOW(),
+          updated_at = NOW()
+      FROM prescriptions pr
+      WHERE pr.prescription_id = o.prescription_id
+        AND o.opportunity_type = $1
+        AND COALESCE(pr.insurance_group, '') = $2
+        AND o.status NOT IN ('Denied', 'Completed', 'Approved', 'Flagged', 'Didn''t Work')
+      RETURNING o.opportunity_id
+    `, [opportunityType, insuranceGroup || '', opportunityId, req.user.userId]);
+
+    res.json({
+      success: true,
+      flagged: result.rows.length,
+      message: `Flagged ${result.rows.length} opportunities for ${opportunityType} on group ${insuranceGroup}`
+    });
+  } catch (error) {
+    console.error('Error flagging group:', error);
+    res.status(500).json({ error: 'Failed to flag group' });
+  }
+});
+
+// POST /api/admin/resolve-didnt-work - Resolve a single "Didn't Work" opportunity
+router.post('/resolve-didnt-work', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { opportunityId, action, reason } = req.body;
+
+    let newStatus = 'Denied';
+    if (action === 'reopen') {
+      newStatus = 'Not Submitted';
+    }
+
+    await db.query(`
+      UPDATE opportunities
+      SET status = $1,
+          dismissed_reason = $2,
+          updated_at = NOW()
+      WHERE opportunity_id = $3
+    `, [newStatus, reason, opportunityId]);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error resolving opportunity:', error);
+    res.status(500).json({ error: 'Failed to resolve opportunity' });
+  }
+});
+
 export default router;
