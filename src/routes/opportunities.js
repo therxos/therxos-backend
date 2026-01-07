@@ -174,8 +174,8 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
 
     if (status) {
       updates.status = status;
-      
-      // V1-compatible statuses: Not Submitted, Submitted, Approved, Denied, Completed, Didn't Work
+
+      // Statuses: Not Submitted, Submitted, Approved, Denied, Completed, Didn't Work, Flagged
       if (status === 'Submitted') {
         updates.reviewed_by = req.user.userId;
         updates.reviewed_at = new Date();
@@ -184,6 +184,9 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
         updates.actioned_at = new Date();
       } else if (status === 'Denied') {
         updates.dismissed_reason = dismissedReason;
+      } else if (status === 'Flagged') {
+        updates.flagged_by = req.user.userId;
+        updates.flagged_at = new Date();
       }
     }
 
