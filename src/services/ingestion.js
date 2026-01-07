@@ -105,9 +105,23 @@ const PMS_COLUMN_MAPPINGS = {
 };
 
 /**
+ * Detect delimiter from first line of file
+ */
+function detectDelimiter(buffer) {
+  const firstLine = buffer.toString('utf8').split('\n')[0];
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  const commaCount = (firstLine.match(/,/g) || []).length;
+
+  // If more tabs than commas, it's TSV
+  return tabCount > commaCount ? '\t' : ',';
+}
+
+/**
  * Parse CSV buffer into records
  */
 async function parseCSV(buffer, options = {}) {
+  const delimiter = detectDelimiter(buffer);
+
   return new Promise((resolve, reject) => {
     const records = [];
     const parser = parse({
@@ -115,6 +129,7 @@ async function parseCSV(buffer, options = {}) {
       skip_empty_lines: true,
       trim: true,
       relax_column_count: true,
+      delimiter: delimiter,
       ...options
     });
 
