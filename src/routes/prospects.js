@@ -104,18 +104,32 @@ const QUICK_TRIGGERS = [
 
 // Column mapping for common PMS exports
 const COLUMN_ALIASES = {
-  patient_name: ['Patient Full Name Last then First', 'Patient Name', 'PatientName', 'Patient'],
-  drug_name: ['Dispensed Item Name', 'Drug Name', 'DrugName', 'Medication', 'Drug'],
-  ndc: ['Dispensed Item NDC', 'NDC', 'NDC11'],
-  insurance_bin: ['Primary Third Party Bin', 'BIN', 'Bin', 'Insurance BIN'],
-  insurance_group: ['Primary Group Number', 'Group', 'Group Number', 'Insurance Group'],
-  fill_date: ['Date Written', 'Fill Date', 'Dispensed Date', 'Date'],
-  dob: ['Patient Date of Birth', 'DOB', 'Date of Birth', 'Patient DOB'],
+  patient_name: ['Patient Full Name Last then First', 'Patient Name', 'PatientName', 'Patient', 'Name', 'Member Name', 'Member'],
+  drug_name: [
+    'Dispensed Item Name', 'Drug Name', 'DrugName', 'Medication', 'Drug',
+    'Product Name', 'ProductName', 'Item Name', 'Rx Name', 'Med Name',
+    'Description', 'Drug Description', 'Item Description', 'Product',
+    'Medication Name', 'Prescription', 'Dispensed Drug', 'Label Name'
+  ],
+  ndc: ['Dispensed Item NDC', 'NDC', 'NDC11', 'NDC Code', 'National Drug Code'],
+  insurance_bin: ['Primary Third Party Bin', 'BIN', 'Bin', 'Insurance BIN', 'Payer BIN'],
+  insurance_group: ['Primary Group Number', 'Group', 'Group Number', 'Insurance Group', 'Group ID'],
+  fill_date: ['Date Written', 'Fill Date', 'Dispensed Date', 'Date', 'Date Filled', 'Service Date', 'DOS'],
+  dob: ['Patient Date of Birth', 'DOB', 'Date of Birth', 'Patient DOB', 'Birth Date', 'Birthdate'],
 };
 
 function findColumn(headers, aliases) {
+  // First try exact match (case-insensitive)
   for (const alias of aliases) {
     const found = headers.find(h => h.toLowerCase() === alias.toLowerCase());
+    if (found) return found;
+  }
+  // Then try contains match for flexibility
+  for (const alias of aliases) {
+    const found = headers.find(h =>
+      h.toLowerCase().includes(alias.toLowerCase()) ||
+      alias.toLowerCase().includes(h.toLowerCase())
+    );
     if (found) return found;
   }
   return null;
@@ -156,27 +170,30 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
     const groupCol = findColumn(headers, COLUMN_ALIASES.insurance_group);
     const dobCol = findColumn(headers, COLUMN_ALIASES.dob);
 
-    if (!patientCol || !drugCol) {
-      return res.status(400).json({ 
-        error: 'Could not identify patient name or drug columns. Please ensure your export includes patient names and drug names.' 
+    // Drug column is required, but patient column is optional for prospect preview
+    if (!drugCol) {
+      return res.status(400).json({
+        error: 'Could not identify drug/medication column. Please ensure your export includes drug names.'
       });
     }
 
-    // Build patient profiles
+    // Build patient profiles (use row index if no patient column)
     const patients = new Map();
-    
-    for (const row of records) {
-      const patientName = row[patientCol]?.trim();
-      const drugName = (row[drugCol] || '').toUpperCase();
-      
-      if (!patientName || !drugName) continue;
 
+    for (let i = 0; i < records.length; i++) {
+      const row = records[i];
+      const drugName = (row[drugCol] || '').toUpperCase();
+
+      if (!drugName) continue;
+
+      // Use patient name if available, otherwise use row index
+      const patientName = patientCol ? row[patientCol]?.trim() : `row_${i}`;
       const dob = dobCol ? row[dobCol] : '';
-      const patientKey = `${patientName}|${dob}`;
+      const patientKey = patientCol ? `${patientName}|${dob}` : `row_${i}`;
 
       if (!patients.has(patientKey)) {
         patients.set(patientKey, {
-          name: patientName,
+          name: patientName || `Patient ${i + 1}`,
           dob,
           bin: binCol ? row[binCol] : null,
           group: groupCol ? row[groupCol] : null,
