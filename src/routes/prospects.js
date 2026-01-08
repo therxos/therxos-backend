@@ -360,8 +360,8 @@ router.post('/checkout/create-session', async (req, res) => {
         analysisId,
         pharmacyName,
       },
-      success_url: `${process.env.FRONTEND_URL}/onboarding?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL}/preview/${analysisId}`,
+      success_url: `${process.env.WEBSITE_URL || 'https://therxos.com'}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.WEBSITE_URL || 'https://therxos.com'}/preview.html?id=${analysisId}`,
     });
 
     res.json({ url: session.url });
