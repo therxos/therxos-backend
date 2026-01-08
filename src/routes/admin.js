@@ -551,13 +551,26 @@ router.get('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
 // POST /api/admin/triggers - Create new trigger
 router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    const {
-      triggerCode, displayName, triggerType, category,
-      detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
-      recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
-      priority, annualFills, defaultGpValue, isEnabled,
-      binValues, restrictions
-    } = req.body;
+    // Accept both camelCase and snake_case
+    const body = req.body;
+    const triggerCode = body.triggerCode || body.trigger_code;
+    const displayName = body.displayName || body.display_name;
+    const triggerType = body.triggerType || body.trigger_type;
+    const category = body.category;
+    const detectionKeywords = body.detectionKeywords || body.detection_keywords || [];
+    const excludeKeywords = body.excludeKeywords || body.exclude_keywords || [];
+    const ifHasKeywords = body.ifHasKeywords || body.if_has_keywords || [];
+    const ifNotHasKeywords = body.ifNotHasKeywords || body.if_not_has_keywords || [];
+    const recommendedDrug = body.recommendedDrug || body.recommended_drug;
+    const recommendedNdc = body.recommendedNdc || body.recommended_ndc;
+    const actionInstructions = body.actionInstructions || body.action_instructions;
+    const clinicalRationale = body.clinicalRationale || body.clinical_rationale;
+    const priority = body.priority || 'medium';
+    const annualFills = body.annualFills || body.annual_fills || 12;
+    const defaultGpValue = body.defaultGpValue || body.default_gp_value;
+    const isEnabled = body.isEnabled !== undefined ? body.isEnabled : (body.is_enabled !== false);
+    const binValues = body.binValues || body.bin_values;
+    const restrictions = body.restrictions;
 
     // Insert trigger
     const result = await db.query(`
@@ -570,9 +583,9 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
       RETURNING *
     `, [
       triggerCode, displayName, triggerType, category,
-      detectionKeywords || [], excludeKeywords || [], ifHasKeywords || [], ifNotHasKeywords || [],
+      detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
       recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
-      priority || 'medium', annualFills || 12, defaultGpValue, isEnabled !== false
+      priority, annualFills, defaultGpValue, isEnabled
     ]);
 
     const triggerId = result.rows[0].trigger_id;
@@ -611,13 +624,26 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
 router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      triggerCode, displayName, triggerType, category,
-      detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
-      recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
-      priority, annualFills, defaultGpValue, isEnabled,
-      binValues, restrictions
-    } = req.body;
+    // Accept both camelCase and snake_case
+    const body = req.body;
+    const triggerCode = body.triggerCode || body.trigger_code;
+    const displayName = body.displayName || body.display_name;
+    const triggerType = body.triggerType || body.trigger_type;
+    const category = body.category;
+    const detectionKeywords = body.detectionKeywords || body.detection_keywords;
+    const excludeKeywords = body.excludeKeywords || body.exclude_keywords;
+    const ifHasKeywords = body.ifHasKeywords || body.if_has_keywords;
+    const ifNotHasKeywords = body.ifNotHasKeywords || body.if_not_has_keywords;
+    const recommendedDrug = body.recommendedDrug || body.recommended_drug;
+    const recommendedNdc = body.recommendedNdc || body.recommended_ndc;
+    const actionInstructions = body.actionInstructions || body.action_instructions;
+    const clinicalRationale = body.clinicalRationale || body.clinical_rationale;
+    const priority = body.priority;
+    const annualFills = body.annualFills || body.annual_fills;
+    const defaultGpValue = body.defaultGpValue || body.default_gp_value;
+    const isEnabled = body.isEnabled !== undefined ? body.isEnabled : body.is_enabled;
+    const binValues = body.binValues || body.bin_values;
+    const restrictions = body.restrictions;
 
     // Update trigger
     const result = await db.query(`
