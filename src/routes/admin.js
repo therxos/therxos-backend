@@ -260,7 +260,6 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
       SELECT
         o.opportunity_id,
         o.opportunity_type,
-        o.trigger_group,
         o.current_drug_name,
         o.recommended_drug_name,
         o.potential_margin_gain,
