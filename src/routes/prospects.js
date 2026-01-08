@@ -177,87 +177,141 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
       });
     }
 
-    // Build patient profiles (use row index if no patient column)
+    // Build patient profiles
     const patients = new Map();
+    const allUniqueDrugs = new Set(); // Track all unique drugs for no-patient mode
 
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
-      const drugName = (row[drugCol] || '').toUpperCase();
+      const drugName = (row[drugCol] || '').toUpperCase().trim();
 
       if (!drugName) continue;
 
-      // Use patient name if available, otherwise use row index
-      const patientName = patientCol ? row[patientCol]?.trim() : `row_${i}`;
-      const dob = dobCol ? row[dobCol] : '';
-      const patientKey = patientCol ? `${patientName}|${dob}` : `row_${i}`;
+      allUniqueDrugs.add(drugName);
 
-      if (!patients.has(patientKey)) {
-        patients.set(patientKey, {
-          name: patientName || `Patient ${i + 1}`,
-          dob,
-          bin: binCol ? row[binCol] : null,
-          group: groupCol ? row[groupCol] : null,
-          drugs: new Set(),
-        });
+      if (patientCol) {
+        // If we have patient column, group by patient
+        const patientName = row[patientCol]?.trim();
+        if (!patientName) continue;
+
+        const dob = dobCol ? row[dobCol] : '';
+        const patientKey = `${patientName}|${dob}`;
+
+        if (!patients.has(patientKey)) {
+          patients.set(patientKey, {
+            name: patientName,
+            dob,
+            bin: binCol ? row[binCol] : null,
+            group: groupCol ? row[groupCol] : null,
+            drugs: new Set(),
+          });
+        }
+
+        patients.get(patientKey).drugs.add(drugName);
       }
-
-      patients.get(patientKey).drugs.add(drugName);
     }
 
     // Run opportunity detection
     const opportunities = [];
     const byType = {};
 
-    for (const [patientKey, patient] of patients) {
-      const drugList = Array.from(patient.drugs);
-      const drugString = drugList.join(' ');
+    if (patientCol && patients.size > 0) {
+      // ACCURATE MODE: We have patient data, analyze per-patient
+      for (const [patientKey, patient] of patients) {
+        const drugList = Array.from(patient.drugs);
+        const drugString = drugList.join(' ');
+
+        for (const trigger of QUICK_TRIGGERS) {
+          const hasDetect = trigger.detect.some(keyword =>
+            drugString.includes(keyword.toUpperCase())
+          );
+
+          if (!hasDetect) continue;
+
+          if (trigger.exclude) {
+            const hasExclude = trigger.exclude.some(keyword =>
+              drugString.includes(keyword.toUpperCase())
+            );
+            if (hasExclude) continue;
+          }
+
+          if (trigger.requireMissing) {
+            const hasMissing = trigger.requireMissing.some(keyword =>
+              drugString.includes(keyword.toUpperCase())
+            );
+            if (hasMissing) continue;
+          }
+
+          opportunities.push({
+            patientKey,
+            triggerId: trigger.id,
+            type: trigger.type,
+            value: trigger.value,
+          });
+
+          if (!byType[trigger.type]) {
+            byType[trigger.type] = { count: 0, annualValue: 0 };
+          }
+          byType[trigger.type].count++;
+          byType[trigger.type].annualValue += trigger.value * 12;
+        }
+      }
+    } else {
+      // ESTIMATE MODE: No patient data - count unique drugs matching each trigger
+      const allDrugsString = Array.from(allUniqueDrugs).join(' ');
 
       for (const trigger of QUICK_TRIGGERS) {
-        // Check if patient has any detection keywords
-        const hasDetect = trigger.detect.some(keyword => 
-          drugString.includes(keyword.toUpperCase())
-        );
-        
-        if (!hasDetect) continue;
-
-        // Check exclusions
-        if (trigger.exclude) {
-          const hasExclude = trigger.exclude.some(keyword =>
-            drugString.includes(keyword.toUpperCase())
+        // Count unique drugs that match this trigger's detection keywords
+        let matchCount = 0;
+        for (const drug of allUniqueDrugs) {
+          const matches = trigger.detect.some(keyword =>
+            drug.includes(keyword.toUpperCase())
           );
-          if (hasExclude) continue;
+          if (matches) {
+            // Check exclusions
+            if (trigger.exclude) {
+              const excluded = trigger.exclude.some(keyword =>
+                drug.includes(keyword.toUpperCase())
+              );
+              if (excluded) continue;
+            }
+            matchCount++;
+          }
         }
 
-        // Check requireMissing (for missing_therapy type)
+        if (matchCount === 0) continue;
+
+        // For missing therapy triggers without patient data, estimate ~70% might be missing
+        // For other triggers, use the match count directly
+        let estimatedCount = matchCount;
         if (trigger.requireMissing) {
-          const hasMissing = trigger.requireMissing.some(keyword =>
-            drugString.includes(keyword.toUpperCase())
-          );
-          if (hasMissing) continue; // Patient already has it
+          estimatedCount = Math.ceil(matchCount * 0.7);
         }
 
-        // Found an opportunity!
-        opportunities.push({
-          patientKey,
-          triggerId: trigger.id,
-          type: trigger.type,
-          value: trigger.value,
-        });
+        if (estimatedCount > 0) {
+          opportunities.push({
+            patientKey: 'estimate',
+            triggerId: trigger.id,
+            type: trigger.type,
+            value: trigger.value,
+            count: estimatedCount,
+          });
 
-        // Aggregate by type
-        if (!byType[trigger.type]) {
-          byType[trigger.type] = { count: 0, annualValue: 0 };
+          if (!byType[trigger.type]) {
+            byType[trigger.type] = { count: 0, annualValue: 0 };
+          }
+          byType[trigger.type].count += estimatedCount;
+          byType[trigger.type].annualValue += trigger.value * 12 * estimatedCount;
         }
-        byType[trigger.type].count++;
-        byType[trigger.type].annualValue += trigger.value * 12;
       }
     }
 
-    // Calculate totals
-    const totalOpportunities = opportunities.length;
-    const totalAnnualValue = opportunities.reduce((sum, opp) => sum + (opp.value * 12), 0);
+    // Calculate totals (handle both accurate and estimate modes)
+    const totalOpportunities = Object.values(byType).reduce((sum, t) => sum + t.count, 0);
+    const totalAnnualValue = Object.values(byType).reduce((sum, t) => sum + t.annualValue, 0);
     const totalMonthlyValue = Math.round(totalAnnualValue / 12);
-    const patientsWithOpps = new Set(opportunities.map(o => o.patientKey)).size;
+    const patientsWithOpps = patientCol ? new Set(opportunities.map(o => o.patientKey)).size : 0;
+    const uniqueDrugsAnalyzed = allUniqueDrugs.size;
 
     // Format byType for response
     const byTypeArray = Object.entries(byType).map(([type, data]) => ({
@@ -268,18 +322,20 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
 
     // Create analysis record
     const analysisId = uuidv4();
+    const isEstimate = !patientCol; // Flag if this is estimate mode
     const analysis = {
       analysisId,
       pharmacyName,
       email,
-      totalPatients: patients.size,
+      totalPatients: patientCol ? patients.size : 0,
+      uniqueDrugsAnalyzed,
       patientsWithOpportunities: patientsWithOpps,
       totalOpportunities,
       totalAnnualValue,
       totalMonthlyValue,
       byType: byTypeArray,
+      isEstimate, // Let frontend know this is an estimate
       createdAt: new Date().toISOString(),
-      // Don't store patient-level details for preview
     };
 
     // Cache the analysis (expires in 24 hours)
@@ -291,13 +347,13 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
     // Also store in database for persistence
     try {
       await db.query(`
-        INSERT INTO prospect_analyses (analysis_id, pharmacy_name, email, total_patients, 
+        INSERT INTO prospect_analyses (analysis_id, pharmacy_name, email, total_patients,
           patients_with_opportunities, total_opportunities, total_annual_value, analysis_data)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       `, [
-        analysisId, pharmacyName, email, patients.size,
+        analysisId, pharmacyName, email, patientCol ? patients.size : uniqueDrugsAnalyzed,
         patientsWithOpps, totalOpportunities, totalAnnualValue,
-        JSON.stringify({ byType: byTypeArray })
+        JSON.stringify({ byType: byTypeArray, isEstimate, uniqueDrugsAnalyzed })
       ]);
     } catch (dbErr) {
       console.log('Could not persist analysis to DB:', dbErr.message);
