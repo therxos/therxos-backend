@@ -34,8 +34,8 @@ const stripe = process.env.STRIPE_SECRET_KEY
 // Store analyses in memory for now (could move to DB later)
 const analysisCache = new Map();
 
-// Trigger definitions (simplified version for quick analysis)
-const QUICK_TRIGGERS = [
+// Fallback trigger definitions (used if DB unavailable)
+const FALLBACK_TRIGGERS = [
   {
     id: 'ppi_switch',
     name: 'PPI to Dexlansoprazole',
@@ -102,6 +102,97 @@ const QUICK_TRIGGERS = [
   },
 ];
 
+// Load triggers from database (with fallback to hardcoded)
+async function loadTriggersFromDB() {
+  try {
+    const result = await db.query(`
+      SELECT t.*,
+        COALESCE(
+          json_agg(
+            json_build_object('bin', tbv.insurance_bin, 'gp_value', tbv.gp_value, 'is_excluded', tbv.is_excluded)
+          ) FILTER (WHERE tbv.id IS NOT NULL),
+          '[]'
+        ) as bin_values
+      FROM triggers t
+      LEFT JOIN trigger_bin_values tbv ON t.trigger_id = tbv.trigger_id
+      WHERE t.is_enabled = true
+      GROUP BY t.trigger_id
+    `);
+
+    if (result.rows.length === 0) {
+      console.log('No triggers in DB, using fallback triggers');
+      return FALLBACK_TRIGGERS;
+    }
+
+    // Transform DB format to analysis format
+    return result.rows.map(row => ({
+      id: row.trigger_code,
+      name: row.display_name,
+      type: row.trigger_type,
+      detect: row.detection_keywords || [],
+      exclude: row.exclude_keywords || [],
+      requireMissing: row.if_not_has_keywords || [],
+      ifHas: row.if_has_keywords || [],
+      value: row.default_gp_value || 50,
+      binValues: row.bin_values || [],
+    }));
+  } catch (error) {
+    console.log('Error loading triggers from DB, using fallback:', error.message);
+    return FALLBACK_TRIGGERS;
+  }
+}
+
+// Load audit rules from database for audit risk detection
+async function loadAuditRulesFromDB() {
+  try {
+    const result = await db.query(`
+      SELECT * FROM audit_rules WHERE is_enabled = true
+    `);
+    return result.rows;
+  } catch (error) {
+    console.log('Error loading audit rules from DB:', error.message);
+    return [];
+  }
+}
+
+// Detect audit risks in prescription data
+function detectAuditRisks(records, drugCol, quantityCol, daysCol, gpCol, dawCol, sigCol) {
+  const risks = [];
+
+  for (const row of records) {
+    const drugName = (row[drugCol] || '').toUpperCase();
+    const quantity = parseFloat(row[quantityCol]) || null;
+    const daysSupply = parseInt(row[daysCol]) || null;
+    const grossProfit = parseFloat(row[gpCol]) || null;
+    const dawCode = row[dawCol] || '';
+    const sig = (row[sigCol] || '').toUpperCase();
+
+    // High GP Risk (>$50)
+    if (grossProfit && grossProfit > 50) {
+      risks.push({ type: 'high_gp_risk', drug: drugName, value: grossProfit });
+    }
+
+    // Ozempic quantity check (must be 3ml)
+    if ((drugName.includes('OZEMPIC') || drugName.includes('SEMAGLUTIDE')) && quantity && quantity !== 3) {
+      risks.push({ type: 'quantity_mismatch', drug: drugName, expected: 3, actual: quantity });
+    }
+
+    // Synthroid DAW check (must be 1, 2, or 9 - not 0)
+    if (drugName.includes('SYNTHROID') && dawCode === '0') {
+      risks.push({ type: 'daw_violation', drug: drugName, expected: '1/2/9', actual: dawCode });
+    }
+
+    // SIG/quantity mismatch for daily meds
+    if (sig.includes('ONCE DAILY') || sig.includes('1 TABLET DAILY') || sig.includes('QD')) {
+      if (quantity && daysSupply && Math.abs(quantity - daysSupply) > daysSupply * 0.1) {
+        risks.push({ type: 'sig_quantity_mismatch', drug: drugName, sig, quantity, daysSupply });
+      }
+    }
+  }
+
+  return risks;
+}
+
 // Column mapping for common PMS exports
 const COLUMN_ALIASES = {
   patient_name: ['Patient Full Name Last then First', 'Patient Name', 'PatientName', 'Patient', 'Name', 'Member Name', 'Member'],
@@ -116,6 +207,12 @@ const COLUMN_ALIASES = {
   insurance_group: ['Primary Group Number', 'Group', 'Group Number', 'Insurance Group', 'Group ID'],
   fill_date: ['Date Written', 'Fill Date', 'Dispensed Date', 'Date', 'Date Filled', 'Service Date', 'DOS'],
   dob: ['Patient Date of Birth', 'DOB', 'Date of Birth', 'Patient DOB', 'Birth Date', 'Birthdate'],
+  // Audit-related columns
+  quantity: ['Quantity', 'Qty', 'Dispensed Quantity', 'Dispensed Qty', 'Units', 'Amount'],
+  days_supply: ['Days Supply', 'Day Supply', 'Days', 'DaysSupply', 'Supply Days'],
+  gross_profit: ['Gross Profit', 'GP', 'Profit', 'Net Profit', 'Margin'],
+  daw_code: ['DAW', 'DAW Code', 'Dispense As Written', 'DAWCode'],
+  sig: ['SIG', 'Directions', 'Instructions', 'Sig Code', 'Directions for Use'],
 };
 
 function findColumn(headers, aliases) {
@@ -170,12 +267,22 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
     const groupCol = findColumn(headers, COLUMN_ALIASES.insurance_group);
     const dobCol = findColumn(headers, COLUMN_ALIASES.dob);
 
+    // Audit-related columns
+    const quantityCol = findColumn(headers, COLUMN_ALIASES.quantity);
+    const daysCol = findColumn(headers, COLUMN_ALIASES.days_supply);
+    const gpCol = findColumn(headers, COLUMN_ALIASES.gross_profit);
+    const dawCol = findColumn(headers, COLUMN_ALIASES.daw_code);
+    const sigCol = findColumn(headers, COLUMN_ALIASES.sig);
+
     // Drug column is required, but patient column is optional for prospect preview
     if (!drugCol) {
       return res.status(400).json({
         error: 'Could not identify drug/medication column. Please ensure your export includes drug names.'
       });
     }
+
+    // Load triggers from database (falls back to hardcoded if DB unavailable)
+    const QUICK_TRIGGERS = await loadTriggersFromDB();
 
     // Build patient profiles
     const patients = new Map();
@@ -320,6 +427,21 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
       annualValue: data.annualValue,
     })).sort((a, b) => b.annualValue - a.annualValue);
 
+    // Run audit risk detection (if we have relevant columns)
+    let auditRisks = [];
+    let auditRisksByType = {};
+    if (quantityCol || gpCol || dawCol) {
+      auditRisks = detectAuditRisks(records, drugCol, quantityCol, daysCol, gpCol, dawCol, sigCol);
+
+      // Summarize by type
+      for (const risk of auditRisks) {
+        if (!auditRisksByType[risk.type]) {
+          auditRisksByType[risk.type] = 0;
+        }
+        auditRisksByType[risk.type]++;
+      }
+    }
+
     // Create analysis record
     const analysisId = uuidv4();
     const isEstimate = !patientCol; // Flag if this is estimate mode
@@ -335,6 +457,9 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
       totalMonthlyValue,
       byType: byTypeArray,
       isEstimate, // Let frontend know this is an estimate
+      // Audit risk summary (count only for prospects, details for clients)
+      auditRisksCount: auditRisks.length,
+      auditRisksByType: Object.entries(auditRisksByType).map(([type, count]) => ({ type, count })),
       createdAt: new Date().toISOString(),
     };
 
@@ -353,7 +478,13 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
       `, [
         analysisId, pharmacyName, email, patientCol ? patients.size : uniqueDrugsAnalyzed,
         patientsWithOpps, totalOpportunities, totalAnnualValue,
-        JSON.stringify({ byType: byTypeArray, isEstimate, uniqueDrugsAnalyzed })
+        JSON.stringify({
+          byType: byTypeArray,
+          isEstimate,
+          uniqueDrugsAnalyzed,
+          auditRisksCount: auditRisks.length,
+          auditRisksByType: Object.entries(auditRisksByType).map(([type, count]) => ({ type, count })),
+        })
       ]);
     } catch (dbErr) {
       console.log('Could not persist analysis to DB:', dbErr.message);
@@ -399,6 +530,9 @@ router.get('/analysis/:analysisId', async (req, res) => {
       totalAnnualValue: row.total_annual_value,
       totalMonthlyValue: Math.round(row.total_annual_value / 12),
       byType: row.analysis_data?.byType || [],
+      isEstimate: row.analysis_data?.isEstimate || false,
+      auditRisksCount: row.analysis_data?.auditRisksCount || 0,
+      auditRisksByType: row.analysis_data?.auditRisksByType || [],
     };
 
     res.json(analysis);

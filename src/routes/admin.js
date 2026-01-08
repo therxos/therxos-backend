@@ -442,4 +442,549 @@ router.post('/resolve-didnt-work', authenticateToken, requireSuperAdmin, async (
   }
 });
 
+
+// ===========================================
+// TRIGGER MANAGEMENT ENDPOINTS
+// ===========================================
+
+// GET /api/admin/triggers - List all triggers with BIN values
+router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { type, enabled, search } = req.query;
+
+    let query = `
+      SELECT
+        t.*,
+        (SELECT json_agg(json_build_object(
+          'bin', tbv.insurance_bin,
+          'gpValue', tbv.gp_value,
+          'isExcluded', tbv.is_excluded
+        )) FROM trigger_bin_values tbv WHERE tbv.trigger_id = t.trigger_id) as bin_values,
+        (SELECT json_agg(json_build_object(
+          'type', tr.restriction_type,
+          'bin', tr.insurance_bin,
+          'groups', tr.insurance_groups
+        )) FROM trigger_restrictions tr WHERE tr.trigger_id = t.trigger_id) as restrictions
+      FROM triggers t
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramIndex = 1;
+
+    if (type) {
+      query += ` AND t.trigger_type = $${paramIndex++}`;
+      params.push(type);
+    }
+
+    if (enabled !== undefined) {
+      query += ` AND t.is_enabled = $${paramIndex++}`;
+      params.push(enabled === 'true');
+    }
+
+    if (search) {
+      query += ` AND (t.display_name ILIKE $${paramIndex} OR t.trigger_code ILIKE $${paramIndex} OR t.category ILIKE $${paramIndex})`;
+      params.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY t.trigger_type, t.display_name`;
+
+    const result = await db.query(query, params);
+
+    // Get counts by type
+    const typeCountsResult = await db.query(`
+      SELECT trigger_type, COUNT(*) as count
+      FROM triggers
+      GROUP BY trigger_type
+    `);
+    const byType = {};
+    typeCountsResult.rows.forEach(r => { byType[r.trigger_type] = parseInt(r.count); });
+
+    res.json({
+      triggers: result.rows,
+      total: result.rows.length,
+      byType
+    });
+  } catch (error) {
+    console.error('Error fetching triggers:', error);
+    res.status(500).json({ error: 'Failed to fetch triggers' });
+  }
+});
+
+// GET /api/admin/triggers/:id - Get single trigger with all details
+router.get('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const triggerResult = await db.query(`
+      SELECT * FROM triggers WHERE trigger_id = $1
+    `, [id]);
+
+    if (triggerResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    const binValuesResult = await db.query(`
+      SELECT insurance_bin, gp_value, is_excluded
+      FROM trigger_bin_values
+      WHERE trigger_id = $1
+      ORDER BY insurance_bin
+    `, [id]);
+
+    const restrictionsResult = await db.query(`
+      SELECT restriction_type, insurance_bin, insurance_groups
+      FROM trigger_restrictions
+      WHERE trigger_id = $1
+    `, [id]);
+
+    res.json({
+      trigger: triggerResult.rows[0],
+      binValues: binValuesResult.rows,
+      restrictions: restrictionsResult.rows
+    });
+  } catch (error) {
+    console.error('Error fetching trigger:', error);
+    res.status(500).json({ error: 'Failed to fetch trigger' });
+  }
+});
+
+// POST /api/admin/triggers - Create new trigger
+router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const {
+      triggerCode, displayName, triggerType, category,
+      detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
+      recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
+      priority, annualFills, defaultGpValue, isEnabled,
+      binValues, restrictions
+    } = req.body;
+
+    // Insert trigger
+    const result = await db.query(`
+      INSERT INTO triggers (
+        trigger_code, display_name, trigger_type, category,
+        detection_keywords, exclude_keywords, if_has_keywords, if_not_has_keywords,
+        recommended_drug, recommended_ndc, action_instructions, clinical_rationale,
+        priority, annual_fills, default_gp_value, is_enabled
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      RETURNING *
+    `, [
+      triggerCode, displayName, triggerType, category,
+      detectionKeywords || [], excludeKeywords || [], ifHasKeywords || [], ifNotHasKeywords || [],
+      recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
+      priority || 'medium', annualFills || 12, defaultGpValue, isEnabled !== false
+    ]);
+
+    const triggerId = result.rows[0].trigger_id;
+
+    // Insert BIN values
+    if (binValues && binValues.length > 0) {
+      for (const bv of binValues) {
+        await db.query(`
+          INSERT INTO trigger_bin_values (trigger_id, insurance_bin, gp_value, is_excluded)
+          VALUES ($1, $2, $3, $4)
+        `, [triggerId, bv.bin, bv.gpValue, bv.isExcluded || false]);
+      }
+    }
+
+    // Insert restrictions
+    if (restrictions && restrictions.length > 0) {
+      for (const r of restrictions) {
+        await db.query(`
+          INSERT INTO trigger_restrictions (trigger_id, restriction_type, insurance_bin, insurance_groups)
+          VALUES ($1, $2, $3, $4)
+        `, [triggerId, r.type, r.bin, r.groups || []]);
+      }
+    }
+
+    res.json({ trigger: result.rows[0], triggerId });
+  } catch (error) {
+    console.error('Error creating trigger:', error);
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Trigger code already exists' });
+    }
+    res.status(500).json({ error: 'Failed to create trigger' });
+  }
+});
+
+// PUT /api/admin/triggers/:id - Update trigger
+router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      triggerCode, displayName, triggerType, category,
+      detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
+      recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
+      priority, annualFills, defaultGpValue, isEnabled,
+      binValues, restrictions
+    } = req.body;
+
+    // Update trigger
+    const result = await db.query(`
+      UPDATE triggers SET
+        trigger_code = COALESCE($1, trigger_code),
+        display_name = COALESCE($2, display_name),
+        trigger_type = COALESCE($3, trigger_type),
+        category = COALESCE($4, category),
+        detection_keywords = COALESCE($5, detection_keywords),
+        exclude_keywords = COALESCE($6, exclude_keywords),
+        if_has_keywords = COALESCE($7, if_has_keywords),
+        if_not_has_keywords = COALESCE($8, if_not_has_keywords),
+        recommended_drug = COALESCE($9, recommended_drug),
+        recommended_ndc = $10,
+        action_instructions = COALESCE($11, action_instructions),
+        clinical_rationale = $12,
+        priority = COALESCE($13, priority),
+        annual_fills = COALESCE($14, annual_fills),
+        default_gp_value = $15,
+        is_enabled = COALESCE($16, is_enabled),
+        updated_at = NOW()
+      WHERE trigger_id = $17
+      RETURNING *
+    `, [
+      triggerCode, displayName, triggerType, category,
+      detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
+      recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
+      priority, annualFills, defaultGpValue, isEnabled, id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    // Update BIN values if provided
+    if (binValues !== undefined) {
+      await db.query('DELETE FROM trigger_bin_values WHERE trigger_id = $1', [id]);
+      for (const bv of binValues) {
+        await db.query(`
+          INSERT INTO trigger_bin_values (trigger_id, insurance_bin, gp_value, is_excluded)
+          VALUES ($1, $2, $3, $4)
+        `, [id, bv.bin, bv.gpValue, bv.isExcluded || false]);
+      }
+    }
+
+    // Update restrictions if provided
+    if (restrictions !== undefined) {
+      await db.query('DELETE FROM trigger_restrictions WHERE trigger_id = $1', [id]);
+      for (const r of restrictions) {
+        await db.query(`
+          INSERT INTO trigger_restrictions (trigger_id, restriction_type, insurance_bin, insurance_groups)
+          VALUES ($1, $2, $3, $4)
+        `, [id, r.type, r.bin, r.groups || []]);
+      }
+    }
+
+    res.json({ trigger: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating trigger:', error);
+    res.status(500).json({ error: 'Failed to update trigger' });
+  }
+});
+
+// DELETE /api/admin/triggers/:id - Delete trigger
+router.delete('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      DELETE FROM triggers WHERE trigger_id = $1 RETURNING trigger_id
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    res.json({ success: true, deletedId: id });
+  } catch (error) {
+    console.error('Error deleting trigger:', error);
+    res.status(500).json({ error: 'Failed to delete trigger' });
+  }
+});
+
+// POST /api/admin/triggers/:id/toggle - Toggle trigger enabled/disabled
+router.post('/triggers/:id/toggle', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      UPDATE triggers
+      SET is_enabled = NOT is_enabled, updated_at = NOW()
+      WHERE trigger_id = $1
+      RETURNING trigger_id, is_enabled
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    res.json({ triggerId: id, isEnabled: result.rows[0].is_enabled });
+  } catch (error) {
+    console.error('Error toggling trigger:', error);
+    res.status(500).json({ error: 'Failed to toggle trigger' });
+  }
+});
+
+// POST /api/admin/triggers/:id/bin-values - Add BIN value to trigger
+router.post('/triggers/:id/bin-values', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { bin, gpValue, isExcluded } = req.body;
+
+    const result = await db.query(`
+      INSERT INTO trigger_bin_values (trigger_id, insurance_bin, gp_value, is_excluded)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (trigger_id, insurance_bin)
+      DO UPDATE SET gp_value = $3, is_excluded = $4, updated_at = NOW()
+      RETURNING *
+    `, [id, bin, gpValue, isExcluded || false]);
+
+    res.json({ binValue: result.rows[0] });
+  } catch (error) {
+    console.error('Error adding BIN value:', error);
+    res.status(500).json({ error: 'Failed to add BIN value' });
+  }
+});
+
+// DELETE /api/admin/triggers/:id/bin-values/:bin - Remove BIN value from trigger
+router.delete('/triggers/:id/bin-values/:bin', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id, bin } = req.params;
+
+    await db.query(`
+      DELETE FROM trigger_bin_values WHERE trigger_id = $1 AND insurance_bin = $2
+    `, [id, bin]);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error removing BIN value:', error);
+    res.status(500).json({ error: 'Failed to remove BIN value' });
+  }
+});
+
+
+// ===========================================
+// AUDIT RULES ENDPOINTS
+// ===========================================
+
+// GET /api/admin/audit-rules - List all audit rules
+router.get('/audit-rules', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT * FROM audit_rules ORDER BY rule_type, rule_name
+    `);
+
+    res.json({ rules: result.rows });
+  } catch (error) {
+    console.error('Error fetching audit rules:', error);
+    res.status(500).json({ error: 'Failed to fetch audit rules' });
+  }
+});
+
+// GET /api/admin/audit-rules/:id - Get single audit rule
+router.get('/audit-rules/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      SELECT * FROM audit_rules WHERE rule_id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Audit rule not found' });
+    }
+
+    res.json({ rule: result.rows[0] });
+  } catch (error) {
+    console.error('Error fetching audit rule:', error);
+    res.status(500).json({ error: 'Failed to fetch audit rule' });
+  }
+});
+
+// POST /api/admin/audit-rules - Create new audit rule
+router.post('/audit-rules', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const {
+      ruleCode, ruleName, ruleDescription, ruleType,
+      drugKeywords, ndcPattern,
+      expectedQuantity, minQuantity, maxQuantity, quantityTolerance,
+      minDaysSupply, maxDaysSupply,
+      allowedDawCodes, hasGenericAvailable,
+      gpThreshold, severity, auditRiskScore, isEnabled
+    } = req.body;
+
+    const result = await db.query(`
+      INSERT INTO audit_rules (
+        rule_code, rule_name, rule_description, rule_type,
+        drug_keywords, ndc_pattern,
+        expected_quantity, min_quantity, max_quantity, quantity_tolerance,
+        min_days_supply, max_days_supply,
+        allowed_daw_codes, has_generic_available,
+        gp_threshold, severity, audit_risk_score, is_enabled
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      RETURNING *
+    `, [
+      ruleCode, ruleName, ruleDescription, ruleType,
+      drugKeywords || [], ndcPattern,
+      expectedQuantity, minQuantity, maxQuantity, quantityTolerance || 0.1,
+      minDaysSupply, maxDaysSupply,
+      allowedDawCodes || [], hasGenericAvailable,
+      gpThreshold || 50, severity || 'warning', auditRiskScore, isEnabled !== false
+    ]);
+
+    res.json({ rule: result.rows[0] });
+  } catch (error) {
+    console.error('Error creating audit rule:', error);
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Rule code already exists' });
+    }
+    res.status(500).json({ error: 'Failed to create audit rule' });
+  }
+});
+
+// PUT /api/admin/audit-rules/:id - Update audit rule
+router.put('/audit-rules/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      ruleCode, ruleName, ruleDescription, ruleType,
+      drugKeywords, ndcPattern,
+      expectedQuantity, minQuantity, maxQuantity, quantityTolerance,
+      minDaysSupply, maxDaysSupply,
+      allowedDawCodes, hasGenericAvailable,
+      gpThreshold, severity, auditRiskScore, isEnabled
+    } = req.body;
+
+    const result = await db.query(`
+      UPDATE audit_rules SET
+        rule_code = COALESCE($1, rule_code),
+        rule_name = COALESCE($2, rule_name),
+        rule_description = $3,
+        rule_type = COALESCE($4, rule_type),
+        drug_keywords = COALESCE($5, drug_keywords),
+        ndc_pattern = $6,
+        expected_quantity = $7,
+        min_quantity = $8,
+        max_quantity = $9,
+        quantity_tolerance = COALESCE($10, quantity_tolerance),
+        min_days_supply = $11,
+        max_days_supply = $12,
+        allowed_daw_codes = COALESCE($13, allowed_daw_codes),
+        has_generic_available = $14,
+        gp_threshold = COALESCE($15, gp_threshold),
+        severity = COALESCE($16, severity),
+        audit_risk_score = $17,
+        is_enabled = COALESCE($18, is_enabled),
+        updated_at = NOW()
+      WHERE rule_id = $19
+      RETURNING *
+    `, [
+      ruleCode, ruleName, ruleDescription, ruleType,
+      drugKeywords, ndcPattern,
+      expectedQuantity, minQuantity, maxQuantity, quantityTolerance,
+      minDaysSupply, maxDaysSupply,
+      allowedDawCodes, hasGenericAvailable,
+      gpThreshold, severity, auditRiskScore, isEnabled, id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Audit rule not found' });
+    }
+
+    res.json({ rule: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating audit rule:', error);
+    res.status(500).json({ error: 'Failed to update audit rule' });
+  }
+});
+
+// DELETE /api/admin/audit-rules/:id - Delete audit rule
+router.delete('/audit-rules/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      DELETE FROM audit_rules WHERE rule_id = $1 RETURNING rule_id
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Audit rule not found' });
+    }
+
+    res.json({ success: true, deletedId: id });
+  } catch (error) {
+    console.error('Error deleting audit rule:', error);
+    res.status(500).json({ error: 'Failed to delete audit rule' });
+  }
+});
+
+// POST /api/admin/audit-rules/:id/toggle - Toggle audit rule enabled/disabled
+router.post('/audit-rules/:id/toggle', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      UPDATE audit_rules
+      SET is_enabled = NOT is_enabled, updated_at = NOW()
+      WHERE rule_id = $1
+      RETURNING rule_id, is_enabled
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Audit rule not found' });
+    }
+
+    res.json({ ruleId: id, isEnabled: result.rows[0].is_enabled });
+  } catch (error) {
+    console.error('Error toggling audit rule:', error);
+    res.status(500).json({ error: 'Failed to toggle audit rule' });
+  }
+});
+
+// GET /api/admin/audit-flags - Get audit flags for review
+router.get('/audit-flags', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId, status, severity, limit = 50 } = req.query;
+
+    let query = `
+      SELECT
+        af.*,
+        p.pharmacy_name,
+        ar.rule_name,
+        ar.rule_description
+      FROM audit_flags af
+      LEFT JOIN pharmacies p ON p.pharmacy_id = af.pharmacy_id
+      LEFT JOIN audit_rules ar ON ar.rule_id = af.rule_id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramIndex = 1;
+
+    if (pharmacyId) {
+      query += ` AND af.pharmacy_id = $${paramIndex++}`;
+      params.push(pharmacyId);
+    }
+
+    if (status) {
+      query += ` AND af.status = $${paramIndex++}`;
+      params.push(status);
+    }
+
+    if (severity) {
+      query += ` AND af.severity = $${paramIndex++}`;
+      params.push(severity);
+    }
+
+    query += ` ORDER BY af.flagged_at DESC LIMIT $${paramIndex++}`;
+    params.push(parseInt(limit));
+
+    const result = await db.query(query, params);
+
+    res.json({ flags: result.rows });
+  } catch (error) {
+    console.error('Error fetching audit flags:', error);
+    res.status(500).json({ error: 'Failed to fetch audit flags' });
+  }
+});
+
+
 export default router;
