@@ -1038,7 +1038,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
     // Load all prescriptions for this pharmacy with patient info
     const rxResult = await db.query(`
       SELECT
-        r.rx_id, r.patient_id, r.drug_name, r.ndc, r.quantity, r.days_supply,
+        r.prescription_id, r.patient_id, r.drug_name, r.ndc, r.quantity, r.days_supply,
         r.dispensed_date, r.bin, r.pcn, r.group_number, r.gross_profit,
         r.daw_code, r.sig,
         p.first_name as patient_first_name, p.last_name as patient_last_name
@@ -1310,7 +1310,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           `, [
             pharmacyId,
             rx.patient_id,
-            rx.rx_id,
+            rx.prescription_id,
             rule.rule_id,
             rule.rule_type,
             rule.severity,
