@@ -199,17 +199,24 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
       updates.actual_margin_realized = actualMarginRealized;
     }
 
+    // Always set updated_at
+    updates.updated_at = new Date();
+
     const result = await db.update('opportunities', 'opportunity_id', opportunityId, updates);
 
-    // Log the action
-    await db.insert('opportunity_actions', {
-      action_id: uuidv4(),
-      opportunity_id: opportunityId,
-      action_type: actionType || 'updated',
-      action_details: JSON.stringify({ updates }),
-      performed_by: req.user.userId,
-      outcome: 'success'
-    });
+    // Log the action (non-blocking, don't fail if logging fails)
+    try {
+      await db.insert('opportunity_actions', {
+        action_id: uuidv4(),
+        opportunity_id: opportunityId,
+        action_type: actionType || 'updated',
+        action_details: JSON.stringify({ updates }),
+        performed_by: req.user.userId,
+        outcome: 'success'
+      });
+    } catch (logError) {
+      logger.warn('Failed to log opportunity action', { error: logError.message });
+    }
 
     logger.info('Opportunity updated', {
       opportunityId,
@@ -219,8 +226,8 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    logger.error('Update opportunity error', { error: error.message });
-    res.status(500).json({ error: 'Failed to update opportunity' });
+    logger.error('Update opportunity error', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: `Failed to update opportunity: ${error.message}` });
   }
 });
 

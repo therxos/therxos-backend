@@ -18,7 +18,8 @@
       "Bash(git push:*)",
       "Bash(ls:*)",
       "Bash(npx vercel --prod --yes)",
-      "Bash(node cleanup-duplicates.js:*)"
+      "Bash(node cleanup-duplicates.js:*)",
+      "Bash(curl:*)"
     ]
   }
 }
