@@ -987,4 +987,349 @@ router.get('/audit-flags', authenticateToken, requireSuperAdmin, async (req, res
 });
 
 
+// ==========================================
+// PHARMACY RESCAN - Scan for new opportunities & audit risks
+// ==========================================
+
+// POST /api/admin/pharmacies/:id/rescan - Rescan a pharmacy for opportunities and audit risks
+router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, async (req, res) => {
+  const { id: pharmacyId } = req.params;
+  const { scanType = 'all' } = req.body; // 'all', 'opportunities', 'audit'
+
+  try {
+    console.log(`Starting rescan for pharmacy ${pharmacyId}, type: ${scanType}`);
+
+    // Verify pharmacy exists
+    const pharmacyResult = await db.query(
+      'SELECT pharmacy_id, pharmacy_name FROM pharmacies WHERE pharmacy_id = $1',
+      [pharmacyId]
+    );
+    if (pharmacyResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+    const pharmacyName = pharmacyResult.rows[0].pharmacy_name;
+
+    // Load all prescriptions for this pharmacy with patient info
+    const rxResult = await db.query(`
+      SELECT
+        r.rx_id, r.patient_id, r.drug_name, r.ndc, r.quantity, r.days_supply,
+        r.dispensed_date, r.bin, r.pcn, r.group_number, r.gross_profit,
+        r.daw_code, r.sig,
+        p.first_name as patient_first_name, p.last_name as patient_last_name
+      FROM prescriptions r
+      JOIN patients p ON p.patient_id = r.patient_id
+      WHERE r.pharmacy_id = $1
+      ORDER BY r.patient_id, r.dispensed_date DESC
+    `, [pharmacyId]);
+
+    const prescriptions = rxResult.rows;
+    console.log(`Loaded ${prescriptions.length} prescriptions`);
+
+    // Load enabled triggers
+    const triggersResult = await db.query(`
+      SELECT t.*,
+        COALESCE(
+          json_agg(
+            json_build_object('bin', tbv.insurance_bin, 'gp_value', tbv.gp_value, 'is_excluded', tbv.is_excluded)
+          ) FILTER (WHERE tbv.id IS NOT NULL),
+          '[]'
+        ) as bin_values
+      FROM triggers t
+      LEFT JOIN trigger_bin_values tbv ON t.trigger_id = tbv.trigger_id
+      WHERE t.is_enabled = true
+      GROUP BY t.trigger_id
+    `);
+    const triggers = triggersResult.rows;
+    console.log(`Loaded ${triggers.length} enabled triggers`);
+
+    // Load enabled audit rules
+    const auditResult = await db.query('SELECT * FROM audit_rules WHERE is_enabled = true');
+    const auditRules = auditResult.rows;
+    console.log(`Loaded ${auditRules.length} enabled audit rules`);
+
+    // Get existing opportunities to avoid duplicates
+    const existingOppsResult = await db.query(`
+      SELECT patient_id, trigger_group, current_drug_name
+      FROM opportunities
+      WHERE pharmacy_id = $1
+    `, [pharmacyId]);
+    const existingOpps = new Set(
+      existingOppsResult.rows.map(o => `${o.patient_id}|${o.trigger_group}|${o.current_drug_name?.toUpperCase()}`)
+    );
+    console.log(`Found ${existingOpps.size} existing opportunities`);
+
+    // Get existing audit flags to avoid duplicates
+    const existingFlagsResult = await db.query(`
+      SELECT patient_id, rule_id, drug_name, dispensed_date
+      FROM audit_flags
+      WHERE pharmacy_id = $1
+    `, [pharmacyId]);
+    const existingFlags = new Set(
+      existingFlagsResult.rows.map(f => `${f.patient_id}|${f.rule_id}|${f.drug_name?.toUpperCase()}|${f.dispensed_date}`)
+    );
+    console.log(`Found ${existingFlags.size} existing audit flags`);
+
+    // Group prescriptions by patient
+    const patientRxMap = new Map();
+    for (const rx of prescriptions) {
+      if (!patientRxMap.has(rx.patient_id)) {
+        patientRxMap.set(rx.patient_id, []);
+      }
+      patientRxMap.get(rx.patient_id).push(rx);
+    }
+
+    let newOpportunities = 0;
+    let skippedOpportunities = 0;
+    let newAuditFlags = 0;
+    let skippedAuditFlags = 0;
+
+    // Scan for opportunities
+    if (scanType === 'all' || scanType === 'opportunities') {
+      for (const [patientId, patientRxs] of patientRxMap) {
+        const patientDrugs = patientRxs.map(rx => rx.drug_name?.toUpperCase() || '');
+        const patientBin = patientRxs[0]?.bin;
+        const patientGroup = patientRxs[0]?.group_number;
+
+        for (const trigger of triggers) {
+          // Check detection keywords
+          const detectKeywords = trigger.detection_keywords || [];
+          const excludeKeywords = trigger.exclude_keywords || [];
+          const ifHasKeywords = trigger.if_has_keywords || [];
+          const ifNotHasKeywords = trigger.if_not_has_keywords || [];
+
+          // Find matching drug
+          let matchedDrug = null;
+          let matchedRx = null;
+          for (const rx of patientRxs) {
+            const drugUpper = rx.drug_name?.toUpperCase() || '';
+
+            // Check if drug matches detection keywords
+            const matchesDetect = detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+            if (!matchesDetect) continue;
+
+            // Check if drug is excluded
+            const matchesExclude = excludeKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+            if (matchesExclude) continue;
+
+            matchedDrug = rx.drug_name;
+            matchedRx = rx;
+            break;
+          }
+
+          if (!matchedDrug) continue;
+
+          // Check IF_HAS condition (patient must have these drugs)
+          if (ifHasKeywords.length > 0) {
+            const hasRequired = ifHasKeywords.some(kw =>
+              patientDrugs.some(d => d.includes(kw.toUpperCase()))
+            );
+            if (!hasRequired) continue;
+          }
+
+          // Check IF_NOT_HAS condition (for missing therapy triggers)
+          if (ifNotHasKeywords.length > 0) {
+            const hasForbidden = ifNotHasKeywords.some(kw =>
+              patientDrugs.some(d => d.includes(kw.toUpperCase()))
+            );
+            if (hasForbidden) continue; // Patient already has this therapy
+          }
+
+          // Get GP value for this BIN
+          let gpValue = trigger.default_gp_value || 50;
+          const binValues = trigger.bin_values || [];
+          const binConfig = binValues.find(bv => bv.bin === patientBin);
+          if (binConfig) {
+            if (binConfig.is_excluded) continue; // Skip this BIN
+            if (binConfig.gp_value) gpValue = binConfig.gp_value;
+          }
+
+          // Check if opportunity already exists
+          const oppKey = `${patientId}|${trigger.trigger_code}|${matchedDrug.toUpperCase()}`;
+          if (existingOpps.has(oppKey)) {
+            skippedOpportunities++;
+            continue;
+          }
+
+          // Create new opportunity
+          const annualFills = trigger.annual_fills || 12;
+          const annualValue = gpValue * annualFills;
+
+          await db.query(`
+            INSERT INTO opportunities (
+              pharmacy_id, patient_id, trigger_group, opportunity_type,
+              current_drug_name, recommended_drug_name, potential_margin_gain,
+              annual_margin_gain, insurance_bin, insurance_group,
+              status, priority, staff_notes
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          `, [
+            pharmacyId,
+            patientId,
+            trigger.trigger_code,
+            trigger.trigger_type,
+            matchedDrug,
+            trigger.recommended_drug,
+            gpValue,
+            annualValue,
+            patientBin,
+            patientGroup,
+            'Not Submitted',
+            trigger.priority || 'medium',
+            `Auto-detected by rescan on ${new Date().toISOString().split('T')[0]}`
+          ]);
+
+          newOpportunities++;
+          existingOpps.add(oppKey); // Prevent duplicates within this scan
+        }
+      }
+    }
+
+    // Scan for audit risks
+    if (scanType === 'all' || scanType === 'audit') {
+      for (const rx of prescriptions) {
+        const drugUpper = rx.drug_name?.toUpperCase() || '';
+
+        for (const rule of auditRules) {
+          let violation = null;
+          let expectedValue = null;
+          let actualValue = null;
+
+          // Check if rule applies to this drug
+          const drugKeywords = rule.drug_keywords || [];
+          if (drugKeywords.length > 0) {
+            const matchesDrug = drugKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+            if (!matchesDrug) continue;
+          }
+
+          // Apply rule checks
+          switch (rule.rule_type) {
+            case 'quantity_mismatch':
+              if (rule.expected_quantity && rx.quantity !== null) {
+                if (Number(rx.quantity) !== Number(rule.expected_quantity)) {
+                  violation = `${rx.drug_name} quantity should be ${rule.expected_quantity}, got ${rx.quantity}`;
+                  expectedValue = String(rule.expected_quantity);
+                  actualValue = String(rx.quantity);
+                }
+              }
+              break;
+
+            case 'days_supply_mismatch':
+              if (rx.days_supply !== null) {
+                if (rule.min_days_supply && rx.days_supply < rule.min_days_supply) {
+                  violation = `${rx.drug_name} days supply ${rx.days_supply} is below minimum ${rule.min_days_supply}`;
+                  expectedValue = `>= ${rule.min_days_supply}`;
+                  actualValue = String(rx.days_supply);
+                }
+                if (rule.max_days_supply && rx.days_supply > rule.max_days_supply) {
+                  violation = `${rx.drug_name} days supply ${rx.days_supply} exceeds maximum ${rule.max_days_supply}`;
+                  expectedValue = `<= ${rule.max_days_supply}`;
+                  actualValue = String(rx.days_supply);
+                }
+              }
+              break;
+
+            case 'daw_violation':
+              if (rule.allowed_daw_codes && rule.allowed_daw_codes.length > 0 && rx.daw_code !== null) {
+                if (!rule.allowed_daw_codes.includes(String(rx.daw_code))) {
+                  violation = `${rx.drug_name} has DAW ${rx.daw_code}, but should be ${rule.allowed_daw_codes.join('/')} (has generic available)`;
+                  expectedValue = rule.allowed_daw_codes.join('/');
+                  actualValue = String(rx.daw_code);
+                }
+              }
+              break;
+
+            case 'high_gp_risk':
+              if (rx.gross_profit !== null && rule.gp_threshold) {
+                if (Number(rx.gross_profit) > Number(rule.gp_threshold)) {
+                  violation = `${rx.drug_name} has GP $${rx.gross_profit} (above $${rule.gp_threshold} threshold)`;
+                  expectedValue = `<= $${rule.gp_threshold}`;
+                  actualValue = `$${rx.gross_profit}`;
+                }
+              }
+              break;
+
+            case 'sig_quantity_mismatch':
+              // Check if SIG indicates once daily and qty doesn't match days
+              const sigUpper = (rx.sig || '').toUpperCase();
+              if ((sigUpper.includes('ONCE DAILY') || sigUpper.includes('QD') || sigUpper.includes('1 DAILY'))
+                  && rx.quantity && rx.days_supply) {
+                const tolerance = rule.quantity_tolerance || 0.1;
+                const diff = Math.abs(rx.quantity - rx.days_supply);
+                if (diff > rx.days_supply * tolerance) {
+                  violation = `${rx.drug_name}: SIG "${rx.sig}" suggests qty should equal days supply. Got qty=${rx.quantity}, days=${rx.days_supply}`;
+                  expectedValue = `qty ≈ ${rx.days_supply}`;
+                  actualValue = String(rx.quantity);
+                }
+              }
+              break;
+          }
+
+          if (!violation) continue;
+
+          // Check if flag already exists
+          const flagKey = `${rx.patient_id}|${rule.rule_id}|${drugUpper}|${rx.dispensed_date}`;
+          if (existingFlags.has(flagKey)) {
+            skippedAuditFlags++;
+            continue;
+          }
+
+          // Create audit flag
+          await db.query(`
+            INSERT INTO audit_flags (
+              pharmacy_id, patient_id, prescription_id, rule_id,
+              rule_type, severity, drug_name, ndc, dispensed_quantity,
+              days_supply, daw_code, sig, gross_profit,
+              violation_message, expected_value, actual_value,
+              status, dispensed_date
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          `, [
+            pharmacyId,
+            rx.patient_id,
+            rx.rx_id,
+            rule.rule_id,
+            rule.rule_type,
+            rule.severity,
+            rx.drug_name,
+            rx.ndc,
+            rx.quantity,
+            rx.days_supply,
+            rx.daw_code,
+            rx.sig,
+            rx.gross_profit,
+            violation,
+            expectedValue,
+            actualValue,
+            'open',
+            rx.dispensed_date
+          ]);
+
+          newAuditFlags++;
+          existingFlags.add(flagKey); // Prevent duplicates within this scan
+        }
+      }
+    }
+
+    console.log(`Rescan complete: ${newOpportunities} new opportunities, ${newAuditFlags} new audit flags`);
+
+    res.json({
+      success: true,
+      pharmacy: pharmacyName,
+      prescriptionsScanned: prescriptions.length,
+      patientsScanned: patientRxMap.size,
+      triggersUsed: triggers.length,
+      auditRulesUsed: auditRules.length,
+      results: {
+        newOpportunities,
+        skippedOpportunities,
+        newAuditFlags,
+        skippedAuditFlags,
+      }
+    });
+
+  } catch (error) {
+    console.error('Error during rescan:', error);
+    res.status(500).json({ error: 'Failed to rescan pharmacy: ' + error.message });
+  }
+});
+
+
 export default router;
