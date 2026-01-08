@@ -20,6 +20,7 @@ import prospectsRoutes from './routes/prospects.js';
 import adminRoutes from './routes/admin.js';
 import automationRoutes from './routes/automation.js';
 import settingsRoutes from './routes/settings.js';
+import feedbackRoutes from './routes/feedback.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -100,6 +101,7 @@ app.use('/api/checkout', prospectsRoutes); // Checkout routes are in prospects.j
 app.use('/api/admin', adminRoutes);
 app.use('/api/automation', automationRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 // CSV Upload endpoint
 app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
