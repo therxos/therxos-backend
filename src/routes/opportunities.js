@@ -185,8 +185,9 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
       } else if (status === 'Denied') {
         updates.dismissed_reason = dismissedReason;
       } else if (status === 'Flagged') {
-        updates.flagged_by = req.user.userId;
-        updates.flagged_at = new Date();
+        // Note: flagged_by and flagged_at columns may not exist yet - just update status
+        // updates.flagged_by = req.user.userId;
+        // updates.flagged_at = new Date();
       }
     }
 
