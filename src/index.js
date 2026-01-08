@@ -27,7 +27,31 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000', 'https://*.therxos.app'],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) ||
+      ['http://localhost:3000', 'https://therxos.com', 'https://www.therxos.com', 'https://beta.therxos.com'];
+
+    // Check if origin matches allowed list (also handle www/non-www variants)
+    const isAllowed = allowedOrigins.some(allowed => {
+      if (origin === allowed) return true;
+      // Auto-allow www variant if non-www is allowed and vice versa
+      if (allowed.includes('therxos.com')) {
+        const withWww = allowed.replace('https://', 'https://www.');
+        const withoutWww = allowed.replace('https://www.', 'https://');
+        if (origin === withWww || origin === withoutWww) return true;
+      }
+      return false;
+    });
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
