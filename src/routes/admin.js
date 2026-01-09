@@ -1078,12 +1078,12 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
 
     // Get existing opportunities to avoid duplicates
     const existingOppsResult = await db.query(`
-      SELECT patient_id, trigger_group, current_drug_name
+      SELECT patient_id, trigger_type, current_drug_name
       FROM opportunities
       WHERE pharmacy_id = $1
     `, [pharmacyId]);
     const existingOpps = new Set(
-      existingOppsResult.rows.map(o => `${o.patient_id}|${o.trigger_group}|${o.current_drug_name?.toUpperCase()}`)
+      existingOppsResult.rows.map(o => `${o.patient_id}|${o.trigger_type}|${o.current_drug_name?.toUpperCase()}`)
     );
     console.log(`Found ${existingOpps.size} existing opportunities`);
 
@@ -1185,7 +1185,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
 
           await db.query(`
             INSERT INTO opportunities (
-              pharmacy_id, patient_id, trigger_group, opportunity_type,
+              pharmacy_id, patient_id, trigger_type, opportunity_type,
               current_drug_name, recommended_drug_name, potential_margin_gain,
               annual_margin_gain, insurance_bin, insurance_group,
               status, priority, staff_notes
