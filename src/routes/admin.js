@@ -1398,13 +1398,22 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
       ? `${subdomain}${Date.now().toString().slice(-4)}`
       : subdomain;
 
-    // Check if email already exists
+    // Check if email already exists in users
     const existingUser = await db.query(
       'SELECT user_id FROM users WHERE email = $1',
       [adminEmail.toLowerCase()]
     );
     if (existingUser.rows.length > 0) {
       return res.status(400).json({ error: 'A user with this email already exists' });
+    }
+
+    // Check if email already exists in clients
+    const existingClient = await db.query(
+      'SELECT client_id FROM clients WHERE submitter_email = $1',
+      [adminEmail.toLowerCase()]
+    );
+    if (existingClient.rows.length > 0) {
+      return res.status(400).json({ error: 'A client with this email already exists' });
     }
 
     // Create client
