@@ -1,6 +1,8 @@
 // admin.js - Super Admin API routes for platform management
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
+import bcrypt from 'bcryptjs';
 import db from '../database/index.js';
 import { authenticateToken } from './auth.js';
 import { ROLES } from '../utils/permissions.js';
@@ -1357,6 +1359,99 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
   } catch (error) {
     console.error('Error during rescan:', error);
     res.status(500).json({ error: 'Failed to rescan pharmacy: ' + error.message });
+  }
+});
+
+// POST /api/admin/clients - Create a new client (super admin only)
+router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const {
+      clientName,
+      pharmacyName,
+      pharmacyNpi,
+      pharmacyNcpdp,
+      pharmacyState,
+      adminEmail,
+      adminFirstName,
+      adminLastName,
+      pmsSystem
+    } = req.body;
+
+    // Validate required fields
+    if (!clientName || !adminEmail) {
+      return res.status(400).json({ error: 'Client name and admin email are required' });
+    }
+
+    // Generate subdomain from client name
+    const subdomain = clientName
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .slice(0, 20);
+
+    // Check if subdomain exists
+    const existing = await db.query(
+      'SELECT client_id FROM clients WHERE dashboard_subdomain = $1',
+      [subdomain]
+    );
+
+    const finalSubdomain = existing.rows.length > 0
+      ? `${subdomain}${Date.now().toString().slice(-4)}`
+      : subdomain;
+
+    // Check if email already exists
+    const existingUser = await db.query(
+      'SELECT user_id FROM users WHERE email = $1',
+      [adminEmail.toLowerCase()]
+    );
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ error: 'A user with this email already exists' });
+    }
+
+    // Create client
+    const clientId = uuidv4();
+    await db.query(`
+      INSERT INTO clients (client_id, client_name, dashboard_subdomain, status, created_at)
+      VALUES ($1, $2, $3, $4, NOW())
+    `, [clientId, clientName, finalSubdomain, 'active']);
+
+    // Create pharmacy
+    const pharmacyId = uuidv4();
+    await db.query(`
+      INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, npi, ncpdp, state, pms_system, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    `, [pharmacyId, clientId, pharmacyName || clientName, pharmacyNpi || null, pharmacyNcpdp || null, pharmacyState || null, pmsSystem || null]);
+
+    // Create admin user with temp password
+    const tempPassword = uuidv4().slice(0, 12);
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    const userId = uuidv4();
+
+    await db.query(`
+      INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+    `, [userId, clientId, pharmacyId, adminEmail.toLowerCase(), passwordHash, adminFirstName || 'Admin', adminLastName || '', 'owner', true, true]);
+
+    console.log('New client created by super admin:', { clientId, clientName, pharmacyId });
+
+    res.status(201).json({
+      success: true,
+      client: {
+        clientId,
+        clientName,
+        subdomain: finalSubdomain
+      },
+      pharmacy: {
+        pharmacyId,
+        pharmacyName: pharmacyName || clientName
+      },
+      credentials: {
+        email: adminEmail.toLowerCase(),
+        temporaryPassword: tempPassword
+      }
+    });
+  } catch (error) {
+    console.error('Error creating client:', error);
+    res.status(500).json({ error: 'Failed to create client: ' + error.message });
   }
 });
 
