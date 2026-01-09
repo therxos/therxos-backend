@@ -1426,9 +1426,9 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
     // Create pharmacy
     const pharmacyId = uuidv4();
     await db.query(`
-      INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, pharmacy_npi, ncpdp, state, pms_system, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-    `, [pharmacyId, clientId, pharmacyName || clientName, pharmacyNpi || null, pharmacyNcpdp || null, pharmacyState || null, pmsSystem || null]);
+      INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, pharmacy_npi, state, pms_system, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    `, [pharmacyId, clientId, pharmacyName || clientName, pharmacyNpi || null, pharmacyState || null, pmsSystem || null]);
 
     // Create admin user with temp password
     const tempPassword = uuidv4().slice(0, 12);
