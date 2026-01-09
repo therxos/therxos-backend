@@ -1077,13 +1077,14 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
     console.log(`Loaded ${auditRules.length} enabled audit rules`);
 
     // Get existing opportunities to avoid duplicates
+    // Use opportunity_type + current_drug_name as the dedup key
     const existingOppsResult = await db.query(`
-      SELECT patient_id, trigger_type, current_drug_name
+      SELECT patient_id, opportunity_type, current_drug_name
       FROM opportunities
       WHERE pharmacy_id = $1
     `, [pharmacyId]);
     const existingOpps = new Set(
-      existingOppsResult.rows.map(o => `${o.patient_id}|${o.trigger_type}|${o.current_drug_name?.toUpperCase()}`)
+      existingOppsResult.rows.map(o => `${o.patient_id}|${o.opportunity_type}|${o.current_drug_name?.toUpperCase()}`)
     );
     console.log(`Found ${existingOpps.size} existing opportunities`);
 
@@ -1172,8 +1173,8 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
             if (binConfig.gp_value) gpValue = binConfig.gp_value;
           }
 
-          // Check if opportunity already exists
-          const oppKey = `${patientId}|${trigger.trigger_code}|${matchedDrug.toUpperCase()}`;
+          // Check if opportunity already exists (using opportunity_type + drug as key)
+          const oppKey = `${patientId}|${trigger.trigger_type}|${matchedDrug.toUpperCase()}`;
           if (existingOpps.has(oppKey)) {
             skippedOpportunities++;
             continue;
@@ -1185,15 +1186,14 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
 
           await db.query(`
             INSERT INTO opportunities (
-              pharmacy_id, patient_id, trigger_type, opportunity_type,
+              pharmacy_id, patient_id, opportunity_type,
               current_drug_name, recommended_drug_name, potential_margin_gain,
               annual_margin_gain, insurance_bin, insurance_group,
-              status, priority, staff_notes
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+              status, clinical_priority, staff_notes
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           `, [
             pharmacyId,
             patientId,
-            trigger.trigger_code,
             trigger.trigger_type,
             matchedDrug,
             trigger.recommended_drug,
