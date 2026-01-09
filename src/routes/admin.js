@@ -1125,8 +1125,11 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
         const patientBin = patientRxs[0]?.bin;
         const patientGroup = patientRxs[0]?.group_number;
 
-        // Skip globally excluded BINs (e.g., cash)
-        if (EXCLUDED_BINS.includes(patientBin)) continue;
+        // Skip entire patient if their primary BIN is excluded (e.g., cash)
+        if (EXCLUDED_BINS.includes(patientBin)) {
+          console.log(`Skipping patient ${patientId} - primary BIN ${patientBin} is excluded`);
+          continue;
+        }
 
         for (const trigger of triggers) {
           // Check detection keywords
@@ -1155,14 +1158,6 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           }
 
           if (!matchedDrug) continue;
-
-          // Check if matched prescription's BIN is globally excluded (e.g., cash)
-          const matchedBin = matchedRx?.bin;
-          console.log(`Checking BIN: "${matchedBin}" for drug ${matchedDrug}, excluded: ${EXCLUDED_BINS.includes(matchedBin)}`);
-          if (EXCLUDED_BINS.includes(matchedBin)) {
-            console.log(`SKIPPING due to excluded BIN: ${matchedBin}`);
-            continue;
-          }
 
           // Check IF_HAS condition (patient must have these drugs)
           if (ifHasKeywords.length > 0) {
