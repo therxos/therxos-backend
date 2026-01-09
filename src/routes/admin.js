@@ -1188,11 +1188,11 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
 
           await db.query(`
             INSERT INTO opportunities (
-              pharmacy_id, patient_id, opportunity_type,
+              opportunity_id, pharmacy_id, patient_id, opportunity_type,
               current_drug_name, recommended_drug_name, potential_margin_gain,
               annual_margin_gain, insurance_bin, insurance_group,
               status, clinical_priority, staff_notes
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           `, [
             pharmacyId,
             patientId,
