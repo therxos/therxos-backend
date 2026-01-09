@@ -503,40 +503,75 @@ export async function ingestCSV(buffer, options = {}) {
       }
     }
 
-    // Insert prescriptions with patient_id
+    // Insert prescriptions with patient_id in batches
     let insertedCount = 0;
+    const BATCH_SIZE = 50;
+
+    // Prepare all prescriptions with patient_id
     for (const rx of prescriptions) {
-      const patientId = patientMap.get(rx._patient_hash);
+      rx.patient_id = patientMap.get(rx._patient_hash);
       delete rx._patient_hash;
-      
-      rx.patient_id = patientId;
-      
+    }
+
+    // Process in batches
+    for (let i = 0; i < prescriptions.length; i += BATCH_SIZE) {
+      const batch = prescriptions.slice(i, i + BATCH_SIZE);
+
+      if (batch.length === 0) continue;
+
+      // Build batch insert query
+      const values = [];
+      const valuePlaceholders = [];
+      let paramIndex = 1;
+
+      for (const rx of batch) {
+        valuePlaceholders.push(`(${Array.from({length: 24}, () => `$${paramIndex++}`).join(', ')})`);
+        values.push(
+          rx.prescription_id, rx.pharmacy_id, rx.patient_id, rx.rx_number, rx.ndc, rx.drug_name,
+          rx.quantity_dispensed, rx.days_supply, rx.daw_code, rx.prescriber_npi, rx.prescriber_name,
+          rx.insurance_bin, rx.insurance_pcn, rx.insurance_group, rx.patient_pay, rx.insurance_pay,
+          rx.acquisition_cost, rx.sig, rx.dispensed_date, rx.written_date, rx.refills_remaining,
+          rx.source, rx.source_file, JSON.stringify(rx.raw_data)
+        );
+      }
+
       try {
-        await db.query(`
+        const result = await db.query(`
           INSERT INTO prescriptions (
             prescription_id, pharmacy_id, patient_id, rx_number, ndc, drug_name,
             quantity_dispensed, days_supply, daw_code, prescriber_npi, prescriber_name,
             insurance_bin, insurance_pcn, insurance_group, patient_pay, insurance_pay,
             acquisition_cost, sig, dispensed_date, written_date, refills_remaining,
             source, source_file, raw_data
-          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-            $17, $18, $19, $20, $21, $22, $23, $24
-          )
+          ) VALUES ${valuePlaceholders.join(', ')}
           ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO NOTHING
-        `, [
-          rx.prescription_id, rx.pharmacy_id, rx.patient_id, rx.rx_number, rx.ndc, rx.drug_name,
-          rx.quantity_dispensed, rx.days_supply, rx.daw_code, rx.prescriber_npi, rx.prescriber_name,
-          rx.insurance_bin, rx.insurance_pcn, rx.insurance_group, rx.patient_pay, rx.insurance_pay,
-          rx.acquisition_cost, rx.sig, rx.dispensed_date, rx.written_date, rx.refills_remaining,
-          rx.source, rx.source_file, JSON.stringify(rx.raw_data)
-        ]);
-        insertedCount++;
+        `, values);
+        insertedCount += result.rowCount || batch.length;
       } catch (error) {
-        if (error.code === '23505') { // Duplicate key
-          duplicateCount++;
-        } else {
-          throw error;
+        // If batch fails, fall back to individual inserts for this batch
+        logger.warn('Batch insert failed, falling back to individual inserts', { error: error.message, batchStart: i });
+        for (const rx of batch) {
+          try {
+            await db.query(`
+              INSERT INTO prescriptions (
+                prescription_id, pharmacy_id, patient_id, rx_number, ndc, drug_name,
+                quantity_dispensed, days_supply, daw_code, prescriber_npi, prescriber_name,
+                insurance_bin, insurance_pcn, insurance_group, patient_pay, insurance_pay,
+                acquisition_cost, sig, dispensed_date, written_date, refills_remaining,
+                source, source_file, raw_data
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+              ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO NOTHING
+            `, [
+              rx.prescription_id, rx.pharmacy_id, rx.patient_id, rx.rx_number, rx.ndc, rx.drug_name,
+              rx.quantity_dispensed, rx.days_supply, rx.daw_code, rx.prescriber_npi, rx.prescriber_name,
+              rx.insurance_bin, rx.insurance_pcn, rx.insurance_group, rx.patient_pay, rx.insurance_pay,
+              rx.acquisition_cost, rx.sig, rx.dispensed_date, rx.written_date, rx.refills_remaining,
+              rx.source, rx.source_file, JSON.stringify(rx.raw_data)
+            ]);
+            insertedCount++;
+          } catch (err) {
+            if (err.code === '23505') duplicateCount++;
+          }
         }
       }
     }
