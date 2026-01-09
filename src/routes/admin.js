@@ -1158,7 +1158,11 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
 
           // Check if matched prescription's BIN is globally excluded (e.g., cash)
           const matchedBin = matchedRx?.bin;
-          if (EXCLUDED_BINS.includes(matchedBin)) continue;
+          console.log(`Checking BIN: "${matchedBin}" for drug ${matchedDrug}, excluded: ${EXCLUDED_BINS.includes(matchedBin)}`);
+          if (EXCLUDED_BINS.includes(matchedBin)) {
+            console.log(`SKIPPING due to excluded BIN: ${matchedBin}`);
+            continue;
+          }
 
           // Check IF_HAS condition (patient must have these drugs)
           if (ifHasKeywords.length > 0) {
