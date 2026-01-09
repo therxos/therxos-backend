@@ -536,10 +536,15 @@ router.get('/monthly/export', authenticateToken, async (req, res) => {
 // Audit flags for pharmacy
 router.get('/audit-flags', authenticateToken, async (req, res) => {
   try {
-    const pharmacyId = req.user.pharmacyId;
     const { status, severity, limit = 100, offset = 0 } = req.query;
 
-    console.log('Fetching audit flags for pharmacy:', pharmacyId);
+    // Super admins can specify a pharmacyId, otherwise use the user's pharmacy
+    let pharmacyId = req.user.pharmacyId;
+    if (req.user.role === 'super_admin' && req.query.pharmacyId) {
+      pharmacyId = req.query.pharmacyId;
+    }
+
+    console.log('Fetching audit flags for pharmacy:', pharmacyId, 'user role:', req.user.role);
 
     let query = `
       SELECT
