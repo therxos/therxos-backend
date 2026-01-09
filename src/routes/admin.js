@@ -1046,7 +1046,8 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
         r.insurance_group as group_number,
         COALESCE(r.insurance_pay, 0) + COALESCE(r.patient_pay, 0) - COALESCE(r.acquisition_cost, 0) as gross_profit,
         r.daw_code, r.sig, r.prescriber_name,
-        p.first_name as patient_first_name, p.last_name as patient_last_name
+        p.first_name as patient_first_name, p.last_name as patient_last_name,
+        p.primary_insurance_bin
       FROM prescriptions r
       JOIN patients p ON p.patient_id = r.patient_id
       WHERE r.pharmacy_id = $1
@@ -1124,10 +1125,11 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
         const patientDrugs = patientRxs.map(rx => rx.drug_name?.toUpperCase() || '');
         const patientBin = patientRxs[0]?.bin;
         const patientGroup = patientRxs[0]?.group_number;
+        const patientPrimaryBin = patientRxs[0]?.primary_insurance_bin;
 
-        // Skip entire patient if their primary BIN is excluded (e.g., cash)
-        if (EXCLUDED_BINS.includes(patientBin)) {
-          console.log(`Skipping patient ${patientId} - primary BIN ${patientBin} is excluded`);
+        // Skip entire patient if their primary BIN is excluded (e.g., cash BIN 014798)
+        if (EXCLUDED_BINS.includes(patientPrimaryBin)) {
+          console.log(`Skipping patient ${patientId} - primary_insurance_bin ${patientPrimaryBin} is excluded`);
           continue;
         }
 
