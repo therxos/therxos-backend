@@ -533,4 +533,102 @@ router.get('/monthly/export', authenticateToken, async (req, res) => {
   }
 });
 
+// Audit flags for pharmacy
+router.get('/audit-flags', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { status, severity, limit = 100, offset = 0 } = req.query;
+
+    let query = `
+      SELECT
+        af.*,
+        p.first_name as patient_first_name,
+        p.last_name as patient_last_name,
+        ar.rule_name,
+        ar.rule_description
+      FROM audit_flags af
+      LEFT JOIN patients p ON p.patient_id = af.patient_id
+      LEFT JOIN audit_rules ar ON ar.rule_id = af.rule_id
+      WHERE af.pharmacy_id = $1
+    `;
+    const params = [pharmacyId];
+    let paramIndex = 2;
+
+    if (status) {
+      query += ` AND af.status = $${paramIndex++}`;
+      params.push(status);
+    }
+    if (severity) {
+      query += ` AND af.severity = $${paramIndex++}`;
+      params.push(severity);
+    }
+
+    query += ` ORDER BY af.flagged_at DESC`;
+    query += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await db.query(query, params);
+
+    // Get counts by status
+    const countsResult = await db.query(`
+      SELECT
+        status,
+        COUNT(*) as count
+      FROM audit_flags
+      WHERE pharmacy_id = $1
+      GROUP BY status
+    `, [pharmacyId]);
+
+    // Get counts by severity
+    const severityResult = await db.query(`
+      SELECT
+        severity,
+        COUNT(*) as count
+      FROM audit_flags
+      WHERE pharmacy_id = $1
+      GROUP BY severity
+    `, [pharmacyId]);
+
+    res.json({
+      flags: result.rows,
+      total: result.rows.length,
+      counts: {
+        byStatus: countsResult.rows.reduce((acc, r) => ({ ...acc, [r.status]: parseInt(r.count) }), {}),
+        bySeverity: severityResult.rows.reduce((acc, r) => ({ ...acc, [r.severity]: parseInt(r.count) }), {})
+      }
+    });
+  } catch (error) {
+    logger.error('Fetch audit flags error', { error: error.message });
+    res.status(500).json({ error: 'Failed to fetch audit flags' });
+  }
+});
+
+// Update audit flag status
+router.put('/audit-flags/:flagId', authenticateToken, async (req, res) => {
+  try {
+    const { flagId } = req.params;
+    const { status, resolution_notes } = req.body;
+    const pharmacyId = req.user.pharmacyId;
+
+    const result = await db.query(`
+      UPDATE audit_flags
+      SET status = $1,
+          resolution_notes = $2,
+          reviewed_by = $3,
+          reviewed_at = NOW()
+      WHERE flag_id = $4 AND pharmacy_id = $5
+      RETURNING *
+    `, [status, resolution_notes, req.user.userId, flagId, pharmacyId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Audit flag not found' });
+    }
+
+    res.json({ flag: result.rows[0] });
+  } catch (error) {
+    logger.error('Update audit flag error', { error: error.message });
+    res.status(500).json({ error: 'Failed to update audit flag' });
+  }
+});
+
 export default router;
