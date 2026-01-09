@@ -145,8 +145,8 @@ app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
       pharmacyId: finalPharmacyId,
       clientId: clientId || resolvedPharmacy?.client_id,
       sourceEmail,
-      sourceFile: req.file.originalname,
-      pmsSystem: 'spp' // Default to SPP format for manual uploads
+      sourceFile: req.file.originalname
+      // pmsSystem auto-detected from CSV headers
     });
 
     let autoCompleteResult = null;
