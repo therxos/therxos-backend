@@ -1410,9 +1410,9 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
     // Create client
     const clientId = uuidv4();
     await db.query(`
-      INSERT INTO clients (client_id, client_name, dashboard_subdomain, status, created_at)
-      VALUES ($1, $2, $3, $4, NOW())
-    `, [clientId, clientName, finalSubdomain, 'active']);
+      INSERT INTO clients (client_id, client_name, dashboard_subdomain, submitter_email, status, created_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+    `, [clientId, clientName, finalSubdomain, adminEmail.toLowerCase(), 'active']);
 
     // Create pharmacy
     const pharmacyId = uuidv4();
