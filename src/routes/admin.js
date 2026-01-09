@@ -1038,13 +1038,17 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
     const pharmacyName = pharmacyResult.rows[0].pharmacy_name;
 
     // Load all prescriptions for this pharmacy with patient info
+    // Use Gross Profit from raw_data if available, otherwise calculate from components
     const rxResult = await db.query(`
       SELECT
         r.prescription_id, r.patient_id, r.drug_name, r.ndc,
         r.quantity_dispensed as quantity, r.days_supply,
         r.dispensed_date, r.insurance_bin as bin, r.insurance_pcn as pcn,
         r.insurance_group as group_number,
-        COALESCE(r.insurance_pay, 0) + COALESCE(r.patient_pay, 0) - COALESCE(r.acquisition_cost, 0) as gross_profit,
+        COALESCE(
+          (r.raw_data->>'Gross Profit')::numeric,
+          COALESCE(r.insurance_pay, 0) + COALESCE(r.patient_pay, 0) - COALESCE(r.acquisition_cost, 0)
+        ) as gross_profit,
         r.daw_code, r.sig, r.prescriber_name,
         p.first_name as patient_first_name, p.last_name as patient_last_name,
         p.primary_insurance_bin
@@ -1213,8 +1217,9 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
             INSERT INTO opportunities (
               opportunity_id, pharmacy_id, patient_id, opportunity_type,
               current_drug_name, recommended_drug_name, potential_margin_gain,
-              annual_margin_gain, status, clinical_priority, clinical_rationale, staff_notes
-            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+              annual_margin_gain, current_margin, prescriber_name,
+              status, clinical_priority, clinical_rationale, staff_notes
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
           `, [
             pharmacyId,
             patientId,
@@ -1223,6 +1228,8 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
             trigger.recommended_drug,
             netGain,
             annualValue,
+            currentGP,
+            matchedRx?.prescriber_name || null,
             'Not Submitted',
             trigger.priority || 'medium',
             rationale,
