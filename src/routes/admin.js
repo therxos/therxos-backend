@@ -1115,12 +1115,18 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
     let newAuditFlags = 0;
     let skippedAuditFlags = 0;
 
+    // Global BIN exclusions (cash BINs that shouldn't trigger opportunities)
+    const EXCLUDED_BINS = ['014798'];
+
     // Scan for opportunities
     if (scanType === 'all' || scanType === 'opportunities') {
       for (const [patientId, patientRxs] of patientRxMap) {
         const patientDrugs = patientRxs.map(rx => rx.drug_name?.toUpperCase() || '');
         const patientBin = patientRxs[0]?.bin;
         const patientGroup = patientRxs[0]?.group_number;
+
+        // Skip globally excluded BINs (e.g., cash)
+        if (EXCLUDED_BINS.includes(patientBin)) continue;
 
         for (const trigger of triggers) {
           // Check detection keywords
@@ -1184,7 +1190,13 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
 
           // Create new opportunity
           const annualFills = trigger.annual_fills || 12;
-          const annualValue = gpValue * annualFills;
+          // Calculate net gain: expected GP - current GP from prescription
+          const currentGP = matchedRx?.gross_profit || 0;
+          const netGain = gpValue - currentGP;
+          const annualValue = netGain * annualFills;
+
+          // Use action_instructions for clinical rationale (what staff should do)
+          const rationale = trigger.action_instructions || trigger.clinical_rationale || `${trigger.display_name || trigger.trigger_type} opportunity`;
 
           await db.query(`
             INSERT INTO opportunities (
@@ -1198,11 +1210,11 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
             trigger.trigger_type,
             matchedDrug,
             trigger.recommended_drug,
-            gpValue,
+            netGain,
             annualValue,
             'Not Submitted',
             trigger.priority || 'medium',
-            trigger.clinical_rationale || `${trigger.trigger_type} opportunity detected`,
+            rationale,
             `Auto-detected by rescan on ${new Date().toISOString().split('T')[0]}`
           ]);
 
