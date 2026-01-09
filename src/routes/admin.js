@@ -1462,7 +1462,7 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
       await txClient.query(`
         INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-      `, [userId, clientId, pharmacyId, adminEmail.toLowerCase(), passwordHash, adminFirstName || 'Admin', adminLastName || '', 'owner', true, true]);
+      `, [userId, clientId, pharmacyId, adminEmail.toLowerCase(), passwordHash, adminFirstName || 'Admin', adminLastName || '', 'admin', true, true]);
     });
 
     console.log('New client created by super admin:', { clientId, clientName, pharmacyId });
