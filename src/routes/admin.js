@@ -1445,11 +1445,18 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
         VALUES ($1, $2, $3, $4, $5, NOW())
       `, [clientId, clientName, finalSubdomain, adminEmail.toLowerCase(), 'active']);
 
-      // Create pharmacy
+      // Create pharmacy (trim state to 2 chars, NPI to 10)
       await txClient.query(`
         INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, pharmacy_npi, state, pms_system, created_at)
         VALUES ($1, $2, $3, $4, $5, $6, NOW())
-      `, [pharmacyId, clientId, pharmacyName || clientName, pharmacyNpi || null, pharmacyState || null, pmsSystem || null]);
+      `, [
+        pharmacyId,
+        clientId,
+        pharmacyName || clientName,
+        pharmacyNpi ? pharmacyNpi.slice(0, 10) : null,
+        pharmacyState ? pharmacyState.slice(0, 2).toUpperCase() : null,
+        pmsSystem || null
+      ]);
 
       // Create admin user
       await txClient.query(`
