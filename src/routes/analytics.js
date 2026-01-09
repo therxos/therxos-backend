@@ -539,6 +539,8 @@ router.get('/audit-flags', authenticateToken, async (req, res) => {
     const pharmacyId = req.user.pharmacyId;
     const { status, severity, limit = 100, offset = 0 } = req.query;
 
+    console.log('Fetching audit flags for pharmacy:', pharmacyId);
+
     let query = `
       SELECT
         af.*,
@@ -598,8 +600,13 @@ router.get('/audit-flags', authenticateToken, async (req, res) => {
       }
     });
   } catch (error) {
-    logger.error('Fetch audit flags error', { error: error.message });
-    res.status(500).json({ error: 'Failed to fetch audit flags' });
+    logger.error('Fetch audit flags error', { error: error.message, stack: error.stack });
+    // Return more details in dev/debug scenarios
+    res.status(500).json({
+      error: 'Failed to fetch audit flags',
+      details: error.message,
+      pharmacyId: req.user?.pharmacyId
+    });
   }
 });
 
