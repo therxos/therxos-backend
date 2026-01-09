@@ -33,7 +33,7 @@ router.get('/', authenticateToken, async (req, res) => {
         pr.contract_id,
         pr.plan_name,
         COALESCE(o.current_drug_name, pr.drug_name) as current_drug,
-        pr.prescriber_name,
+        COALESCE(o.prescriber_name, pr.prescriber_name) as prescriber_name,
         COALESCE(o.potential_margin_gain, 0) as potential_margin_gain,
         COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0) as annual_margin_gain
       FROM opportunities o
