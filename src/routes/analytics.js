@@ -596,12 +596,27 @@ router.get('/audit-flags', authenticateToken, async (req, res) => {
       GROUP BY severity
     `, [pharmacyId]);
 
+    // Debug: check what pharmacy_ids exist in audit_flags
+    const debugResult = await db.query(`
+      SELECT DISTINCT af.pharmacy_id, ph.pharmacy_name, COUNT(*) as flag_count
+      FROM audit_flags af
+      LEFT JOIN pharmacies ph ON ph.pharmacy_id = af.pharmacy_id
+      GROUP BY af.pharmacy_id, ph.pharmacy_name
+    `);
+
     res.json({
       flags: result.rows,
       total: result.rows.length,
       counts: {
         byStatus: countsResult.rows.reduce((acc, r) => ({ ...acc, [r.status]: parseInt(r.count) }), {}),
         bySeverity: severityResult.rows.reduce((acc, r) => ({ ...acc, [r.severity]: parseInt(r.count) }), {})
+      },
+      debug: {
+        requestedPharmacyId: pharmacyId,
+        userRole: req.user.role,
+        queryParamPharmacyId: req.query.pharmacyId,
+        userPharmacyId: req.user.pharmacyId,
+        allPharmaciesWithFlags: debugResult.rows
       }
     });
   } catch (error) {
