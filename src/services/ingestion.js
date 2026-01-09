@@ -48,23 +48,25 @@ const PMS_COLUMN_MAPPINGS = {
   },
   pioneerrx: {
     rx_number: ['Rx Number', 'RxNumber', 'RX_NUM'],
-    ndc: ['NDC', 'NDC11', 'Product NDC'],
-    drug_name: ['Drug Name', 'DrugName', 'Medication'],
-    quantity_dispensed: ['Qty', 'Quantity', 'Qty Dispensed', 'QuantityDispensed'],
+    ndc: ['NDC', 'NDC11', 'Product NDC', 'Dispensed Item NDC'],
+    drug_name: ['Drug Name', 'DrugName', 'Medication', 'Dispensed Item Name'],
+    quantity_dispensed: ['Qty', 'Quantity', 'Qty Dispensed', 'QuantityDispensed', 'Dispensed Quantity'],
     days_supply: ['Days Supply', 'DaysSupply', 'Days'],
     daw_code: ['DAW', 'DAW Code', 'DAWCode'],
     prescriber_npi: ['Prescriber NPI', 'PrescriberNPI', 'Doctor NPI'],
-    prescriber_name: ['Prescriber', 'Prescriber Name', 'Doctor'],
+    prescriber_name: ['Prescriber', 'Prescriber Name', 'Doctor', 'Prescriber Full Name'],
     patient_first: ['Patient First', 'FirstName', 'Patient First Name'],
     patient_last: ['Patient Last', 'LastName', 'Patient Last Name'],
+    patient_full_name: ['Patient Full Name', 'Patient Name', 'PatientName'],
     patient_dob: ['DOB', 'Date of Birth', 'BirthDate'],
     patient_zip: ['Zip', 'ZIP', 'Patient Zip'],
-    insurance_bin: ['BIN', 'Insurance BIN', 'Ins BIN'],
-    insurance_pcn: ['PCN', 'Insurance PCN', 'Ins PCN'],
-    insurance_group: ['Group', 'Insurance Group', 'Group ID', 'GroupID'],
-    patient_pay: ['Patient Pay', 'Copay', 'Patient Cost', 'PatientPay'],
+    insurance_bin: ['BIN', 'Insurance BIN', 'Ins BIN', 'Primary Third Party Bin'],
+    insurance_pcn: ['PCN', 'Insurance PCN', 'Ins PCN', 'Primary Third Party PCN'],
+    insurance_group: ['Group', 'Insurance Group', 'Group ID', 'GroupID', 'Primary Group Number'],
+    patient_pay: ['Patient Pay', 'Copay', 'Patient Cost', 'PatientPay', 'Primary Copay Amount', 'Patient Paid Amount'],
     insurance_pay: ['Insurance Pay', 'Ins Pay', 'Third Party Pay'],
     acquisition_cost: ['ACQ', 'Acquisition Cost', 'Cost'],
+    gross_profit: ['Gross Profit', 'GP', 'Profit'],
     sig: ['SIG', 'Directions', 'Instructions'],
     dispensed_date: ['Fill Date', 'Dispensed Date', 'Date Filled', 'DateFilled'],
     written_date: ['Written Date', 'Rx Date', 'DateWritten'],
@@ -378,8 +380,24 @@ export async function ingestCSV(buffer, options = {}) {
       
       try {
         // Map columns to standardized fields
-        const patientFirst = findColumnValue(row, mappings.patient_first);
-        const patientLast = findColumnValue(row, mappings.patient_last);
+        let patientFirst = findColumnValue(row, mappings.patient_first);
+        let patientLast = findColumnValue(row, mappings.patient_last);
+
+        // Handle combined "Patient Full Name" field
+        if (!patientFirst && !patientLast && mappings.patient_full_name) {
+          const fullName = findColumnValue(row, mappings.patient_full_name);
+          if (fullName) {
+            const nameParts = fullName.trim().split(/\s+/);
+            if (nameParts.length >= 2) {
+              patientFirst = nameParts[0];
+              patientLast = nameParts.slice(1).join(' ');
+            } else {
+              patientFirst = fullName;
+              patientLast = '';
+            }
+          }
+        }
+
         const patientDob = parseDate(findColumnValue(row, mappings.patient_dob));
         const patientHash = generatePatientHash(patientFirst, patientLast, patientDob);
 
@@ -415,6 +433,7 @@ export async function ingestCSV(buffer, options = {}) {
           patient_pay: parseFloat(findColumnValue(row, mappings.patient_pay)) || null,
           insurance_pay: parseFloat(findColumnValue(row, mappings.insurance_pay)) || null,
           acquisition_cost: parseFloat(findColumnValue(row, mappings.acquisition_cost)) || null,
+          gross_profit: parseFloat(findColumnValue(row, mappings.gross_profit)) || null,
           sig: findColumnValue(row, mappings.sig),
           dispensed_date: parseDate(findColumnValue(row, mappings.dispensed_date)),
           written_date: parseDate(findColumnValue(row, mappings.written_date)),
@@ -498,18 +517,18 @@ export async function ingestCSV(buffer, options = {}) {
             prescription_id, pharmacy_id, patient_id, rx_number, ndc, drug_name,
             quantity_dispensed, days_supply, daw_code, prescriber_npi, prescriber_name,
             insurance_bin, insurance_pcn, insurance_group, patient_pay, insurance_pay,
-            acquisition_cost, sig, dispensed_date, written_date, refills_remaining,
+            acquisition_cost, gross_profit, sig, dispensed_date, written_date, refills_remaining,
             source, source_file, raw_data
           ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-            $17, $18, $19, $20, $21, $22, $23, $24
+            $17, $18, $19, $20, $21, $22, $23, $24, $25
           )
           ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO NOTHING
         `, [
           rx.prescription_id, rx.pharmacy_id, rx.patient_id, rx.rx_number, rx.ndc, rx.drug_name,
           rx.quantity_dispensed, rx.days_supply, rx.daw_code, rx.prescriber_npi, rx.prescriber_name,
           rx.insurance_bin, rx.insurance_pcn, rx.insurance_group, rx.patient_pay, rx.insurance_pay,
-          rx.acquisition_cost, rx.sig, rx.dispensed_date, rx.written_date, rx.refills_remaining,
+          rx.acquisition_cost, rx.gross_profit, rx.sig, rx.dispensed_date, rx.written_date, rx.refills_remaining,
           rx.source, rx.source_file, JSON.stringify(rx.raw_data)
         ]);
         insertedCount++;
