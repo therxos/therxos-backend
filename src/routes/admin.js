@@ -1045,7 +1045,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
         r.dispensed_date, r.insurance_bin as bin, r.insurance_pcn as pcn,
         r.insurance_group as group_number,
         COALESCE(r.insurance_pay, 0) + COALESCE(r.patient_pay, 0) - COALESCE(r.acquisition_cost, 0) as gross_profit,
-        r.daw_code, r.sig,
+        r.daw_code, r.sig, r.prescriber_name,
         p.first_name as patient_first_name, p.last_name as patient_last_name
       FROM prescriptions r
       JOIN patients p ON p.patient_id = r.patient_id
@@ -1156,6 +1156,10 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
 
           if (!matchedDrug) continue;
 
+          // Check if matched prescription's BIN is globally excluded (e.g., cash)
+          const matchedBin = matchedRx?.bin;
+          if (EXCLUDED_BINS.includes(matchedBin)) continue;
+
           // Check IF_HAS condition (patient must have these drugs)
           if (ifHasKeywords.length > 0) {
             const hasRequired = ifHasKeywords.some(kw =>
@@ -1194,6 +1198,12 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           const currentGP = matchedRx?.gross_profit || 0;
           const netGain = gpValue - currentGP;
           const annualValue = netGain * annualFills;
+
+          // Skip if no positive net gain (not worthwhile to switch)
+          if (netGain <= 0) {
+            console.log(`Skipping ${matchedDrug}: netGain=${netGain} (expected ${gpValue} - current ${currentGP})`);
+            continue;
+          }
 
           // Use action_instructions for clinical rationale (what staff should do)
           const rationale = trigger.action_instructions || trigger.clinical_rationale || `${trigger.display_name || trigger.trigger_type} opportunity`;
