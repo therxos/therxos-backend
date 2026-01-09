@@ -1369,7 +1369,6 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
       clientName,
       pharmacyName,
       pharmacyNpi,
-      pharmacyNcpdp,
       pharmacyState,
       adminEmail,
       adminFirstName,
@@ -1407,38 +1406,57 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
       return res.status(400).json({ error: 'A user with this email already exists' });
     }
 
-    // Check if email already exists in clients
-    const existingClient = await db.query(
+    // Check if email already exists in clients (delete orphans from failed attempts)
+    const existingClientResult = await db.query(
       'SELECT client_id FROM clients WHERE submitter_email = $1',
       [adminEmail.toLowerCase()]
     );
-    if (existingClient.rows.length > 0) {
-      return res.status(400).json({ error: 'A client with this email already exists' });
+    if (existingClientResult.rows.length > 0) {
+      // Check if this is an orphan (no pharmacy or user associated)
+      const orphanCheck = await db.query(`
+        SELECT c.client_id,
+          (SELECT COUNT(*) FROM pharmacies WHERE client_id = c.client_id) as pharmacy_count,
+          (SELECT COUNT(*) FROM users WHERE client_id = c.client_id) as user_count
+        FROM clients c WHERE c.submitter_email = $1
+      `, [adminEmail.toLowerCase()]);
+
+      const orphan = orphanCheck.rows[0];
+      if (orphan && parseInt(orphan.pharmacy_count) === 0 && parseInt(orphan.user_count) === 0) {
+        // Delete orphan client from failed previous attempt
+        await db.query('DELETE FROM clients WHERE client_id = $1', [orphan.client_id]);
+        console.log('Deleted orphan client:', orphan.client_id);
+      } else {
+        return res.status(400).json({ error: 'A client with this email already exists' });
+      }
     }
 
-    // Create client
+    // Generate IDs and password before transaction
     const clientId = uuidv4();
-    await db.query(`
-      INSERT INTO clients (client_id, client_name, dashboard_subdomain, submitter_email, status, created_at)
-      VALUES ($1, $2, $3, $4, $5, NOW())
-    `, [clientId, clientName, finalSubdomain, adminEmail.toLowerCase(), 'active']);
-
-    // Create pharmacy
     const pharmacyId = uuidv4();
-    await db.query(`
-      INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, pharmacy_npi, state, pms_system, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW())
-    `, [pharmacyId, clientId, pharmacyName || clientName, pharmacyNpi || null, pharmacyState || null, pmsSystem || null]);
-
-    // Create admin user with temp password
+    const userId = uuidv4();
     const tempPassword = uuidv4().slice(0, 12);
     const passwordHash = await bcrypt.hash(tempPassword, 12);
-    const userId = uuidv4();
 
-    await db.query(`
-      INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-    `, [userId, clientId, pharmacyId, adminEmail.toLowerCase(), passwordHash, adminFirstName || 'Admin', adminLastName || '', 'owner', true, true]);
+    // Use transaction helper for atomic operation
+    await db.transaction(async (txClient) => {
+      // Create client
+      await txClient.query(`
+        INSERT INTO clients (client_id, client_name, dashboard_subdomain, submitter_email, status, created_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+      `, [clientId, clientName, finalSubdomain, adminEmail.toLowerCase(), 'active']);
+
+      // Create pharmacy
+      await txClient.query(`
+        INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, pharmacy_npi, state, pms_system, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `, [pharmacyId, clientId, pharmacyName || clientName, pharmacyNpi || null, pharmacyState || null, pmsSystem || null]);
+
+      // Create admin user
+      await txClient.query(`
+        INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+      `, [userId, clientId, pharmacyId, adminEmail.toLowerCase(), passwordHash, adminFirstName || 'Admin', adminLastName || '', 'owner', true, true]);
+    });
 
     console.log('New client created by super admin:', { clientId, clientName, pharmacyId });
 
