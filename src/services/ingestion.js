@@ -517,18 +517,18 @@ export async function ingestCSV(buffer, options = {}) {
             prescription_id, pharmacy_id, patient_id, rx_number, ndc, drug_name,
             quantity_dispensed, days_supply, daw_code, prescriber_npi, prescriber_name,
             insurance_bin, insurance_pcn, insurance_group, patient_pay, insurance_pay,
-            acquisition_cost, gross_profit, sig, dispensed_date, written_date, refills_remaining,
+            acquisition_cost, sig, dispensed_date, written_date, refills_remaining,
             source, source_file, raw_data
           ) VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-            $17, $18, $19, $20, $21, $22, $23, $24, $25
+            $17, $18, $19, $20, $21, $22, $23, $24
           )
           ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO NOTHING
         `, [
           rx.prescription_id, rx.pharmacy_id, rx.patient_id, rx.rx_number, rx.ndc, rx.drug_name,
           rx.quantity_dispensed, rx.days_supply, rx.daw_code, rx.prescriber_npi, rx.prescriber_name,
           rx.insurance_bin, rx.insurance_pcn, rx.insurance_group, rx.patient_pay, rx.insurance_pay,
-          rx.acquisition_cost, rx.gross_profit, rx.sig, rx.dispensed_date, rx.written_date, rx.refills_remaining,
+          rx.acquisition_cost, rx.sig, rx.dispensed_date, rx.written_date, rx.refills_remaining,
           rx.source, rx.source_file, JSON.stringify(rx.raw_data)
         ]);
         insertedCount++;
