@@ -283,6 +283,30 @@ function parseDate(dateStr) {
 }
 
 /**
+ * Pad BIN to 6 digits (always 6 chars, left-padded with zeros)
+ */
+function padBIN(bin) {
+  if (!bin) return null;
+  const cleaned = bin.toString().replace(/\D/g, '');
+  if (!cleaned) return null;
+  return cleaned.padStart(6, '0').slice(0, 6);
+}
+
+/**
+ * Pad PCN to 3 digits (always 3 chars, left-padded with zeros)
+ */
+function padPCN(pcn) {
+  if (!pcn) return null;
+  const cleaned = pcn.toString().trim();
+  if (!cleaned) return null;
+  // PCN can have letters, so just pad with zeros if it's numeric
+  if (/^\d+$/.test(cleaned)) {
+    return cleaned.padStart(3, '0');
+  }
+  return cleaned; // Keep as-is if alphanumeric
+}
+
+/**
  * Generate a deterministic patient hash from identifiable info
  * This anonymizes patient data while allowing for deduplication
  */
@@ -410,8 +434,8 @@ export async function ingestCSV(buffer, options = {}) {
             last_name: patientLast,
             date_of_birth: patientDob,
             zip_code: findColumnValue(row, mappings.patient_zip),
-            primary_insurance_bin: findColumnValue(row, mappings.insurance_bin),
-            primary_insurance_pcn: findColumnValue(row, mappings.insurance_pcn),
+            primary_insurance_bin: padBIN(findColumnValue(row, mappings.insurance_bin)),
+            primary_insurance_pcn: padPCN(findColumnValue(row, mappings.insurance_pcn)),
             primary_insurance_group: findColumnValue(row, mappings.insurance_group)
           });
         }
@@ -427,8 +451,8 @@ export async function ingestCSV(buffer, options = {}) {
           daw_code: findColumnValue(row, mappings.daw_code),
           prescriber_npi: findColumnValue(row, mappings.prescriber_npi),
           prescriber_name: findColumnValue(row, mappings.prescriber_name),
-          insurance_bin: findColumnValue(row, mappings.insurance_bin),
-          insurance_pcn: findColumnValue(row, mappings.insurance_pcn),
+          insurance_bin: padBIN(findColumnValue(row, mappings.insurance_bin)),
+          insurance_pcn: padPCN(findColumnValue(row, mappings.insurance_pcn)),
           insurance_group: findColumnValue(row, mappings.insurance_group),
           patient_pay: parseFloat(findColumnValue(row, mappings.patient_pay)) || null,
           insurance_pay: parseFloat(findColumnValue(row, mappings.insurance_pay)) || null,
