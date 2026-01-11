@@ -1084,14 +1084,14 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
     console.log(`Loaded ${auditRules.length} enabled audit rules`);
 
     // Get existing opportunities to avoid duplicates
-    // Use opportunity_type + current_drug_name as the dedup key
+    // Use opportunity_type + current_drug_name as the dedup key (handle NULL drug names)
     const existingOppsResult = await db.query(`
-      SELECT patient_id, opportunity_type, current_drug_name
+      SELECT patient_id, opportunity_type, COALESCE(current_drug_name, '') as current_drug_name
       FROM opportunities
       WHERE pharmacy_id = $1
     `, [pharmacyId]);
     const existingOpps = new Set(
-      existingOppsResult.rows.map(o => `${o.patient_id}|${o.opportunity_type}|${o.current_drug_name?.toUpperCase()}`)
+      existingOppsResult.rows.map(o => `${o.patient_id}|${o.opportunity_type}|${(o.current_drug_name || '').toUpperCase()}`)
     );
     console.log(`Found ${existingOpps.size} existing opportunities`);
 
@@ -1191,7 +1191,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           }
 
           // Check if opportunity already exists (using opportunity_type + drug as key)
-          const oppKey = `${patientId}|${trigger.trigger_type}|${matchedDrug.toUpperCase()}`;
+          const oppKey = `${patientId}|${trigger.trigger_type}|${(matchedDrug || '').toUpperCase()}`;
           if (existingOpps.has(oppKey)) {
             skippedOpportunities++;
             continue;

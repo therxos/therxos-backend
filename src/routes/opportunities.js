@@ -71,7 +71,7 @@ router.get('/', authenticateToken, async (req, res) => {
       type: 'o.opportunity_type'
     }[sortBy] || 'o.potential_margin_gain';
 
-    query += ` ORDER BY ${sortColumn} ${sortOrder === 'asc' ? 'ASC' : 'DESC'}`;
+    query += ` ORDER BY ${sortColumn} ${sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST`;
     query += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
     params.push(parseInt(limit), parseInt(offset));
 
