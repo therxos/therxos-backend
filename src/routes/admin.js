@@ -1189,23 +1189,26 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
           if (binConfig.gp_value) gpValue = binConfig.gp_value;
         }
 
-        // Dedup check
-        const oppKey = `${patientId}|${trigger.trigger_type}|${(matchedDrug || '').toUpperCase()}`;
+        // Dedup check - use trigger_code for matching
+        const oppKey = `${patientId}|${trigger.trigger_code}|${(matchedDrug || '').toUpperCase()}`;
         if (existingOpps.has(oppKey)) {
           pharmacySkipped++;
           continue;
         }
 
         // Calculate value
+        // For ADD-ON triggers (trigger name contains "ADD ON" or "ADD-ON"), GP is purely additive
+        const isAddOn = (trigger.display_name || '').toUpperCase().includes('ADD ON') ||
+                        (trigger.display_name || '').toUpperCase().includes('ADD-ON');
         const currentGP = matchedRx?.gross_profit || 0;
-        const netGain = gpValue - currentGP;
+        const netGain = isAddOn ? gpValue : (gpValue - currentGP);
         if (netGain <= 0) continue;
 
         const annualFills = trigger.annual_fills || 12;
         const annualValue = netGain * annualFills;
         const rationale = trigger.action_instructions || trigger.clinical_rationale || `${trigger.display_name || trigger.trigger_type} opportunity`;
 
-        // Insert opportunity
+        // Insert opportunity - use trigger_code as opportunity_type for tracking
         await db.query(`
           INSERT INTO opportunities (
             opportunity_id, pharmacy_id, patient_id, opportunity_type,
@@ -1214,7 +1217,7 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
             status, clinical_priority, clinical_rationale, staff_notes
           ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         `, [
-          pharmacy.pharmacy_id, patientId, trigger.trigger_type,
+          pharmacy.pharmacy_id, patientId, trigger.trigger_code,
           matchedDrug, trigger.recommended_drug, netGain, annualValue,
           currentGP, matchedRx?.prescriber_name || null,
           'Not Submitted', trigger.priority || 'medium', rationale,
