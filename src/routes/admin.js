@@ -789,6 +789,205 @@ router.delete('/triggers/:id/bin-values/:bin', authenticateToken, requireSuperAd
   }
 });
 
+// POST /api/admin/triggers/:id/scan - Scan all active pharmacies for a specific trigger
+router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (req, res) => {
+  const { id: triggerId } = req.params;
+  const { pharmacyId = null } = req.body; // Optional: limit to specific pharmacy
+
+  try {
+    // Verify trigger exists and is enabled
+    const triggerResult = await db.query(`
+      SELECT t.*,
+        COALESCE(
+          json_agg(
+            json_build_object('bin', tbv.insurance_bin, 'gp_value', tbv.gp_value, 'is_excluded', tbv.is_excluded)
+          ) FILTER (WHERE tbv.id IS NOT NULL),
+          '[]'
+        ) as bin_values
+      FROM triggers t
+      LEFT JOIN trigger_bin_values tbv ON t.trigger_id = tbv.trigger_id
+      WHERE t.trigger_id = $1
+      GROUP BY t.trigger_id
+    `, [triggerId]);
+
+    if (triggerResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+    const trigger = triggerResult.rows[0];
+
+    if (!trigger.is_enabled) {
+      return res.status(400).json({ error: 'Trigger is disabled. Enable it first.' });
+    }
+
+    // Get pharmacies to scan
+    let pharmaciesQuery = `
+      SELECT p.pharmacy_id, p.pharmacy_name
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE p.is_active = true AND c.status = 'active'
+      AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%hero%'
+    `;
+    const pharmaciesParams = [];
+    if (pharmacyId) {
+      pharmaciesQuery += ' AND p.pharmacy_id = $1';
+      pharmaciesParams.push(pharmacyId);
+    }
+    const pharmaciesResult = await db.query(pharmaciesQuery, pharmaciesParams);
+    const pharmacies = pharmaciesResult.rows;
+
+    console.log(`Scanning trigger "${trigger.display_name}" across ${pharmacies.length} pharmacy(ies)`);
+
+    // Global BIN exclusions
+    const EXCLUDED_BINS = ['014798'];
+
+    let totalNewOpportunities = 0;
+    let totalSkipped = 0;
+    const pharmacyResults = [];
+
+    for (const pharmacy of pharmacies) {
+      // Load prescriptions for this pharmacy
+      const rxResult = await db.query(`
+        SELECT
+          r.prescription_id, r.patient_id, r.drug_name, r.ndc,
+          r.insurance_bin as bin, r.prescriber_name,
+          COALESCE(
+            (r.raw_data->>'Gross Profit')::numeric,
+            COALESCE(r.insurance_pay, 0) + COALESCE(r.patient_pay, 0) - COALESCE(r.acquisition_cost, 0)
+          ) as gross_profit,
+          p.primary_insurance_bin
+        FROM prescriptions r
+        JOIN patients p ON p.patient_id = r.patient_id
+        WHERE r.pharmacy_id = $1
+        ORDER BY r.patient_id, r.dispensed_date DESC
+      `, [pharmacy.pharmacy_id]);
+
+      // Get existing opportunities for dedup
+      const existingOppsResult = await db.query(`
+        SELECT patient_id, opportunity_type, COALESCE(current_drug_name, '') as current_drug_name
+        FROM opportunities WHERE pharmacy_id = $1
+      `, [pharmacy.pharmacy_id]);
+      const existingOpps = new Set(
+        existingOppsResult.rows.map(o => `${o.patient_id}|${o.opportunity_type}|${(o.current_drug_name || '').toUpperCase()}`)
+      );
+
+      // Group by patient
+      const patientRxMap = new Map();
+      for (const rx of rxResult.rows) {
+        if (!patientRxMap.has(rx.patient_id)) {
+          patientRxMap.set(rx.patient_id, []);
+        }
+        patientRxMap.get(rx.patient_id).push(rx);
+      }
+
+      let pharmacyNewOpps = 0;
+      let pharmacySkipped = 0;
+
+      // Scan each patient for this trigger
+      for (const [patientId, patientRxs] of patientRxMap) {
+        const patientPrimaryBin = patientRxs[0]?.primary_insurance_bin;
+        if (EXCLUDED_BINS.includes(patientPrimaryBin)) continue;
+
+        const patientDrugs = patientRxs.map(rx => rx.drug_name?.toUpperCase() || '');
+        const detectKeywords = trigger.detection_keywords || [];
+        const excludeKeywords = trigger.exclude_keywords || [];
+        const ifHasKeywords = trigger.if_has_keywords || [];
+        const ifNotHasKeywords = trigger.if_not_has_keywords || [];
+
+        // Find matching drug
+        let matchedDrug = null;
+        let matchedRx = null;
+        for (const rx of patientRxs) {
+          const drugUpper = rx.drug_name?.toUpperCase() || '';
+          const matchesDetect = detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+          if (!matchesDetect) continue;
+          const matchesExclude = excludeKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+          if (matchesExclude) continue;
+          matchedDrug = rx.drug_name;
+          matchedRx = rx;
+          break;
+        }
+
+        if (!matchedDrug) continue;
+
+        // Check IF_HAS / IF_NOT_HAS conditions
+        if (ifHasKeywords.length > 0) {
+          const hasRequired = ifHasKeywords.some(kw => patientDrugs.some(d => d.includes(kw.toUpperCase())));
+          if (!hasRequired) continue;
+        }
+        if (ifNotHasKeywords.length > 0) {
+          const hasForbidden = ifNotHasKeywords.some(kw => patientDrugs.some(d => d.includes(kw.toUpperCase())));
+          if (hasForbidden) continue;
+        }
+
+        // Get GP value
+        let gpValue = trigger.default_gp_value || 50;
+        const binValues = trigger.bin_values || [];
+        const binConfig = binValues.find(bv => bv.bin === patientRxs[0]?.bin);
+        if (binConfig) {
+          if (binConfig.is_excluded) continue;
+          if (binConfig.gp_value) gpValue = binConfig.gp_value;
+        }
+
+        // Dedup check
+        const oppKey = `${patientId}|${trigger.trigger_type}|${(matchedDrug || '').toUpperCase()}`;
+        if (existingOpps.has(oppKey)) {
+          pharmacySkipped++;
+          continue;
+        }
+
+        // Calculate value
+        const currentGP = matchedRx?.gross_profit || 0;
+        const netGain = gpValue - currentGP;
+        if (netGain <= 0) continue;
+
+        const annualFills = trigger.annual_fills || 12;
+        const annualValue = netGain * annualFills;
+        const rationale = trigger.action_instructions || trigger.clinical_rationale || `${trigger.display_name || trigger.trigger_type} opportunity`;
+
+        // Insert opportunity
+        await db.query(`
+          INSERT INTO opportunities (
+            opportunity_id, pharmacy_id, patient_id, opportunity_type,
+            current_drug_name, recommended_drug_name, potential_margin_gain,
+            annual_margin_gain, current_margin, prescriber_name,
+            status, clinical_priority, clinical_rationale, staff_notes
+          ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        `, [
+          pharmacy.pharmacy_id, patientId, trigger.trigger_type,
+          matchedDrug, trigger.recommended_drug, netGain, annualValue,
+          currentGP, matchedRx?.prescriber_name || null,
+          'Not Submitted', trigger.priority || 'medium', rationale,
+          `Scanned for trigger "${trigger.display_name}" on ${new Date().toISOString().split('T')[0]}`
+        ]);
+
+        existingOpps.add(oppKey);
+        pharmacyNewOpps++;
+      }
+
+      totalNewOpportunities += pharmacyNewOpps;
+      totalSkipped += pharmacySkipped;
+      pharmacyResults.push({
+        pharmacyId: pharmacy.pharmacy_id,
+        pharmacyName: pharmacy.pharmacy_name,
+        newOpportunities: pharmacyNewOpps,
+        skipped: pharmacySkipped
+      });
+    }
+
+    res.json({
+      success: true,
+      trigger: { id: triggerId, name: trigger.display_name, type: trigger.trigger_type },
+      pharmaciesScanned: pharmacies.length,
+      totalNewOpportunities,
+      totalSkipped,
+      results: pharmacyResults
+    });
+  } catch (error) {
+    console.error('Error scanning trigger:', error);
+    res.status(500).json({ error: 'Failed to scan trigger: ' + error.message });
+  }
+});
+
 
 // ===========================================
 // AUDIT RULES ENDPOINTS
@@ -1022,10 +1221,10 @@ router.get('/audit-flags', authenticateToken, requireSuperAdmin, async (req, res
 // POST /api/admin/pharmacies/:id/rescan - Rescan a pharmacy for opportunities and audit risks
 router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, async (req, res) => {
   const { id: pharmacyId } = req.params;
-  const { scanType = 'all' } = req.body; // 'all', 'opportunities', 'audit'
+  const { scanType = 'all', triggerId = null } = req.body; // scanType: 'all', 'opportunities', 'audit'; triggerId: scan only this trigger
 
   try {
-    console.log(`Starting rescan for pharmacy ${pharmacyId}, type: ${scanType}`);
+    console.log(`Starting rescan for pharmacy ${pharmacyId}, type: ${scanType}${triggerId ? `, trigger: ${triggerId}` : ''}`);
 
     // Verify pharmacy exists
     const pharmacyResult = await db.query(
@@ -1061,8 +1260,8 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
     const prescriptions = rxResult.rows;
     console.log(`Loaded ${prescriptions.length} prescriptions`);
 
-    // Load enabled triggers
-    const triggersResult = await db.query(`
+    // Load enabled triggers (or just one if triggerId specified)
+    const triggersQuery = `
       SELECT t.*,
         COALESCE(
           json_agg(
@@ -1073,10 +1272,14 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
       FROM triggers t
       LEFT JOIN trigger_bin_values tbv ON t.trigger_id = tbv.trigger_id
       WHERE t.is_enabled = true
+      ${triggerId ? 'AND t.trigger_id = $1' : ''}
       GROUP BY t.trigger_id
-    `);
+    `;
+    const triggersResult = triggerId
+      ? await db.query(triggersQuery, [triggerId])
+      : await db.query(triggersQuery);
     const triggers = triggersResult.rows;
-    console.log(`Loaded ${triggers.length} enabled triggers`);
+    console.log(`Loaded ${triggers.length} trigger(s)${triggerId ? ` (filtered to ${triggerId})` : ''}`);
 
     // Load enabled audit rules
     const auditResult = await db.query('SELECT * FROM audit_rules WHERE is_enabled = true');
