@@ -895,7 +895,7 @@ router.get('/bins/:bin/groups', authenticateToken, requireSuperAdmin, async (req
 router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id: triggerId } = req.params;
-    const { minClaims = 1 } = req.body;
+    const { minClaims = 1, daysBack = 365 } = req.body;
 
     // Get trigger info
     const triggerResult = await db.query(
@@ -919,7 +919,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       });
     }
 
-    // Find matching completed claims from last 180 days (insurance_pay > 0 means paid)
+    // Find matching completed claims from last N days (default 365, configurable via daysBack param)
     let matchQuery;
     let matchParams;
 
@@ -938,12 +938,12 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         )
         AND insurance_pay > 0
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
-        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '180 days'
+        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $4
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $3
         ORDER BY most_recent_claim DESC, claim_count DESC
       `;
-      matchParams = [recommendedDrug, trigger.recommended_ndc, parseInt(minClaims)];
+      matchParams = [recommendedDrug, trigger.recommended_ndc, parseInt(minClaims), parseInt(daysBack)];
     } else {
       matchQuery = `
         SELECT
@@ -956,12 +956,12 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         WHERE UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
         AND insurance_pay > 0
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
-        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '180 days'
+        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $3
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $2
         ORDER BY most_recent_claim DESC, claim_count DESC
       `;
-      matchParams = [recommendedDrug, parseInt(minClaims)];
+      matchParams = [recommendedDrug, parseInt(minClaims), parseInt(daysBack)];
     }
 
     const matches = await db.query(matchQuery, matchParams);
