@@ -895,7 +895,7 @@ router.get('/bins/:bin/groups', authenticateToken, requireSuperAdmin, async (req
 router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id: triggerId } = req.params;
-    const { minClaims = 1, daysBack = 365, searchKeywords } = req.body;
+    const { minClaims = 1, daysBack = 365, searchKeywords, minMargin = 0 } = req.body;
 
     // Get trigger info
     const triggerResult = await db.query(
@@ -966,6 +966,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     // Calculate margin as: (insurance_pay + patient_pay) - acquisition_cost
     // matchParams already contains the keyword params from the loop above
+    // minMargin defaults to 10 but can be set to 0 for DME items like monitors
     if (trigger.recommended_ndc) {
       const ndcParamIndex = matchParams.length + 1;
       matchParams.push(trigger.recommended_ndc);
@@ -973,6 +974,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       matchParams.push(parseInt(minClaims));
       const daysBackParamIndex = matchParams.length + 1;
       matchParams.push(parseInt(daysBack));
+      const minMarginParamIndex = matchParams.length + 1;
+      matchParams.push(parseFloat(minMargin));
 
       matchQuery = `
         SELECT
@@ -990,7 +993,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $${minClaimsParamIndex}
-          AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= 10
+          AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= $${minMarginParamIndex}
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
     } else {
@@ -998,6 +1001,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       matchParams.push(parseInt(minClaims));
       const daysBackParamIndex = matchParams.length + 1;
       matchParams.push(parseInt(daysBack));
+      const minMarginParamIndex = matchParams.length + 1;
+      matchParams.push(parseFloat(minMargin));
 
       matchQuery = `
         SELECT
@@ -1012,7 +1017,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $${minClaimsParamIndex}
-          AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= 10
+          AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= $${minMarginParamIndex}
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
     }
