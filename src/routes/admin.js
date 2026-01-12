@@ -933,9 +933,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     console.log(`Using drug keywords for matching: ${JSON.stringify(drugWords)}`);
 
-    // Build dynamic WHERE clause to match ANY of the keywords
+    // Build dynamic WHERE clause to match ALL keywords
     // Each keyword uses %word% to match anywhere in drug name
-    const keywordConditions = drugWords.map((_, i) => `UPPER(drug_name) LIKE '%' || $${i + 1} || '%'`).join(' OR ');
+    const keywordConditions = drugWords.map((_, i) => `UPPER(drug_name) LIKE '%' || $${i + 1} || '%'`).join(' AND ');
 
     // Calculate margin as: (insurance_pay + patient_pay) - acquisition_cost
     if (trigger.recommended_ndc) {
