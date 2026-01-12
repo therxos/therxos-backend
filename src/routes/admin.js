@@ -899,7 +899,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     // Get trigger info
     const triggerResult = await db.query(
-      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name, verification_keywords FROM triggers WHERE trigger_id = $1',
+      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name FROM triggers WHERE trigger_id = $1',
       [triggerId]
     );
 
@@ -920,11 +920,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     let searchTerms = [];
 
     if (searchKeywords && Array.isArray(searchKeywords) && searchKeywords.length > 0) {
-      // Use keywords from request
+      // Use keywords from request body
       searchTerms = searchKeywords;
-    } else if (trigger.verification_keywords && Array.isArray(trigger.verification_keywords) && trigger.verification_keywords.length > 0) {
-      // Use keywords from trigger
-      searchTerms = trigger.verification_keywords;
     } else if (recommendedDrug) {
       // Parse from recommended_drug - use as single search term
       searchTerms = [recommendedDrug];
