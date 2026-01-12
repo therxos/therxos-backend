@@ -279,8 +279,8 @@ router.post('/pharmacy/:pharmacyId/users', authenticateToken, requireRole('super
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Validate role - admins can create pharmacist, technician, staff
-    const allowedRoles = ['pharmacist', 'technician', 'staff'];
+    // Validate role - admins can create pharmacist, technician
+    const allowedRoles = ['pharmacist', 'technician'];
     if (req.user.role === 'super_admin') {
       allowedRoles.push('admin');
     }
@@ -350,7 +350,7 @@ router.patch('/pharmacy/:pharmacyId/users/:userId', authenticateToken, requireRo
     let paramIndex = 1;
 
     if (role !== undefined) {
-      const allowedRoles = ['pharmacist', 'technician', 'staff'];
+      const allowedRoles = ['pharmacist', 'technician'];
       if (req.user.role === 'super_admin') allowedRoles.push('admin');
       if (!allowedRoles.includes(role)) {
         return res.status(400).json({ error: 'Invalid role' });
