@@ -402,7 +402,7 @@ Statuses from V1 are stored in `v1_status` and `v1_notes` columns. The main `sta
 - [ ] Logout causes client-side error (React hydration)
 - [ ] `/change-password` page returns 404
 - [ ] Stripe integration incomplete (needs keys)
-- [ ] Gmail polling for auto-capture not implemented
+- [x] Gmail polling for auto-capture - IMPLEMENTED, needs OAuth credentials (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET)
 - [ ] Aracoma Drug RX30 data import pending
 
 ---
