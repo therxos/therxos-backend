@@ -175,19 +175,16 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
     if (status) {
       updates.status = status;
 
-      // Statuses: Not Submitted, Submitted, Approved, Denied, Completed, Didn't Work, Flagged
+      // Always update actioned_at and actioned_by on any status change
+      updates.actioned_by = req.user.userId;
+      updates.actioned_at = new Date();
+
+      // Additional tracking for specific statuses
       if (status === 'Submitted') {
         updates.reviewed_by = req.user.userId;
         updates.reviewed_at = new Date();
-      } else if (status === 'Completed' || status === 'Approved') {
-        updates.actioned_by = req.user.userId;
-        updates.actioned_at = new Date();
       } else if (status === 'Denied') {
         updates.dismissed_reason = dismissedReason;
-      } else if (status === 'Flagged') {
-        // Note: flagged_by and flagged_at columns may not exist yet - just update status
-        // updates.flagged_by = req.user.userId;
-        // updates.flagged_at = new Date();
       }
     }
 
