@@ -946,6 +946,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $4
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $3
+          AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= 10
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
       matchParams = [drugKeyword, trigger.recommended_ndc, parseInt(minClaims), parseInt(daysBack)];
@@ -963,6 +964,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $3
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $2
+          AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= 10
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
       matchParams = [drugKeyword, parseInt(minClaims), parseInt(daysBack)];
@@ -1067,7 +1069,15 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
       SELECT t.*,
         COALESCE(
           json_agg(
-            json_build_object('bin', tbv.insurance_bin, 'gp_value', tbv.gp_value, 'is_excluded', tbv.is_excluded)
+            json_build_object(
+              'bin', tbv.insurance_bin,
+              'insurance_bin', tbv.insurance_bin,
+              'insurance_group', tbv.insurance_group,
+              'gp_value', tbv.gp_value,
+              'is_excluded', tbv.is_excluded,
+              'coverage_status', tbv.coverage_status,
+              'avg_reimbursement', tbv.avg_reimbursement
+            )
           ) FILTER (WHERE tbv.id IS NOT NULL),
           '[]'
         ) as bin_values
