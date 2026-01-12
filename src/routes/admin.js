@@ -1180,13 +1180,49 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
           if (hasForbidden) continue;
         }
 
-        // Get GP value
-        let gpValue = trigger.default_gp_value || 50;
+        // Get GP value - ONLY create opportunities for BINs with explicit pricing or verified reimbursement
         const binValues = trigger.bin_values || [];
-        const binConfig = binValues.find(bv => bv.bin === patientRxs[0]?.bin);
+        const patientBin = matchedRx?.insurance_bin || matchedRx?.bin || patientRxs[0]?.insurance_bin || patientRxs[0]?.bin;
+        const patientGroup = matchedRx?.insurance_group || matchedRx?.group_number || patientRxs[0]?.insurance_group || patientRxs[0]?.group_number;
+
+        // Try exact BIN + GROUP match first
+        let binConfig = binValues.find(bv =>
+          (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
+          bv.insurance_group === patientGroup
+        );
+
+        // If no exact match, try BIN-only match (group = null means "all groups")
+        if (!binConfig) {
+          binConfig = binValues.find(bv =>
+            (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
+            !bv.insurance_group
+          );
+        }
+
+        let gpValue;
         if (binConfig) {
-          if (binConfig.is_excluded) continue;
-          if (binConfig.gp_value) gpValue = binConfig.gp_value;
+          // Has explicit BIN config
+          if (binConfig.is_excluded || binConfig.coverage_status === 'excluded') {
+            pharmacySkipped++;
+            continue;
+          }
+          gpValue = binConfig.gp_value || binConfig.avg_reimbursement || trigger.default_gp_value || 50;
+        } else {
+          // No explicit pricing for this BIN - check if there's any verified coverage for it
+          const verifiedForBin = binValues.find(bv =>
+            (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
+            bv.coverage_status === 'verified' &&
+            bv.avg_reimbursement > 0
+          );
+
+          if (verifiedForBin) {
+            // Use verified reimbursement as GP
+            gpValue = verifiedForBin.avg_reimbursement;
+          } else {
+            // No explicit pricing AND no verified reimbursement - SKIP this BIN
+            pharmacySkipped++;
+            continue;
+          }
         }
 
         // Dedup check - use trigger_type for matching (matches DB constraint)
