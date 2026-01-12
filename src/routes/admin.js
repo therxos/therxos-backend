@@ -895,11 +895,11 @@ router.get('/bins/:bin/groups', authenticateToken, requireSuperAdmin, async (req
 router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id: triggerId } = req.params;
-    const { minClaims = 1, daysBack = 365 } = req.body;
+    const { minClaims = 1, daysBack = 365, searchKeywords } = req.body;
 
     // Get trigger info
     const triggerResult = await db.query(
-      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name FROM triggers WHERE trigger_id = $1',
+      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name, verification_keywords FROM triggers WHERE trigger_id = $1',
       [triggerId]
     );
 
@@ -912,36 +912,70 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     console.log(`Verifying coverage for trigger: ${trigger.display_name}, recommended_drug: "${recommendedDrug}", ndc: ${trigger.recommended_ndc || 'none'}`);
 
-    if (!recommendedDrug && !trigger.recommended_ndc) {
+    // Find matching completed claims from last N days (default 365, configurable via daysBack param)
+    let matchQuery;
+    let matchParams = [];
+
+    // Determine search terms - priority: request body > trigger field > parse recommended_drug
+    let searchTerms = [];
+
+    if (searchKeywords && Array.isArray(searchKeywords) && searchKeywords.length > 0) {
+      // Use keywords from request
+      searchTerms = searchKeywords;
+    } else if (trigger.verification_keywords && Array.isArray(trigger.verification_keywords) && trigger.verification_keywords.length > 0) {
+      // Use keywords from trigger
+      searchTerms = trigger.verification_keywords;
+    } else if (recommendedDrug) {
+      // Parse from recommended_drug - use as single search term
+      searchTerms = [recommendedDrug];
+    }
+
+    if (searchTerms.length === 0 && !trigger.recommended_ndc) {
       return res.status(400).json({
-        error: 'Trigger has no recommended drug or NDC set',
+        error: 'Trigger has no recommended drug, verification keywords, or NDC set',
         trigger: { id: triggerId, name: trigger.display_name }
       });
     }
 
-    // Find matching completed claims from last N days (default 365, configurable via daysBack param)
-    let matchQuery;
-    let matchParams;
+    // Filter out noise words but KEEP formulation words (tablet, cream, etc.) to prevent cross-formulation matches
+    const skipWords = ['mg', 'ml', 'mcg', 'er', 'sr', 'xr', 'dr', 'hcl', 'sodium', 'potassium', 'try', 'alternates', 'if', 'fails', 'before', 'saying', 'doesnt', 'work', 'the', 'and', 'for', 'with'];
 
-    // Extract significant words from recommended_drug for flexible matching
-    // Filter out common suffixes/dosage terms that won't help with matching
-    const skipWords = ['mg', 'ml', 'mcg', 'tablet', 'capsule', 'cap', 'tab', 'solution', 'cream', 'gel', 'patch', 'er', 'sr', 'xr', 'dr', 'hcl', 'sodium', 'potassium'];
-    const drugWords = recommendedDrug
-      .split(/[\s,.-]+/)
-      .map(w => w.trim().toUpperCase())
-      .filter(w => w.length > 2 && !skipWords.includes(w.toLowerCase()) && !/^\d+$/.test(w));
+    // Build search groups - each term becomes an AND group, groups are OR'd together
+    // Example: ["BLOOD PRESSURE MONITOR", "BP MONITOR", "BP CUFF"] becomes:
+    // (drug LIKE '%BLOOD%' AND drug LIKE '%PRESSURE%' AND drug LIKE '%MONITOR%')
+    // OR (drug LIKE '%BP%' AND drug LIKE '%MONITOR%')
+    // OR (drug LIKE '%BP%' AND drug LIKE '%CUFF%')
+    const searchGroups = [];
+    let paramIndex = 1;
 
-    console.log(`Using drug keywords for matching: ${JSON.stringify(drugWords)}`);
+    for (const term of searchTerms) {
+      const words = term
+        .split(/[\s,.\-\(\)\[\]]+/)
+        .map(w => w.trim().toUpperCase())
+        .filter(w => w.length >= 2 && !skipWords.includes(w.toLowerCase()) && !/^\d+$/.test(w));
 
-    // Build dynamic WHERE clause to match ALL keywords
-    // Each keyword uses %word% to match anywhere in drug name
-    const keywordConditions = drugWords.map((_, i) => `UPPER(drug_name) LIKE '%' || $${i + 1} || '%'`).join(' AND ');
+      if (words.length > 0) {
+        const groupConditions = words.map(word => {
+          matchParams.push(word);
+          return `UPPER(drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+        });
+        searchGroups.push(`(${groupConditions.join(' AND ')})`);
+      }
+    }
+
+    console.log(`Using search groups: ${JSON.stringify(searchTerms)} -> ${searchGroups.length} groups, ${matchParams.length} params`);
+
+    const keywordConditions = searchGroups.length > 0 ? searchGroups.join(' OR ') : null;
 
     // Calculate margin as: (insurance_pay + patient_pay) - acquisition_cost
+    // matchParams already contains the keyword params from the loop above
     if (trigger.recommended_ndc) {
-      const ndcParamIndex = drugWords.length + 1;
-      const minClaimsParamIndex = drugWords.length + 2;
-      const daysBackParamIndex = drugWords.length + 3;
+      const ndcParamIndex = matchParams.length + 1;
+      matchParams.push(trigger.recommended_ndc);
+      const minClaimsParamIndex = matchParams.length + 1;
+      matchParams.push(parseInt(minClaims));
+      const daysBackParamIndex = matchParams.length + 1;
+      matchParams.push(parseInt(daysBack));
 
       matchQuery = `
         SELECT
@@ -952,7 +986,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (
-          ${keywordConditions.length > 0 ? `(${keywordConditions})` : 'FALSE'}
+          ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
           OR ndc = $${ndcParamIndex}
         )
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
@@ -962,10 +996,11 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= 10
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
-      matchParams = [...drugWords, trigger.recommended_ndc, parseInt(minClaims), parseInt(daysBack)];
     } else {
-      const minClaimsParamIndex = drugWords.length + 1;
-      const daysBackParamIndex = drugWords.length + 2;
+      const minClaimsParamIndex = matchParams.length + 1;
+      matchParams.push(parseInt(minClaims));
+      const daysBackParamIndex = matchParams.length + 1;
+      matchParams.push(parseInt(daysBack));
 
       matchQuery = `
         SELECT
@@ -975,7 +1010,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
-        WHERE ${keywordConditions.length > 0 ? `(${keywordConditions})` : 'FALSE'}
+        WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         GROUP BY insurance_bin, insurance_group
@@ -983,7 +1018,6 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= 10
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
-      matchParams = [...drugWords, parseInt(minClaims), parseInt(daysBack)];
     }
 
     const matches = await db.query(matchQuery, matchParams);
