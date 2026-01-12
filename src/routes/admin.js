@@ -923,13 +923,26 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     let matchQuery;
     let matchParams;
 
-    // Extract first word of drug name for flexible matching (e.g., "ezetimibe 10mg" -> "ezetimibe")
-    const drugKeyword = recommendedDrug.split(/\s+/)[0].trim();
-    console.log(`Using drug keyword for matching: "${drugKeyword}"`);
+    // Extract significant words from recommended_drug for flexible matching
+    // Filter out common suffixes/dosage terms that won't help with matching
+    const skipWords = ['mg', 'ml', 'mcg', 'tablet', 'capsule', 'cap', 'tab', 'solution', 'cream', 'gel', 'patch', 'er', 'sr', 'xr', 'dr', 'hcl', 'sodium', 'potassium'];
+    const drugWords = recommendedDrug
+      .split(/[\s,.-]+/)
+      .map(w => w.trim().toUpperCase())
+      .filter(w => w.length > 2 && !skipWords.includes(w.toLowerCase()) && !/^\d+$/.test(w));
+
+    console.log(`Using drug keywords for matching: ${JSON.stringify(drugWords)}`);
+
+    // Build dynamic WHERE clause to match ANY of the keywords
+    // Each keyword uses %word% to match anywhere in drug name
+    const keywordConditions = drugWords.map((_, i) => `UPPER(drug_name) LIKE '%' || $${i + 1} || '%'`).join(' OR ');
 
     // Calculate margin as: (insurance_pay + patient_pay) - acquisition_cost
-    // This gives us actual profit per claim
     if (trigger.recommended_ndc) {
+      const ndcParamIndex = drugWords.length + 1;
+      const minClaimsParamIndex = drugWords.length + 2;
+      const daysBackParamIndex = drugWords.length + 3;
+
       matchQuery = `
         SELECT
           insurance_bin as bin,
@@ -939,18 +952,21 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (
-          UPPER(drug_name) LIKE UPPER($1) || '%'
-          OR ndc = $2
+          ${keywordConditions.length > 0 ? `(${keywordConditions})` : 'FALSE'}
+          OR ndc = $${ndcParamIndex}
         )
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
-        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $4
+        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         GROUP BY insurance_bin, insurance_group
-        HAVING COUNT(*) >= $3
+        HAVING COUNT(*) >= $${minClaimsParamIndex}
           AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= 10
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
-      matchParams = [drugKeyword, trigger.recommended_ndc, parseInt(minClaims), parseInt(daysBack)];
+      matchParams = [...drugWords, trigger.recommended_ndc, parseInt(minClaims), parseInt(daysBack)];
     } else {
+      const minClaimsParamIndex = drugWords.length + 1;
+      const daysBackParamIndex = drugWords.length + 2;
+
       matchQuery = `
         SELECT
           insurance_bin as bin,
@@ -959,15 +975,15 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
-        WHERE UPPER(drug_name) LIKE UPPER($1) || '%'
+        WHERE ${keywordConditions.length > 0 ? `(${keywordConditions})` : 'FALSE'}
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
-        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $3
+        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         GROUP BY insurance_bin, insurance_group
-        HAVING COUNT(*) >= $2
+        HAVING COUNT(*) >= $${minClaimsParamIndex}
           AND AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) >= 10
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
-      matchParams = [drugKeyword, parseInt(minClaims), parseInt(daysBack)];
+      matchParams = [...drugWords, parseInt(minClaims), parseInt(daysBack)];
     }
 
     const matches = await db.query(matchQuery, matchParams);
