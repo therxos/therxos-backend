@@ -923,43 +923,47 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     let matchQuery;
     let matchParams;
 
+    // Extract first word of drug name for flexible matching (e.g., "ezetimibe 10mg" -> "ezetimibe")
+    const drugKeyword = recommendedDrug.split(/\s+/)[0].trim();
+    console.log(`Using drug keyword for matching: "${drugKeyword}"`);
+
     if (trigger.recommended_ndc) {
       matchQuery = `
         SELECT
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement,
+          AVG(COALESCE(gross_profit, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (
-          UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
+          UPPER(drug_name) LIKE UPPER($1) || '%'
           OR ndc = $2
         )
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
-                AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $4
+        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $4
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $3
-        ORDER BY most_recent_claim DESC, claim_count DESC
+        ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
-      matchParams = [recommendedDrug, trigger.recommended_ndc, parseInt(minClaims), parseInt(daysBack)];
+      matchParams = [drugKeyword, trigger.recommended_ndc, parseInt(minClaims), parseInt(daysBack)];
     } else {
       matchQuery = `
         SELECT
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement,
+          AVG(COALESCE(gross_profit, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
-        WHERE UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
+        WHERE UPPER(drug_name) LIKE UPPER($1) || '%'
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
-                AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $3
+        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $3
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $2
-        ORDER BY most_recent_claim DESC, claim_count DESC
+        ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
-      matchParams = [recommendedDrug, parseInt(minClaims), parseInt(daysBack)];
+      matchParams = [drugKeyword, parseInt(minClaims), parseInt(daysBack)];
     }
 
     const matches = await db.query(matchQuery, matchParams);
