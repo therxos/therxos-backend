@@ -459,8 +459,13 @@ router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) =
         t.*,
         (SELECT json_agg(json_build_object(
           'bin', tbv.insurance_bin,
+          'group', tbv.insurance_group,
           'gpValue', tbv.gp_value,
-          'isExcluded', tbv.is_excluded
+          'isExcluded', tbv.is_excluded,
+          'coverageStatus', tbv.coverage_status,
+          'verifiedAt', tbv.verified_at,
+          'verifiedClaimCount', tbv.verified_claim_count,
+          'avgReimbursement', tbv.avg_reimbursement
         )) FROM trigger_bin_values tbv WHERE tbv.trigger_id = t.trigger_id) as bin_values,
         (SELECT json_agg(json_build_object(
           'type', tr.restriction_type,
@@ -527,10 +532,21 @@ router.get('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
     }
 
     const binValuesResult = await db.query(`
-      SELECT insurance_bin, gp_value, is_excluded
+      SELECT
+        id,
+        insurance_bin as bin,
+        insurance_group as "group",
+        gp_value as "gpValue",
+        is_excluded as "isExcluded",
+        coverage_status as "coverageStatus",
+        verified_at as "verifiedAt",
+        verified_claim_count as "verifiedClaimCount",
+        avg_reimbursement as "avgReimbursement",
+        created_at as "createdAt",
+        updated_at as "updatedAt"
       FROM trigger_bin_values
       WHERE trigger_id = $1
-      ORDER BY insurance_bin
+      ORDER BY insurance_bin, COALESCE(insurance_group, '')
     `, [id]);
 
     const restrictionsResult = await db.query(`
@@ -756,15 +772,27 @@ router.post('/triggers/:id/toggle', authenticateToken, requireSuperAdmin, async 
 router.post('/triggers/:id/bin-values', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { bin, gpValue, isExcluded } = req.body;
+    const { bin, group, gpValue, isExcluded, coverageStatus } = req.body;
+
+    // Map legacy isExcluded to coverage_status
+    let status = coverageStatus || 'unknown';
+    if (isExcluded && !coverageStatus) {
+      status = 'excluded';
+    } else if (!coverageStatus && gpValue) {
+      status = 'works';
+    }
 
     const result = await db.query(`
-      INSERT INTO trigger_bin_values (trigger_id, insurance_bin, gp_value, is_excluded)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (trigger_id, insurance_bin)
-      DO UPDATE SET gp_value = $3, is_excluded = $4, updated_at = NOW()
+      INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, is_excluded, coverage_status)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
+      DO UPDATE SET
+        gp_value = $4,
+        is_excluded = $5,
+        coverage_status = $6,
+        updated_at = NOW()
       RETURNING *
-    `, [id, bin, gpValue, isExcluded || false]);
+    `, [id, bin, group || null, gpValue, isExcluded || false, status]);
 
     res.json({ binValue: result.rows[0] });
   } catch (error) {
@@ -777,15 +805,215 @@ router.post('/triggers/:id/bin-values', authenticateToken, requireSuperAdmin, as
 router.delete('/triggers/:id/bin-values/:bin', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id, bin } = req.params;
+    const { group } = req.query; // Optional: delete specific BIN+Group combo
 
-    await db.query(`
-      DELETE FROM trigger_bin_values WHERE trigger_id = $1 AND insurance_bin = $2
-    `, [id, bin]);
+    if (group !== undefined) {
+      await db.query(`
+        DELETE FROM trigger_bin_values
+        WHERE trigger_id = $1 AND insurance_bin = $2 AND COALESCE(insurance_group, '') = $3
+      `, [id, bin, group || '']);
+    } else {
+      await db.query(`
+        DELETE FROM trigger_bin_values WHERE trigger_id = $1 AND insurance_bin = $2
+      `, [id, bin]);
+    }
 
     res.json({ success: true });
   } catch (error) {
     console.error('Error removing BIN value:', error);
     res.status(500).json({ error: 'Failed to remove BIN value' });
+  }
+});
+
+
+// ===========================================
+// BIN/GROUP DISCOVERY & PRICING ENDPOINTS
+// ===========================================
+
+// GET /api/admin/bins - Get available BINs from prescriptions with claim counts
+router.get('/bins', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { search, limit = 100 } = req.query;
+
+    let query = `
+      SELECT
+        insurance_bin as bin,
+        COUNT(*) as claim_count,
+        COUNT(DISTINCT patient_id) as patient_count,
+        COUNT(DISTINCT pharmacy_id) as pharmacy_count,
+        AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement
+      FROM prescriptions
+      WHERE insurance_bin IS NOT NULL AND insurance_bin != ''
+    `;
+    const params = [];
+    let paramIndex = 1;
+
+    if (search) {
+      query += ` AND insurance_bin ILIKE $${paramIndex++}`;
+      params.push(`%${search}%`);
+    }
+
+    query += ` GROUP BY insurance_bin ORDER BY claim_count DESC LIMIT $${paramIndex++}`;
+    params.push(parseInt(limit));
+
+    const result = await db.query(query, params);
+
+    res.json({ bins: result.rows });
+  } catch (error) {
+    console.error('Error fetching BINs:', error);
+    res.status(500).json({ error: 'Failed to fetch BINs' });
+  }
+});
+
+// GET /api/admin/bins/:bin/groups - Get groups for a specific BIN
+router.get('/bins/:bin/groups', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { bin } = req.params;
+    const { limit = 50 } = req.query;
+
+    const result = await db.query(`
+      SELECT
+        insurance_group as "group",
+        COUNT(*) as claim_count,
+        COUNT(DISTINCT patient_id) as patient_count,
+        AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement
+      FROM prescriptions
+      WHERE insurance_bin = $1 AND insurance_group IS NOT NULL AND insurance_group != ''
+      GROUP BY insurance_group
+      ORDER BY claim_count DESC
+      LIMIT $2
+    `, [bin, parseInt(limit)]);
+
+    res.json({ bin, groups: result.rows });
+  } catch (error) {
+    console.error('Error fetching groups for BIN:', error);
+    res.status(500).json({ error: 'Failed to fetch groups' });
+  }
+});
+
+// POST /api/admin/triggers/:id/verify-coverage - Scan for verified coverage
+router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id: triggerId } = req.params;
+    const { minClaims = 1 } = req.body;
+
+    // Get trigger info
+    const triggerResult = await db.query(
+      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name FROM triggers WHERE trigger_id = $1',
+      [triggerId]
+    );
+
+    if (triggerResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    const trigger = triggerResult.rows[0];
+    const recommendedDrug = trigger.recommended_drug || '';
+
+    // Find matching completed claims (insurance_pay > 0 means paid)
+    const matches = await db.query(`
+      SELECT
+        insurance_bin as bin,
+        insurance_group as "group",
+        COUNT(*) as claim_count,
+        AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement
+      FROM prescriptions
+      WHERE (
+        UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
+        ${trigger.recommended_ndc ? 'OR ndc = $2' : ''}
+      )
+      AND insurance_pay > 0
+      AND insurance_bin IS NOT NULL AND insurance_bin != ''
+      GROUP BY insurance_bin, insurance_group
+      HAVING COUNT(*) >= $3
+      ORDER BY claim_count DESC
+    `, trigger.recommended_ndc
+        ? [recommendedDrug, trigger.recommended_ndc, parseInt(minClaims)]
+        : [recommendedDrug, parseInt(minClaims)]
+    );
+
+    // Upsert into trigger_bin_values with verified status
+    const verified = [];
+    for (const match of matches.rows) {
+      const result = await db.query(`
+        INSERT INTO trigger_bin_values (
+          trigger_id, insurance_bin, insurance_group, coverage_status,
+          verified_at, verified_claim_count, avg_reimbursement, gp_value
+        )
+        VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $5)
+        ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
+        DO UPDATE SET
+          coverage_status = 'verified',
+          verified_at = NOW(),
+          verified_claim_count = $4,
+          avg_reimbursement = $5
+        RETURNING *
+      `, [
+        triggerId,
+        match.bin,
+        match.group || null,
+        parseInt(match.claim_count),
+        parseFloat(match.avg_reimbursement) || 0
+      ]);
+      verified.push(result.rows[0]);
+    }
+
+    console.log(`Verified ${verified.length} BIN/Group combinations for trigger ${trigger.display_name}`);
+
+    res.json({
+      success: true,
+      trigger: { id: triggerId, name: trigger.display_name },
+      verifiedCount: verified.length,
+      entries: verified
+    });
+  } catch (error) {
+    console.error('Error verifying coverage:', error);
+    res.status(500).json({ error: 'Failed to verify coverage: ' + error.message });
+  }
+});
+
+// PUT /api/admin/triggers/:id/bin-values/bulk - Bulk update BIN values
+router.put('/triggers/:id/bin-values/bulk', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id: triggerId } = req.params;
+    const { updates } = req.body;
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: 'updates must be a non-empty array' });
+    }
+
+    const results = [];
+    for (const update of updates) {
+      const { bin, group, gpValue, coverageStatus } = update;
+
+      if (!bin) {
+        continue; // Skip entries without BIN
+      }
+
+      const result = await db.query(`
+        INSERT INTO trigger_bin_values (
+          trigger_id, insurance_bin, insurance_group, gp_value, coverage_status, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
+        DO UPDATE SET
+          gp_value = COALESCE($4, trigger_bin_values.gp_value),
+          coverage_status = COALESCE($5, trigger_bin_values.coverage_status),
+          updated_at = NOW()
+        RETURNING *
+      `, [triggerId, bin, group || null, gpValue, coverageStatus || 'unknown']);
+
+      results.push(result.rows[0]);
+    }
+
+    res.json({
+      success: true,
+      updated: results.length,
+      entries: results
+    });
+  } catch (error) {
+    console.error('Error bulk updating BIN values:', error);
+    res.status(500).json({ error: 'Failed to bulk update BIN values' });
   }
 });
 

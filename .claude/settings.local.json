@@ -20,7 +20,9 @@
       "Bash(npx vercel --prod --yes)",
       "Bash(node cleanup-duplicates.js:*)",
       "Bash(curl:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(node --check:*)",
+      "Bash(find:*)"
     ]
   }
 }
