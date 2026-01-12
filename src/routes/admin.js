@@ -911,26 +911,47 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     const recommendedDrug = trigger.recommended_drug || '';
 
     // Find matching completed claims (insurance_pay > 0 means paid)
-    const matches = await db.query(`
-      SELECT
-        insurance_bin as bin,
-        insurance_group as "group",
-        COUNT(*) as claim_count,
-        AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement
-      FROM prescriptions
-      WHERE (
-        UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
-        ${trigger.recommended_ndc ? 'OR ndc = $2' : ''}
-      )
-      AND insurance_pay > 0
-      AND insurance_bin IS NOT NULL AND insurance_bin != ''
-      GROUP BY insurance_bin, insurance_group
-      HAVING COUNT(*) >= $3
-      ORDER BY claim_count DESC
-    `, trigger.recommended_ndc
-        ? [recommendedDrug, trigger.recommended_ndc, parseInt(minClaims)]
-        : [recommendedDrug, parseInt(minClaims)]
-    );
+    let matchQuery;
+    let matchParams;
+
+    if (trigger.recommended_ndc) {
+      matchQuery = `
+        SELECT
+          insurance_bin as bin,
+          insurance_group as "group",
+          COUNT(*) as claim_count,
+          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement
+        FROM prescriptions
+        WHERE (
+          UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
+          OR ndc = $2
+        )
+        AND insurance_pay > 0
+        AND insurance_bin IS NOT NULL AND insurance_bin != ''
+        GROUP BY insurance_bin, insurance_group
+        HAVING COUNT(*) >= $3
+        ORDER BY claim_count DESC
+      `;
+      matchParams = [recommendedDrug, trigger.recommended_ndc, parseInt(minClaims)];
+    } else {
+      matchQuery = `
+        SELECT
+          insurance_bin as bin,
+          insurance_group as "group",
+          COUNT(*) as claim_count,
+          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement
+        FROM prescriptions
+        WHERE UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
+        AND insurance_pay > 0
+        AND insurance_bin IS NOT NULL AND insurance_bin != ''
+        GROUP BY insurance_bin, insurance_group
+        HAVING COUNT(*) >= $2
+        ORDER BY claim_count DESC
+      `;
+      matchParams = [recommendedDrug, parseInt(minClaims)];
+    }
+
+    const matches = await db.query(matchQuery, matchParams);
 
     // Upsert into trigger_bin_values with verified status
     const verified = [];
