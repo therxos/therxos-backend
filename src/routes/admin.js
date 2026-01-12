@@ -1189,8 +1189,8 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
           if (binConfig.gp_value) gpValue = binConfig.gp_value;
         }
 
-        // Dedup check - use trigger_code for matching
-        const oppKey = `${patientId}|${trigger.trigger_code}|${(matchedDrug || '').toUpperCase()}`;
+        // Dedup check - use trigger_type for matching (matches DB constraint)
+        const oppKey = `${patientId}|${trigger.trigger_type}|${(matchedDrug || '').toUpperCase()}`;
         if (existingOpps.has(oppKey)) {
           pharmacySkipped++;
           continue;
@@ -1208,7 +1208,7 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
         const annualValue = netGain * annualFills;
         const rationale = trigger.action_instructions || trigger.clinical_rationale || `${trigger.display_name || trigger.trigger_type} opportunity`;
 
-        // Insert opportunity - use trigger_code as opportunity_type for tracking
+        // Insert opportunity - use trigger_type for opportunity_type (matches DB constraint)
         await db.query(`
           INSERT INTO opportunities (
             opportunity_id, pharmacy_id, patient_id, opportunity_type,
@@ -1217,7 +1217,7 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
             status, clinical_priority, clinical_rationale, staff_notes
           ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         `, [
-          pharmacy.pharmacy_id, patientId, trigger.trigger_code,
+          pharmacy.pharmacy_id, patientId, trigger.trigger_type,
           matchedDrug, trigger.recommended_drug, netGain, annualValue,
           currentGP, matchedRx?.prescriber_name || null,
           'Not Submitted', trigger.priority || 'medium', rationale,
