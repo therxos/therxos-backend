@@ -910,7 +910,16 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     const trigger = triggerResult.rows[0];
     const recommendedDrug = trigger.recommended_drug || '';
 
-    // Find matching completed claims (insurance_pay > 0 means paid)
+    console.log(`Verifying coverage for trigger: ${trigger.display_name}, recommended_drug: "${recommendedDrug}", ndc: ${trigger.recommended_ndc || 'none'}`);
+
+    if (!recommendedDrug && !trigger.recommended_ndc) {
+      return res.status(400).json({
+        error: 'Trigger has no recommended drug or NDC set',
+        trigger: { id: triggerId, name: trigger.display_name }
+      });
+    }
+
+    // Find matching completed claims from last 180 days (insurance_pay > 0 means paid)
     let matchQuery;
     let matchParams;
 
@@ -920,7 +929,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement
+          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement,
+          MAX(COALESCE(date_filled, dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (
           UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
@@ -928,9 +938,10 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         )
         AND insurance_pay > 0
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
+        AND COALESCE(date_filled, dispensed_date, created_at) >= NOW() - INTERVAL '180 days'
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $3
-        ORDER BY claim_count DESC
+        ORDER BY most_recent_claim DESC, claim_count DESC
       `;
       matchParams = [recommendedDrug, trigger.recommended_ndc, parseInt(minClaims)];
     } else {
@@ -939,19 +950,22 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement
+          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement,
+          MAX(COALESCE(date_filled, dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
         AND insurance_pay > 0
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
+        AND COALESCE(date_filled, dispensed_date, created_at) >= NOW() - INTERVAL '180 days'
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $2
-        ORDER BY claim_count DESC
+        ORDER BY most_recent_claim DESC, claim_count DESC
       `;
       matchParams = [recommendedDrug, parseInt(minClaims)];
     }
 
     const matches = await db.query(matchQuery, matchParams);
+    console.log(`Found ${matches.rows.length} BIN/Group combinations for "${recommendedDrug}"`);
 
     // Upsert into trigger_bin_values with verified status
     const verified = [];
