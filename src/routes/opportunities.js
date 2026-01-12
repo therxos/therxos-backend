@@ -292,6 +292,52 @@ router.post('/bulk-update', authenticateToken, async (req, res) => {
   }
 });
 
+// Get prescriber action counts for warning system
+router.get('/prescriber-stats/:prescriberName', authenticateToken, async (req, res) => {
+  try {
+    const { prescriberName } = req.params;
+    const pharmacyId = req.user.pharmacyId;
+
+    if (!pharmacyId) {
+      return res.status(400).json({ error: 'No pharmacy associated with user' });
+    }
+
+    // Count unique patients with actioned opportunities for this prescriber
+    const result = await db.query(`
+      SELECT
+        COUNT(DISTINCT o.patient_id) as unique_patients_actioned,
+        COUNT(*) as total_opps_actioned
+      FROM opportunities o
+      WHERE o.pharmacy_id = $1
+        AND LOWER(o.prescriber_name) = LOWER($2)
+        AND o.status IN ('Submitted', 'Approved', 'Completed')
+    `, [pharmacyId, prescriberName]);
+
+    // Get pharmacy threshold settings
+    const settingsResult = await db.query(
+      'SELECT settings FROM pharmacies WHERE pharmacy_id = $1',
+      [pharmacyId]
+    );
+
+    const settings = settingsResult.rows[0]?.settings || {};
+    const warnThreshold = settings.prescriberWarnThreshold || 15;
+    const blockThreshold = settings.prescriberBlockThreshold || null; // null = no block
+
+    res.json({
+      prescriberName,
+      uniquePatientsActioned: parseInt(result.rows[0]?.unique_patients_actioned || 0),
+      totalOppsActioned: parseInt(result.rows[0]?.total_opps_actioned || 0),
+      warnThreshold,
+      blockThreshold,
+      shouldWarn: parseInt(result.rows[0]?.unique_patients_actioned || 0) >= warnThreshold,
+      shouldBlock: blockThreshold ? parseInt(result.rows[0]?.unique_patients_actioned || 0) >= blockThreshold : false
+    });
+  } catch (error) {
+    logger.error('Get prescriber stats error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get prescriber stats' });
+  }
+});
+
 // Get opportunity summary/stats
 router.get('/summary/stats', authenticateToken, async (req, res) => {
   try {

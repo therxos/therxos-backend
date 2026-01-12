@@ -427,7 +427,7 @@ router.get('/monthly', authenticateToken, async (req, res) => {
     
     // Daily activity
     const dailyResult = await db.query(`
-      SELECT 
+      SELECT
         DATE(updated_at) as date,
         COUNT(*) FILTER (WHERE status IN ('Submitted', 'Pending')) as submitted,
         COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured')) as captured
@@ -437,7 +437,37 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       GROUP BY DATE(updated_at)
       ORDER BY date
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
-    
+
+    // By BIN - using prescription data joined to opportunities
+    const byBinResult = await db.query(`
+      SELECT
+        COALESCE(pr.insurance_bin, 'Unknown') as bin,
+        COUNT(DISTINCT o.opportunity_id) as count,
+        COALESCE(SUM(o.annual_margin_gain), 0) as value,
+        COUNT(DISTINCT o.opportunity_id) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')) as captured,
+        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')), 0) as captured_value
+      FROM opportunities o
+      LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+      WHERE o.pharmacy_id = $1
+        AND (o.created_at >= $2 AND o.created_at <= $3 OR o.updated_at >= $2 AND o.updated_at <= $3)
+      GROUP BY COALESCE(pr.insurance_bin, 'Unknown')
+      ORDER BY count DESC
+    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
+
+    // Weekly breakdown by actioned date
+    const weeklyResult = await db.query(`
+      SELECT
+        DATE_TRUNC('week', actioned_at) as week_start,
+        COUNT(*) as actioned_count,
+        COALESCE(SUM(annual_margin_gain), 0) as actioned_value
+      FROM opportunities
+      WHERE pharmacy_id = $1
+        AND actioned_at >= $2 AND actioned_at <= $3
+        AND status IN ('Submitted', 'Approved', 'Completed', 'Captured')
+      GROUP BY DATE_TRUNC('week', actioned_at)
+      ORDER BY week_start
+    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
+
     res.json({
       month: monthNum,
       year: yearNum,
@@ -465,6 +495,18 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         date: r.date,
         submitted: parseInt(r.submitted) || 0,
         captured: parseInt(r.captured) || 0,
+      })),
+      by_bin: byBinResult.rows.map(r => ({
+        bin: r.bin,
+        count: parseInt(r.count) || 0,
+        value: parseFloat(r.value) || 0,
+        captured: parseInt(r.captured) || 0,
+        captured_value: parseFloat(r.captured_value) || 0,
+      })),
+      weekly_activity: weeklyResult.rows.map(r => ({
+        week_start: r.week_start,
+        actioned_count: parseInt(r.actioned_count) || 0,
+        actioned_value: parseFloat(r.actioned_value) || 0,
       })),
     });
   } catch (error) {
