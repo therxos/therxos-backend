@@ -929,7 +929,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement,
+          AVG(COALESCE(gross_profit, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (
@@ -937,6 +937,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           OR ndc = $2
         )
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
+        AND COALESCE(gross_profit, 0) > 0
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $4
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $3
@@ -949,11 +950,12 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0)) as avg_reimbursement,
+          AVG(COALESCE(gross_profit, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
+        AND COALESCE(gross_profit, 0) > 0
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $3
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $2
