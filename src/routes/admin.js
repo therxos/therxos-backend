@@ -927,13 +927,15 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     const drugKeyword = recommendedDrug.split(/\s+/)[0].trim();
     console.log(`Using drug keyword for matching: "${drugKeyword}"`);
 
+    // Calculate margin as: (insurance_pay + patient_pay) - acquisition_cost
+    // This gives us actual profit per claim
     if (trigger.recommended_ndc) {
       matchQuery = `
         SELECT
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(gross_profit, 0)) as avg_reimbursement,
+          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (
@@ -953,7 +955,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(gross_profit, 0)) as avg_reimbursement,
+          AVG(COALESCE(insurance_pay, 0) + COALESCE(patient_pay, 0) - COALESCE(acquisition_cost, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE UPPER(drug_name) LIKE UPPER($1) || '%'
