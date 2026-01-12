@@ -936,7 +936,6 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
           OR ndc = $2
         )
-        AND insurance_pay > 0
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $4
         GROUP BY insurance_bin, insurance_group
@@ -954,7 +953,6 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE UPPER(drug_name) LIKE '%' || UPPER($1) || '%'
-        AND insurance_pay > 0
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $3
         GROUP BY insurance_bin, insurance_group
