@@ -982,7 +982,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(gross_profit, net_profit, 0)) as avg_reimbursement,
+          AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (
@@ -993,7 +993,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $${minClaimsParamIndex}
-          AND AVG(COALESCE(gross_profit, net_profit, 0)) >= $${minMarginParamIndex}
+          AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
     } else {
@@ -1009,7 +1009,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE(gross_profit, net_profit, 0)) as avg_reimbursement,
+          AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
@@ -1017,7 +1017,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $${minClaimsParamIndex}
-          AND AVG(COALESCE(gross_profit, net_profit, 0)) >= $${minMarginParamIndex}
+          AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
     }
