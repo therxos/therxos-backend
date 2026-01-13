@@ -1958,6 +1958,82 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           existingFlags.add(flagKey); // Prevent duplicates within this scan
         }
       }
+
+      // Scan for CVS Aberrant Products
+      // Flag prescriptions with CVS BINs and NDCs on the aberrant product list
+      console.log('Scanning for CVS aberrant products...');
+
+      // Load CVS managed BINs
+      const cvsBinsResult = await db.query('SELECT bin FROM cvs_managed_bins');
+      const cvsBins = new Set(cvsBinsResult.rows.map(r => r.bin));
+      console.log(`Loaded ${cvsBins.size} CVS managed BINs`);
+
+      // Load aberrant NDCs
+      const aberrantResult = await db.query('SELECT ndc, product_name FROM cvs_aberrant_products');
+      const aberrantNdcs = new Map();
+      for (const row of aberrantResult.rows) {
+        // Store with and without leading zeros (NDC format variations)
+        aberrantNdcs.set(row.ndc, row.product_name);
+        aberrantNdcs.set(row.ndc.replace(/^0+/, ''), row.product_name); // Remove leading zeros
+      }
+      console.log(`Loaded ${aberrantResult.rows.length} aberrant products`);
+
+      let cvsAberrantFlags = 0;
+
+      for (const rx of prescriptions) {
+        // Check if prescription has a CVS managed BIN
+        const rxBin = rx.insurance_bin || rx.bin || '';
+        if (!cvsBins.has(rxBin)) continue;
+
+        // Check if NDC is on aberrant list
+        const rxNdc = (rx.ndc || '').replace(/-/g, ''); // Remove dashes
+        const aberrantProduct = aberrantNdcs.get(rxNdc) || aberrantNdcs.get(rxNdc.replace(/^0+/, ''));
+        if (!aberrantProduct) continue;
+
+        // This is a CVS aberrant product - create audit flag
+        const drugUpper = rx.drug_name?.toUpperCase() || '';
+        const flagKey = `${rx.patient_id}|CVS_ABERRANT|${drugUpper}|${rx.dispensed_date}`;
+        if (existingFlags.has(flagKey)) {
+          skippedAuditFlags++;
+          continue;
+        }
+
+        const violation = `CVS ABERRANT PRODUCT: ${rx.drug_name} (NDC: ${rxNdc}) is on CVS Caremark's Aberrant Product List. Dispensing >25% of claims from this list can result in network termination.`;
+
+        await db.query(`
+          INSERT INTO audit_flags (
+            pharmacy_id, patient_id, prescription_id, rule_id,
+            rule_type, severity, drug_name, ndc, dispensed_quantity,
+            days_supply, daw_code, sig, gross_profit,
+            violation_message, expected_value, actual_value,
+            status, dispensed_date
+          ) VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        `, [
+          pharmacyId,
+          rx.patient_id,
+          rx.prescription_id,
+          'cvs_aberrant',
+          'high',
+          rx.drug_name,
+          rx.ndc,
+          rx.quantity,
+          rx.days_supply,
+          rx.daw_code,
+          rx.sig,
+          rx.gross_profit,
+          violation,
+          'Avoid aberrant products',
+          `BIN: ${rxBin}, NDC on aberrant list`,
+          'open',
+          rx.dispensed_date
+        ]);
+
+        cvsAberrantFlags++;
+        existingFlags.add(flagKey);
+      }
+
+      newAuditFlags += cvsAberrantFlags;
+      console.log(`Found ${cvsAberrantFlags} CVS aberrant product flags`);
     }
 
     console.log(`Rescan complete: ${newOpportunities} new opportunities, ${newAuditFlags} new audit flags`);
@@ -1980,6 +2056,127 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
   } catch (error) {
     console.error('Error during rescan:', error);
     res.status(500).json({ error: 'Failed to rescan pharmacy: ' + error.message });
+  }
+});
+
+// GET /api/admin/pharmacies/:id/cvs-aberrant-metrics - Get CVS aberrant percentage metrics
+router.get('/pharmacies/:id/cvs-aberrant-metrics', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const pharmacyId = req.params.id;
+
+    // Verify pharmacy exists
+    const pharmacyResult = await db.query(
+      'SELECT pharmacy_name FROM pharmacies WHERE pharmacy_id = $1',
+      [pharmacyId]
+    );
+    if (pharmacyResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+    const pharmacyName = pharmacyResult.rows[0].pharmacy_name;
+
+    // Load CVS managed BINs
+    const cvsBinsResult = await db.query('SELECT bin FROM cvs_managed_bins');
+    const cvsBins = cvsBinsResult.rows.map(r => r.bin);
+
+    if (cvsBins.length === 0) {
+      return res.json({
+        pharmacy: pharmacyName,
+        error: 'No CVS BINs configured. Run load-cvs-aberrant.js first.',
+        status: 'unknown'
+      });
+    }
+
+    // Load aberrant NDCs
+    const aberrantResult = await db.query('SELECT ndc FROM cvs_aberrant_products');
+    const aberrantNdcs = new Set();
+    for (const row of aberrantResult.rows) {
+      aberrantNdcs.add(row.ndc);
+      aberrantNdcs.add(row.ndc.replace(/^0+/, '')); // Without leading zeros
+    }
+
+    // Get all CVS BIN prescriptions
+    const cvsRxResult = await db.query(`
+      SELECT
+        ndc,
+        COALESCE(insurance_pay, 0) as insurance_pay,
+        COALESCE(patient_pay, 0) as patient_pay,
+        drug_name
+      FROM prescriptions
+      WHERE pharmacy_id = $1
+        AND insurance_bin = ANY($2)
+    `, [pharmacyId, cvsBins]);
+
+    let totalCvsRxCount = 0;
+    let totalCvsInsurancePaid = 0;
+    let aberrantRxCount = 0;
+    let aberrantInsurancePaid = 0;
+    const aberrantDrugs = {};
+
+    for (const rx of cvsRxResult.rows) {
+      totalCvsRxCount++;
+      totalCvsInsurancePaid += parseFloat(rx.insurance_pay) || 0;
+
+      const rxNdc = (rx.ndc || '').replace(/-/g, '');
+      const isAberrant = aberrantNdcs.has(rxNdc) || aberrantNdcs.has(rxNdc.replace(/^0+/, ''));
+
+      if (isAberrant) {
+        aberrantRxCount++;
+        aberrantInsurancePaid += parseFloat(rx.insurance_pay) || 0;
+
+        // Track by drug name
+        const drugName = rx.drug_name || 'Unknown';
+        if (!aberrantDrugs[drugName]) {
+          aberrantDrugs[drugName] = { count: 0, insurancePaid: 0 };
+        }
+        aberrantDrugs[drugName].count++;
+        aberrantDrugs[drugName].insurancePaid += parseFloat(rx.insurance_pay) || 0;
+      }
+    }
+
+    // Calculate percentages
+    const percentByCount = totalCvsRxCount > 0 ? (aberrantRxCount / totalCvsRxCount) * 100 : 0;
+    const percentByDollars = totalCvsInsurancePaid > 0 ? (aberrantInsurancePaid / totalCvsInsurancePaid) * 100 : 0;
+
+    // Determine status (use higher of the two percentages)
+    const maxPercent = Math.max(percentByCount, percentByDollars);
+    let status = 'safe';
+    let statusMessage = 'Below 20% threshold';
+    if (maxPercent >= 25) {
+      status = 'critical';
+      statusMessage = 'CRITICAL: Exceeds 25% threshold - risk of network termination';
+    } else if (maxPercent >= 20) {
+      status = 'warning';
+      statusMessage = 'WARNING: Approaching 25% threshold';
+    }
+
+    // Sort aberrant drugs by count
+    const topAberrantDrugs = Object.entries(aberrantDrugs)
+      .map(([drug, data]) => ({ drug, ...data }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    res.json({
+      pharmacy: pharmacyName,
+      status,
+      statusMessage,
+      metrics: {
+        totalCvsRxCount,
+        totalCvsInsurancePaid: Math.round(totalCvsInsurancePaid * 100) / 100,
+        aberrantRxCount,
+        aberrantInsurancePaid: Math.round(aberrantInsurancePaid * 100) / 100,
+        percentByCount: Math.round(percentByCount * 100) / 100,
+        percentByDollars: Math.round(percentByDollars * 100) / 100
+      },
+      thresholds: {
+        warning: 20,
+        critical: 25
+      },
+      topAberrantDrugs
+    });
+
+  } catch (error) {
+    console.error('Error getting CVS aberrant metrics:', error);
+    res.status(500).json({ error: 'Failed to get CVS aberrant metrics: ' + error.message });
   }
 });
 
