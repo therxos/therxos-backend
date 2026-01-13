@@ -345,6 +345,7 @@ async function scanAdminTriggers(pharmacyId) {
       pr.insurance_bin,
       pr.insurance_group,
       pr.prescriber_name,
+      pr.days_supply,
       COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, 0) as profit,
       p.chronic_conditions
     FROM prescriptions pr
@@ -413,8 +414,15 @@ async function scanAdminTriggers(pharmacyId) {
         if (hasExcluded) continue;
       }
 
-      // Determine GP value based on BIN/Group
-      let gpValue = trigger.default_gp_value || 50;
+      // Determine GP value based on BIN/Group, fall back to prescription's gross profit
+      // Normalize to 30-day supply (90 DS = divide by 3)
+      const daysSupply = parseInt(rx.days_supply) || 30;
+      const rawProfit = Math.abs(parseFloat(rx.profit)) || 0;
+      const rxProfit = daysSupply >= 84 ? rawProfit / 3 : rawProfit; // Normalize 90-day to 30-day
+
+      let gpValue = (trigger.default_gp_value != null && trigger.default_gp_value > 0)
+        ? trigger.default_gp_value
+        : (rxProfit > 0 ? rxProfit : 50);
       let skipDueToBin = false;
 
       if (binValues.length > 0) {
@@ -443,6 +451,9 @@ async function scanAdminTriggers(pharmacyId) {
       }
 
       if (skipDueToBin) continue;
+
+      // Skip opportunities below $10 per 30-day fill threshold
+      if (gpValue < 10) continue;
 
       // Deduplicate: one opp per patient per trigger
       const oppKey = `${rx.patient_id}:${trigger.trigger_id}`;

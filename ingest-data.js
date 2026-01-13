@@ -22,6 +22,8 @@ const pool = new Pool({
 const COLUMN_MAP = {
   // PioneerRx Format
   'Rx Number': 'rx_number',
+  'Date Filled': 'dispensed_date',
+  'Primary Third Party PCN': 'insurance_pcn',
   'Patient Full Name Last then First': 'patient_name',
   'Patient Date of Birth': 'patient_dob',
   'Patient Age': 'patient_age',
@@ -123,11 +125,15 @@ function parseCSVLine(line, delimiter) {
   return result;
 }
 
-// Generate patient hash from name and DOB
-function generatePatientHash(name, dob) {
+// Generate patient hash from name and DOB (or Rx number if no name)
+function generatePatientHash(name, dob, rxNumber = null) {
+  // If no patient name, use Rx number as identifier
+  if (!name && rxNumber) {
+    return createHash('sha256').update(`rx:${rxNumber}`).digest('hex');
+  }
   // Parse name (format: "Last, First" or "Last(BP), First")
-  const cleanName = name.replace(/\([^)]*\)/g, '').trim();
-  const normalized = `${cleanName}|${dob}`.toLowerCase();
+  const cleanName = (name || 'UNKNOWN').replace(/\([^)]*\)/g, '').trim();
+  const normalized = `${cleanName}|${dob || ''}`.toLowerCase();
   return createHash('sha256').update(normalized).digest('hex');
 }
 
@@ -270,12 +276,17 @@ async function ingestData(clientEmail, csvFilePath) {
   let skipped = 0;
 
   for (const row of rows) {
-    if (!row.patient_name || !row.ndc || !row.drug_name) {
+    // Require drug info, but patient_name is optional if rx_number exists
+    if (!row.ndc || !row.drug_name) {
+      skipped++;
+      continue;
+    }
+    if (!row.patient_name && !row.rx_number) {
       skipped++;
       continue;
     }
 
-    const patientHash = generatePatientHash(row.patient_name, row.patient_dob || '');
+    const patientHash = generatePatientHash(row.patient_name, row.patient_dob || '', row.rx_number);
 
     if (patientMap.has(patientHash)) {
       // Merge conditions
@@ -283,7 +294,9 @@ async function ingestData(clientEmail, csvFilePath) {
       const newConditions = inferConditions(row.therapeutic_class);
       existing.conditions = [...new Set([...existing.conditions, ...newConditions])];
     } else {
-      const { firstName, lastName } = parsePatientName(row.patient_name);
+      const { firstName, lastName } = row.patient_name
+        ? parsePatientName(row.patient_name)
+        : { firstName: null, lastName: null };
       patientMap.set(patientHash, {
         patientId: uuidv4(),
         patientHash,
@@ -350,9 +363,10 @@ async function ingestData(clientEmail, csvFilePath) {
   let rxBatch = [];
 
   for (const row of rows) {
-    if (!row.patient_name || !row.ndc || !row.drug_name) continue;
+    if (!row.ndc || !row.drug_name) continue;
+    if (!row.patient_name && !row.rx_number) continue;
 
-    const patientHash = generatePatientHash(row.patient_name, row.patient_dob || '');
+    const patientHash = generatePatientHash(row.patient_name, row.patient_dob || '', row.rx_number);
     const patientId = hashToId.get(patientHash);
     if (!patientId) continue;
 

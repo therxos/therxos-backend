@@ -2097,4 +2097,204 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
 });
 
 
+// POST /api/admin/triggers/verify-all-coverage - Scan coverage for ALL triggers at once
+router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { minClaims = 1, daysBack = 365, minMargin = 10 } = req.body;
+
+    console.log(`Starting bulk coverage verification for all triggers (minMargin: $${minMargin}, minClaims: ${minClaims}, daysBack: ${daysBack})`);
+
+    // Get all enabled triggers
+    const triggersResult = await db.query(`
+      SELECT trigger_id, recommended_drug, recommended_ndc, display_name, detection_keywords
+      FROM triggers
+      WHERE is_enabled = true
+      ORDER BY display_name
+    `);
+
+    const triggers = triggersResult.rows;
+    console.log(`Found ${triggers.length} enabled triggers to verify`);
+
+    const results = [];
+    const noMatches = [];
+
+    for (const trigger of triggers) {
+      const recommendedDrug = trigger.recommended_drug || '';
+
+      // Determine search terms - use detection_keywords if available, otherwise recommended_drug
+      let searchTerms = [];
+
+      if (trigger.detection_keywords && Array.isArray(trigger.detection_keywords) && trigger.detection_keywords.length > 0) {
+        // Use detection keywords for reverse lookup - we want to find claims FOR the recommended drug
+        searchTerms = [recommendedDrug];
+      } else if (recommendedDrug) {
+        searchTerms = [recommendedDrug];
+      }
+
+      if (searchTerms.length === 0 && !trigger.recommended_ndc) {
+        // Skip triggers without search criteria
+        noMatches.push({
+          triggerId: trigger.trigger_id,
+          triggerName: trigger.display_name,
+          reason: 'No recommended drug or NDC set'
+        });
+        continue;
+      }
+
+      // Filter out noise words
+      const skipWords = ['mg', 'ml', 'mcg', 'er', 'sr', 'xr', 'dr', 'hcl', 'sodium', 'potassium', 'try', 'alternates', 'if', 'fails', 'before', 'saying', 'doesnt', 'work', 'the', 'and', 'for', 'with'];
+
+      // Build search groups
+      const searchGroups = [];
+      const matchParams = [];
+      let paramIndex = 1;
+
+      for (const term of searchTerms) {
+        const words = term
+          .split(/[\s,.\-\(\)\[\]]+/)
+          .map(w => w.trim().toUpperCase())
+          .filter(w => w.length >= 2 && !skipWords.includes(w.toLowerCase()) && !/^\d+$/.test(w));
+
+        if (words.length > 0) {
+          const groupConditions = words.map(word => {
+            matchParams.push(word);
+            return `UPPER(drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+          });
+          searchGroups.push(`(${groupConditions.join(' AND ')})`);
+        }
+      }
+
+      const keywordConditions = searchGroups.length > 0 ? searchGroups.join(' OR ') : null;
+
+      let matchQuery;
+
+      if (trigger.recommended_ndc) {
+        const ndcParamIndex = matchParams.length + 1;
+        matchParams.push(trigger.recommended_ndc);
+        const minClaimsParamIndex = matchParams.length + 1;
+        matchParams.push(parseInt(minClaims));
+        const daysBackParamIndex = matchParams.length + 1;
+        matchParams.push(parseInt(daysBack));
+        const minMarginParamIndex = matchParams.length + 1;
+        matchParams.push(parseFloat(minMargin));
+
+        matchQuery = `
+          SELECT
+            insurance_bin as bin,
+            insurance_group as "group",
+            COUNT(*) as claim_count,
+            AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
+            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
+          FROM prescriptions
+          WHERE (
+            ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
+            OR ndc = $${ndcParamIndex}
+          )
+          AND insurance_bin IS NOT NULL AND insurance_bin != ''
+          AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+          GROUP BY insurance_bin, insurance_group
+          HAVING COUNT(*) >= $${minClaimsParamIndex}
+            AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
+          ORDER BY avg_reimbursement DESC, claim_count DESC
+        `;
+      } else if (keywordConditions) {
+        const minClaimsParamIndex = matchParams.length + 1;
+        matchParams.push(parseInt(minClaims));
+        const daysBackParamIndex = matchParams.length + 1;
+        matchParams.push(parseInt(daysBack));
+        const minMarginParamIndex = matchParams.length + 1;
+        matchParams.push(parseFloat(minMargin));
+
+        matchQuery = `
+          SELECT
+            insurance_bin as bin,
+            insurance_group as "group",
+            COUNT(*) as claim_count,
+            AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
+            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
+          FROM prescriptions
+          WHERE (${keywordConditions})
+          AND insurance_bin IS NOT NULL AND insurance_bin != ''
+          AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+          GROUP BY insurance_bin, insurance_group
+          HAVING COUNT(*) >= $${minClaimsParamIndex}
+            AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
+          ORDER BY avg_reimbursement DESC, claim_count DESC
+        `;
+      } else {
+        noMatches.push({
+          triggerId: trigger.trigger_id,
+          triggerName: trigger.display_name,
+          reason: 'No valid search terms'
+        });
+        continue;
+      }
+
+      const matches = await db.query(matchQuery, matchParams);
+
+      if (matches.rows.length === 0) {
+        noMatches.push({
+          triggerId: trigger.trigger_id,
+          triggerName: trigger.display_name,
+          reason: `No claims found with margin >= $${minMargin}`
+        });
+        continue;
+      }
+
+      // Upsert matches into trigger_bin_values
+      let verifiedCount = 0;
+      for (const match of matches.rows) {
+        await db.query(`
+          INSERT INTO trigger_bin_values (
+            trigger_id, insurance_bin, insurance_group, coverage_status,
+            verified_at, verified_claim_count, avg_reimbursement, gp_value
+          )
+          VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $5)
+          ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
+          DO UPDATE SET
+            coverage_status = 'verified',
+            verified_at = NOW(),
+            verified_claim_count = $4,
+            avg_reimbursement = $5
+        `, [
+          trigger.trigger_id,
+          match.bin,
+          match.group || null,
+          parseInt(match.claim_count),
+          parseFloat(match.avg_reimbursement) || 0
+        ]);
+        verifiedCount++;
+      }
+
+      results.push({
+        triggerId: trigger.trigger_id,
+        triggerName: trigger.display_name,
+        verifiedCount,
+        topBins: matches.rows.slice(0, 3).map(m => ({
+          bin: m.bin,
+          group: m.group,
+          avgMargin: parseFloat(m.avg_reimbursement).toFixed(2)
+        }))
+      });
+    }
+
+    console.log(`Bulk verification complete: ${results.length} triggers with matches, ${noMatches.length} triggers with no matches`);
+
+    res.json({
+      success: true,
+      summary: {
+        totalTriggers: triggers.length,
+        triggersWithMatches: results.length,
+        triggersWithNoMatches: noMatches.length,
+        minMarginUsed: minMargin
+      },
+      results,
+      noMatches
+    });
+  } catch (error) {
+    console.error('Error in bulk coverage verification:', error);
+    res.status(500).json({ error: 'Failed to verify coverage: ' + error.message });
+  }
+});
+
 export default router;
