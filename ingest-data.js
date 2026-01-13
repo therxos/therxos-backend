@@ -230,7 +230,10 @@ function inferConditions(therapeuticClass) {
 // ============================================
 // BATCH SIZE FOR INSERTS
 // ============================================
-const BATCH_SIZE = 100;
+const BATCH_SIZE = 50; // Reduced to avoid rate limits
+
+// Small delay between batches to avoid rate limits
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ============================================
 // MAIN INGESTION FUNCTION (OPTIMIZED WITH BATCHING)
@@ -327,6 +330,7 @@ async function ingestData(clientEmail, csvFilePath) {
 
     patientCount += batch.length;
     process.stdout.write(`   Inserted ${patientCount}/${patientArray.length} patients...\r`);
+    await delay(50); // Brief pause to avoid rate limits
   }
 
   // Get actual patient IDs from DB (in case of conflicts)
@@ -388,6 +392,7 @@ async function ingestData(clientEmail, csvFilePath) {
       rxCount += rxBatch.length;
       process.stdout.write(`   Inserted ${rxCount} prescriptions...\r`);
       rxBatch = [];
+      await delay(50); // Brief pause to avoid rate limits
     }
   }
 
