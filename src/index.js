@@ -83,10 +83,12 @@ const upload = multer({
 // Health check
 app.get('/health', async (req, res) => {
   const dbHealth = await db.healthCheck();
+  const dbHost = process.env.DATABASE_URL?.split('@')[1]?.split(':')[0] || 'unknown';
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    database: dbHealth
+    database: dbHealth,
+    dbHost: dbHost
   });
 });
 
