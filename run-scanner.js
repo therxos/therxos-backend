@@ -438,11 +438,8 @@ async function scanAdminTriggers(pharmacyId) {
           } else {
             gpValue = binMatch.gp_value || gpValue;
           }
-        } else {
-          // BIN values configured but this BIN isn't in the list - skip unless verified
-          // Only create opportunities for BINs we know work
-          skipDueToBin = true;
         }
+        // If BIN not in list, use default GP (don't skip)
       }
 
       if (skipDueToBin) continue;
@@ -451,13 +448,13 @@ async function scanAdminTriggers(pharmacyId) {
       const oppKey = `${rx.patient_id}:${trigger.trigger_id}`;
       if (createdOpps.has(oppKey)) continue;
 
-      // Check if opportunity already exists in DB
+      // Check if opportunity already exists in DB (same patient + same recommended drug)
       const existing = await pool.query(`
         SELECT opportunity_id FROM opportunities
         WHERE pharmacy_id = $1 AND patient_id = $2
-          AND opportunity_type = $3
+          AND recommended_drug_name = $3
           AND status IN ('Not Submitted', 'Submitted', 'Pending')
-      `, [pharmacyId, rx.patient_id, trigger.trigger_type || 'therapeutic_interchange']);
+      `, [pharmacyId, rx.patient_id, trigger.recommended_drug || trigger.display_name]);
 
       if (existing.rows.length > 0) {
         createdOpps.add(oppKey);
