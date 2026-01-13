@@ -304,6 +304,188 @@ async function scanMissingTherapy(pharmacyId) {
   return opportunities;
 }
 
+/**
+ * Admin Triggers Engine
+ * Uses triggers configured in the admin panel
+ */
+async function scanAdminTriggers(pharmacyId) {
+  console.log('   🔍 Scanning admin-configured triggers...');
+
+  const opportunities = [];
+
+  // Get all enabled triggers with their BIN values
+  const triggersResult = await pool.query(`
+    SELECT t.*,
+      COALESCE(
+        (SELECT json_agg(json_build_object(
+          'insurance_bin', tbv.insurance_bin,
+          'insurance_group', tbv.insurance_group,
+          'gp_value', tbv.gp_value,
+          'coverage_status', tbv.coverage_status
+        ))
+        FROM trigger_bin_values tbv
+        WHERE tbv.trigger_id = t.trigger_id
+        ), '[]'
+      ) as bin_values
+    FROM triggers t
+    WHERE t.is_enabled = true
+    ORDER BY t.priority ASC
+  `);
+
+  const triggers = triggersResult.rows;
+  console.log(`      Found ${triggers.length} enabled triggers`);
+
+  // Get all recent prescriptions with patient info
+  const prescriptionsResult = await pool.query(`
+    SELECT
+      pr.prescription_id,
+      pr.patient_id,
+      pr.drug_name,
+      pr.ndc,
+      pr.insurance_bin,
+      pr.insurance_group,
+      pr.prescriber_name,
+      COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, 0) as profit,
+      p.chronic_conditions
+    FROM prescriptions pr
+    JOIN patients p ON p.patient_id = pr.patient_id
+    WHERE pr.pharmacy_id = $1
+      AND pr.dispensed_date > NOW() - INTERVAL '90 days'
+    ORDER BY pr.dispensed_date DESC
+  `, [pharmacyId]);
+
+  const prescriptions = prescriptionsResult.rows;
+  console.log(`      Checking ${prescriptions.length} prescriptions against triggers`);
+
+  // Build a map of patient's other drugs for if_has/if_not_has checks
+  const patientDrugsMap = new Map();
+  for (const rx of prescriptions) {
+    if (!patientDrugsMap.has(rx.patient_id)) {
+      patientDrugsMap.set(rx.patient_id, []);
+    }
+    patientDrugsMap.get(rx.patient_id).push(rx.drug_name?.toUpperCase() || '');
+  }
+
+  // Track which patient+trigger combos we've already created
+  const createdOpps = new Set();
+
+  for (const trigger of triggers) {
+    const detectionKeywords = trigger.detection_keywords || [];
+    const excludeKeywords = trigger.exclude_keywords || [];
+    const ifHasKeywords = trigger.if_has_keywords || [];
+    const ifNotHasKeywords = trigger.if_not_has_keywords || [];
+    const binValues = typeof trigger.bin_values === 'string'
+      ? JSON.parse(trigger.bin_values)
+      : trigger.bin_values || [];
+
+    if (detectionKeywords.length === 0) continue;
+
+    for (const rx of prescriptions) {
+      const drugName = (rx.drug_name || '').toUpperCase();
+
+      // Check if ALL detection keywords match
+      const matchesDetection = detectionKeywords.every(kw =>
+        drugName.includes(kw.toUpperCase())
+      );
+      if (!matchesDetection) continue;
+
+      // Check exclusions - skip if ANY exclude keyword matches
+      const matchesExclusion = excludeKeywords.some(kw =>
+        drugName.includes(kw.toUpperCase())
+      );
+      if (matchesExclusion) continue;
+
+      // Check if_has_keywords - patient must have at least one of these drugs
+      if (ifHasKeywords.length > 0) {
+        const patientDrugs = patientDrugsMap.get(rx.patient_id) || [];
+        const hasRequired = ifHasKeywords.some(kw =>
+          patientDrugs.some(d => d.includes(kw.toUpperCase()))
+        );
+        if (!hasRequired) continue;
+      }
+
+      // Check if_not_has_keywords - patient must NOT have any of these drugs
+      if (ifNotHasKeywords.length > 0) {
+        const patientDrugs = patientDrugsMap.get(rx.patient_id) || [];
+        const hasExcluded = ifNotHasKeywords.some(kw =>
+          patientDrugs.some(d => d.includes(kw.toUpperCase()))
+        );
+        if (hasExcluded) continue;
+      }
+
+      // Determine GP value based on BIN/Group
+      let gpValue = trigger.default_gp_value || 50;
+      let skipDueToBin = false;
+
+      if (binValues.length > 0) {
+        // Try exact BIN + Group match first
+        let binMatch = binValues.find(bv =>
+          bv.insurance_bin === rx.insurance_bin &&
+          bv.insurance_group === rx.insurance_group
+        );
+
+        // Fall back to BIN-only match
+        if (!binMatch) {
+          binMatch = binValues.find(bv =>
+            bv.insurance_bin === rx.insurance_bin &&
+            !bv.insurance_group
+          );
+        }
+
+        if (binMatch) {
+          if (binMatch.coverage_status === 'excluded') {
+            skipDueToBin = true;
+          } else {
+            gpValue = binMatch.gp_value || gpValue;
+          }
+        } else {
+          // BIN values configured but this BIN isn't in the list - skip unless verified
+          // Only create opportunities for BINs we know work
+          skipDueToBin = true;
+        }
+      }
+
+      if (skipDueToBin) continue;
+
+      // Deduplicate: one opp per patient per trigger
+      const oppKey = `${rx.patient_id}:${trigger.trigger_id}`;
+      if (createdOpps.has(oppKey)) continue;
+
+      // Check if opportunity already exists in DB
+      const existing = await pool.query(`
+        SELECT opportunity_id FROM opportunities
+        WHERE pharmacy_id = $1 AND patient_id = $2
+          AND opportunity_type = $3
+          AND status IN ('Not Submitted', 'Submitted', 'Pending')
+      `, [pharmacyId, rx.patient_id, trigger.trigger_type || 'therapeutic_interchange']);
+
+      if (existing.rows.length > 0) {
+        createdOpps.add(oppKey);
+        continue;
+      }
+
+      createdOpps.add(oppKey);
+
+      opportunities.push({
+        pharmacy_id: pharmacyId,
+        patient_id: rx.patient_id,
+        prescription_id: rx.prescription_id,
+        opportunity_type: trigger.trigger_type || 'therapeutic_interchange',
+        current_ndc: rx.ndc,
+        current_drug_name: rx.drug_name,
+        recommended_drug_name: trigger.recommended_drug || trigger.display_name,
+        potential_margin_gain: gpValue,
+        clinical_rationale: trigger.clinical_rationale || trigger.action_instructions || `${trigger.display_name} opportunity identified.`,
+        clinical_priority: trigger.priority <= 2 ? 'high' : trigger.priority <= 4 ? 'medium' : 'low',
+        prescriber_name: rx.prescriber_name,
+      });
+    }
+  }
+
+  console.log(`      Generated ${opportunities.length} trigger-based opportunities`);
+  return opportunities;
+}
+
 // ============================================
 // MAIN SCANNER FUNCTION
 // ============================================
@@ -343,7 +525,11 @@ async function runScanner(clientEmail) {
   const missingOpps = await scanMissingTherapy(pharmacy_id);
   allOpportunities.push(...missingOpps);
   console.log(`      Found ${missingOpps.length} missing therapy opportunities`);
-  
+
+  const triggerOpps = await scanAdminTriggers(pharmacy_id);
+  allOpportunities.push(...triggerOpps);
+  console.log(`      Found ${triggerOpps.length} admin trigger opportunities`);
+
   // Insert opportunities
   console.log(`\n💾 Saving ${allOpportunities.length} opportunities to database...`);
   
@@ -352,15 +538,16 @@ async function runScanner(clientEmail) {
     try {
       await pool.query(`
         INSERT INTO opportunities (
-          opportunity_id, pharmacy_id, patient_id, opportunity_type,
+          opportunity_id, pharmacy_id, patient_id, prescription_id, opportunity_type,
           current_ndc, current_drug_name, recommended_ndc, recommended_drug_name,
           potential_margin_gain, annual_margin_gain,
-          clinical_rationale, clinical_priority, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          clinical_rationale, clinical_priority, prescriber_name, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       `, [
         uuidv4(),
         opp.pharmacy_id,
         opp.patient_id,
+        opp.prescription_id || null,
         opp.opportunity_type,
         opp.current_ndc,
         opp.current_drug_name,
@@ -370,6 +557,7 @@ async function runScanner(clientEmail) {
         opp.potential_margin_gain * 12,
         opp.clinical_rationale,
         opp.clinical_priority,
+        opp.prescriber_name || null,
         'Not Submitted'
       ]);
       inserted++;
