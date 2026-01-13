@@ -151,6 +151,13 @@ function parseAmount(amountStr) {
   return parseFloat(amountStr.replace(/[$,]/g, '')) || 0;
 }
 
+// Pad BIN to 6 digits (standard format)
+function padBin(bin) {
+  if (!bin) return null;
+  const cleaned = bin.toString().replace(/\D/g, '');
+  return cleaned.padStart(6, '0');
+}
+
 // Extract chronic conditions from therapeutic classes
 function inferConditions(therapeuticClass) {
   const conditions = [];
@@ -280,7 +287,7 @@ async function ingestData(clientEmail, csvFilePath) {
             patientHash,
             parseDate(row.patient_dob),
             conditions,
-            row.insurance_bin,
+            padBin(row.insurance_bin),
             row.group_number
           ]);
           patientId = result.rows[0].patient_id;
@@ -318,7 +325,7 @@ async function ingestData(clientEmail, csvFilePath) {
         parseFloat(row.quantity) || parseFloat(row.quantity_dispensed) || 0,
         parseInt(row.days_supply) || 30,
         dispensedDate,
-        row.insurance_bin,
+        padBin(row.insurance_bin),
         row.group_number || row.insurance_pcn,
         parseAmount(row.patient_pay),
         parseAmount(row.insurance_pay),
