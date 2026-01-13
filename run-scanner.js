@@ -516,28 +516,20 @@ async function runScanner(clientEmail) {
   const { pharmacy_id, client_name } = clientResult.rows[0];
   console.log(`📦 Scanning for: ${client_name}\n`);
   
-  // Run all scanners
+  // Run admin triggers scanner only (hardcoded engines disabled - use admin panel for full control)
   const allOpportunities = [];
-  
-  const ndcOpps = await scanNDCOptimizations(pharmacy_id);
-  allOpportunities.push(...ndcOpps);
-  console.log(`      Found ${ndcOpps.length} NDC optimization opportunities`);
-  
-  const brandOpps = await scanBrandToGeneric(pharmacy_id);
-  allOpportunities.push(...brandOpps);
-  console.log(`      Found ${brandOpps.length} brand-to-generic opportunities`);
-  
-  const interchangeOpps = await scanTherapeuticInterchange(pharmacy_id);
-  allOpportunities.push(...interchangeOpps);
-  console.log(`      Found ${interchangeOpps.length} therapeutic interchange opportunities`);
-  
-  const missingOpps = await scanMissingTherapy(pharmacy_id);
-  allOpportunities.push(...missingOpps);
-  console.log(`      Found ${missingOpps.length} missing therapy opportunities`);
+
+  // Legacy hardcoded engines - DISABLED
+  // These produced low-quality opportunities with poor margins
+  // Use admin-configured triggers instead for full control over detection and pricing
+  // const ndcOpps = await scanNDCOptimizations(pharmacy_id);
+  // const brandOpps = await scanBrandToGeneric(pharmacy_id);
+  // const interchangeOpps = await scanTherapeuticInterchange(pharmacy_id);
+  // const missingOpps = await scanMissingTherapy(pharmacy_id);
 
   const triggerOpps = await scanAdminTriggers(pharmacy_id);
   allOpportunities.push(...triggerOpps);
-  console.log(`      Found ${triggerOpps.length} admin trigger opportunities`);
+  console.log(`   ✅ Found ${triggerOpps.length} opportunities from admin triggers`);
 
   // Insert opportunities
   console.log(`\n💾 Saving ${allOpportunities.length} opportunities to database...`);
