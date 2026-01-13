@@ -228,11 +228,17 @@ function inferConditions(therapeuticClass) {
 }
 
 // ============================================
-// MAIN INGESTION FUNCTION
+// BATCH SIZE FOR INSERTS
+// ============================================
+const BATCH_SIZE = 100;
+
+// ============================================
+// MAIN INGESTION FUNCTION (OPTIMIZED WITH BATCHING)
 // ============================================
 async function ingestData(clientEmail, csvFilePath) {
   console.log(`\n🚀 Starting data ingestion for ${clientEmail}...\n`);
-  
+  const startTime = Date.now();
+
   // Get client and pharmacy info
   const clientResult = await pool.query(`
     SELECT c.client_id, p.pharmacy_id, c.client_name
@@ -240,202 +246,194 @@ async function ingestData(clientEmail, csvFilePath) {
     JOIN pharmacies p ON p.client_id = c.client_id
     WHERE c.submitter_email = $1
   `, [clientEmail.toLowerCase()]);
-  
+
   if (clientResult.rows.length === 0) {
     throw new Error(`Client not found: ${clientEmail}`);
   }
-  
+
   const { client_id, pharmacy_id, client_name } = clientResult.rows[0];
   console.log(`📦 Found client: ${client_name}`);
   console.log(`   Pharmacy ID: ${pharmacy_id}\n`);
-  
+
   // Read and parse CSV
   console.log(`📄 Reading CSV file: ${csvFilePath}`);
   const csvContent = fs.readFileSync(csvFilePath, 'utf-8');
   const rows = parseCSV(csvContent);
   console.log(`   Found ${rows.length} prescription records\n`);
-  
-  // Track patients and stats
-  const patients = new Map();
-  let rxCount = 0;
+
+  // ========== PHASE 1: Build patient map in memory ==========
+  console.log('👥 Phase 1: Building patient data...');
+  const patientMap = new Map(); // hash -> { patientId, firstName, lastName, dob, conditions, bin, pcn }
   let skipped = 0;
-  
-  // Process each row
-  console.log('💊 Processing prescriptions...');
-  
+
   for (const row of rows) {
-    try {
-      // Skip if missing required fields
-      if (!row.patient_name || !row.ndc || !row.drug_name) {
-        skipped++;
-        if (skipped <= 3) {
-          console.log(`   Skipped: missing required field - name:${!!row.patient_name} ndc:${!!row.ndc} drug:${!!row.drug_name}`);
-        }
-        continue;
-      }
-      
-      // Generate patient hash
-      const patientHash = generatePatientHash(row.patient_name, row.patient_dob || '');
-      
-      // Get or create patient
-      let patientId;
-      if (patients.has(patientHash)) {
-        patientId = patients.get(patientHash).patientId;
-        // Update conditions
-        const existingConditions = patients.get(patientHash).conditions;
-        const newConditions = inferConditions(row.therapeutic_class);
-        patients.get(patientHash).conditions = [...new Set([...existingConditions, ...newConditions])];
-      } else {
-        // Check if patient exists in DB
-        const existingPatient = await pool.query(
-          'SELECT patient_id, chronic_conditions FROM patients WHERE patient_hash = $1 AND pharmacy_id = $2',
-          [patientHash, pharmacy_id]
-        );
-        
-        if (existingPatient.rows.length > 0) {
-          patientId = existingPatient.rows[0].patient_id;
-          const existingConditions = existingPatient.rows[0].chronic_conditions || [];
-          patients.set(patientHash, { 
-            patientId, 
-            conditions: [...new Set([...existingConditions, ...inferConditions(row.therapeutic_class)])]
-          });
-        } else {
-          patientId = uuidv4();
-          const conditions = inferConditions(row.therapeutic_class);
-          const { firstName, lastName } = parsePatientName(row.patient_name);
-
-          const result = await pool.query(`
-            INSERT INTO patients (
-              patient_id, pharmacy_id, patient_hash, first_name, last_name, date_of_birth,
-              chronic_conditions, primary_insurance_bin, primary_insurance_pcn
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT ON CONSTRAINT patients_patient_hash_key DO UPDATE SET
-              first_name = COALESCE(EXCLUDED.first_name, patients.first_name),
-              last_name = COALESCE(EXCLUDED.last_name, patients.last_name),
-              chronic_conditions = EXCLUDED.chronic_conditions,
-              primary_insurance_bin = EXCLUDED.primary_insurance_bin,
-              primary_insurance_pcn = EXCLUDED.primary_insurance_pcn,
-              updated_at = NOW()
-            RETURNING patient_id
-          `, [
-            patientId,
-            pharmacy_id,
-            patientHash,
-            firstName,
-            lastName,
-            parseDate(row.patient_dob),
-            conditions,
-            padBin(row.insurance_bin),
-            row.group_number
-          ]);
-          patientId = result.rows[0].patient_id;
-
-          patients.set(patientHash, { patientId, conditions });
-        }
-      }
-      
-      // Insert prescription (upsert based on rx_number)
-      // RX30 uses Fill Date -> dispensed_date, PioneerRx uses Date Written -> date_written
-      const dispensedDate = parseDate(row.dispensed_date) || parseDate(row.date_written) || new Date().toISOString().split('T')[0];
-
-      await pool.query(`
-        INSERT INTO prescriptions (
-          prescription_id, pharmacy_id, patient_id, rx_number, ndc, drug_name,
-          quantity_dispensed, days_supply, dispensed_date,
-          insurance_bin, insurance_group,
-          patient_pay, insurance_pay, acquisition_cost,
-          prescriber_name, daw_code, source, raw_data
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-        ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO UPDATE SET
-          drug_name = EXCLUDED.drug_name,
-          quantity_dispensed = EXCLUDED.quantity_dispensed,
-          patient_pay = EXCLUDED.patient_pay,
-          insurance_pay = EXCLUDED.insurance_pay,
-          acquisition_cost = EXCLUDED.acquisition_cost,
-          raw_data = EXCLUDED.raw_data
-      `, [
-        uuidv4(),
-        pharmacy_id,
-        patientId,
-        row.rx_number,
-        row.ndc?.replace(/-/g, ''),
-        row.drug_name,
-        parseFloat(row.quantity) || parseFloat(row.quantity_dispensed) || 0,
-        parseInt(row.days_supply) || 30,
-        dispensedDate,
-        padBin(row.insurance_bin),
-        row.group_number || row.insurance_pcn,
-        parseAmount(row.patient_pay),
-        parseAmount(row.insurance_pay),
-        parseAmount(row.acquisition_cost) || 0,
-        row.prescriber_name,
-        row.daw_code,
-        'csv_upload',
-        JSON.stringify({
-          therapeutic_class: row.therapeutic_class,
-          pdc: row.pdc,
-          awp: parseAmount(row.awp),
-          net_profit: parseAmount(row.net_profit),
-          gross_profit: parseAmount(row.gross_profit),
-          plan_name: row.plan_name,
-          total_paid: parseAmount(row.total_paid)
-        })
-      ]);
-      
-      rxCount++;
-      
-      if (rxCount % 100 === 0) {
-        process.stdout.write(`   Processed ${rxCount} prescriptions...\r`);
-      }
-      
-    } catch (error) {
-      if (skipped < 5) {
-        console.error(`   Error processing row: ${error.message}`);
-      }
+    if (!row.patient_name || !row.ndc || !row.drug_name) {
       skipped++;
+      continue;
+    }
+
+    const patientHash = generatePatientHash(row.patient_name, row.patient_dob || '');
+
+    if (patientMap.has(patientHash)) {
+      // Merge conditions
+      const existing = patientMap.get(patientHash);
+      const newConditions = inferConditions(row.therapeutic_class);
+      existing.conditions = [...new Set([...existing.conditions, ...newConditions])];
+    } else {
+      const { firstName, lastName } = parsePatientName(row.patient_name);
+      patientMap.set(patientHash, {
+        patientId: uuidv4(),
+        patientHash,
+        firstName,
+        lastName,
+        dob: parseDate(row.patient_dob),
+        conditions: inferConditions(row.therapeutic_class),
+        bin: padBin(row.insurance_bin),
+        pcn: row.group_number
+      });
     }
   }
-  
-  // Update patient conditions
-  console.log('\n\n👥 Updating patient conditions...');
-  for (const [hash, data] of patients) {
-    if (data.conditions.length > 0) {
-      await pool.query(
-        'UPDATE patients SET chronic_conditions = $1 WHERE patient_id = $2',
-        [data.conditions, data.patientId]
-      );
+  console.log(`   Found ${patientMap.size} unique patients\n`);
+
+  // ========== PHASE 2: Batch upsert patients ==========
+  console.log('👥 Phase 2: Inserting patients in batches...');
+  const patientArray = Array.from(patientMap.values());
+  let patientCount = 0;
+
+  for (let i = 0; i < patientArray.length; i += BATCH_SIZE) {
+    const batch = patientArray.slice(i, i + BATCH_SIZE);
+
+    // Build multi-row INSERT
+    const values = [];
+    const params = [];
+    let paramIdx = 1;
+
+    for (const p of batch) {
+      values.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
+      params.push(p.patientId, pharmacy_id, p.patientHash, p.firstName, p.lastName, p.dob, p.conditions, p.bin, p.pcn);
     }
-  }
-  
-  // Log ingestion
-  try {
+
     await pool.query(`
-      INSERT INTO ingestion_logs (
-        log_id, pharmacy_id, source_type, file_name,
-        records_received, records_processed, records_failed, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    `, [
-      uuidv4(),
-      pharmacy_id,
-      'csv_upload',
-      path.basename(csvFilePath),
-      rows.length,
-      rxCount,
-      skipped,
-      'completed'
-    ]);
-  } catch (logError) {
-    // Ingestion log table might have different schema, skip logging
-    console.log('   (Skipped ingestion log - table schema mismatch)');
+      INSERT INTO patients (patient_id, pharmacy_id, patient_hash, first_name, last_name, date_of_birth, chronic_conditions, primary_insurance_bin, primary_insurance_pcn)
+      VALUES ${values.join(', ')}
+      ON CONFLICT ON CONSTRAINT patients_patient_hash_key DO UPDATE SET
+        first_name = COALESCE(EXCLUDED.first_name, patients.first_name),
+        last_name = COALESCE(EXCLUDED.last_name, patients.last_name),
+        chronic_conditions = EXCLUDED.chronic_conditions,
+        primary_insurance_bin = EXCLUDED.primary_insurance_bin,
+        primary_insurance_pcn = EXCLUDED.primary_insurance_pcn,
+        updated_at = NOW()
+    `, params);
+
+    patientCount += batch.length;
+    process.stdout.write(`   Inserted ${patientCount}/${patientArray.length} patients...\r`);
   }
-  
-  console.log(`\n✅ Ingestion complete!`);
-  console.log(`   📊 Total records: ${rows.length}`);
-  console.log(`   ✓ Processed: ${rxCount}`);
-  console.log(`   ✗ Skipped: ${skipped}`);
-  console.log(`   👥 Unique patients: ${patients.size}`);
-  
-  return { rxCount, patients: patients.size, skipped };
+
+  // Get actual patient IDs from DB (in case of conflicts)
+  const patientIdResult = await pool.query(
+    'SELECT patient_id, patient_hash FROM patients WHERE pharmacy_id = $1',
+    [pharmacy_id]
+  );
+  const hashToId = new Map();
+  for (const row of patientIdResult.rows) {
+    hashToId.set(row.patient_hash, row.patient_id);
+  }
+  console.log(`\n   ✓ ${patientCount} patients processed\n`);
+
+  // ========== PHASE 3: Batch upsert prescriptions ==========
+  console.log('💊 Phase 3: Inserting prescriptions in batches...');
+  let rxCount = 0;
+  let rxBatch = [];
+
+  for (const row of rows) {
+    if (!row.patient_name || !row.ndc || !row.drug_name) continue;
+
+    const patientHash = generatePatientHash(row.patient_name, row.patient_dob || '');
+    const patientId = hashToId.get(patientHash);
+    if (!patientId) continue;
+
+    const dispensedDate = parseDate(row.dispensed_date) || parseDate(row.date_written) || new Date().toISOString().split('T')[0];
+
+    rxBatch.push({
+      prescription_id: uuidv4(),
+      pharmacy_id,
+      patient_id: patientId,
+      rx_number: row.rx_number,
+      ndc: row.ndc?.replace(/-/g, ''),
+      drug_name: row.drug_name,
+      quantity: parseFloat(row.quantity) || parseFloat(row.quantity_dispensed) || 0,
+      days_supply: parseInt(row.days_supply) || 30,
+      dispensed_date: dispensedDate,
+      insurance_bin: padBin(row.insurance_bin),
+      insurance_group: row.group_number || row.insurance_pcn,
+      patient_pay: parseAmount(row.patient_pay),
+      insurance_pay: parseAmount(row.insurance_pay),
+      acquisition_cost: parseAmount(row.acquisition_cost) || 0,
+      prescriber_name: row.prescriber_name,
+      daw_code: row.daw_code,
+      raw_data: JSON.stringify({
+        therapeutic_class: row.therapeutic_class,
+        pdc: row.pdc,
+        awp: parseAmount(row.awp),
+        net_profit: parseAmount(row.net_profit),
+        gross_profit: parseAmount(row.gross_profit),
+        plan_name: row.plan_name,
+        total_paid: parseAmount(row.total_paid)
+      })
+    });
+
+    // Flush batch when full
+    if (rxBatch.length >= BATCH_SIZE) {
+      await insertPrescriptionBatch(rxBatch);
+      rxCount += rxBatch.length;
+      process.stdout.write(`   Inserted ${rxCount} prescriptions...\r`);
+      rxBatch = [];
+    }
+  }
+
+  // Flush remaining
+  if (rxBatch.length > 0) {
+    await insertPrescriptionBatch(rxBatch);
+    rxCount += rxBatch.length;
+  }
+  console.log(`\n   ✓ ${rxCount} prescriptions processed\n`);
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`⏱️  Total time: ${elapsed} seconds\n`);
+
+  return { rxCount, patients: patientMap.size, skipped };
+}
+
+// Helper function for batch prescription insert
+async function insertPrescriptionBatch(batch) {
+  const values = [];
+  const params = [];
+  let paramIdx = 1;
+
+  for (const rx of batch) {
+    values.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
+    params.push(
+      rx.prescription_id, rx.pharmacy_id, rx.patient_id, rx.rx_number, rx.ndc, rx.drug_name,
+      rx.quantity, rx.days_supply, rx.dispensed_date, rx.insurance_bin, rx.insurance_group,
+      rx.patient_pay, rx.insurance_pay, rx.acquisition_cost, rx.prescriber_name, rx.daw_code,
+      'csv_upload', rx.raw_data
+    );
+  }
+
+  await pool.query(`
+    INSERT INTO prescriptions (
+      prescription_id, pharmacy_id, patient_id, rx_number, ndc, drug_name,
+      quantity_dispensed, days_supply, dispensed_date, insurance_bin, insurance_group,
+      patient_pay, insurance_pay, acquisition_cost, prescriber_name, daw_code, source, raw_data
+    ) VALUES ${values.join(', ')}
+    ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO UPDATE SET
+      drug_name = EXCLUDED.drug_name,
+      quantity_dispensed = EXCLUDED.quantity_dispensed,
+      patient_pay = EXCLUDED.patient_pay,
+      insurance_pay = EXCLUDED.insurance_pay,
+      acquisition_cost = EXCLUDED.acquisition_cost,
+      raw_data = EXCLUDED.raw_data
+  `, params);
 }
 
 // ============================================
