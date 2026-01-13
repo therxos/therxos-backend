@@ -245,7 +245,7 @@ async function ingestData(clientEmail, csvFilePath) {
               patient_id, pharmacy_id, patient_hash, date_of_birth,
               chronic_conditions, primary_insurance_bin, primary_insurance_pcn
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (patient_hash) DO UPDATE SET
+            ON CONFLICT ON CONSTRAINT patients_patient_hash_key DO UPDATE SET
               chronic_conditions = EXCLUDED.chronic_conditions,
               primary_insurance_bin = EXCLUDED.primary_insurance_bin,
               primary_insurance_pcn = EXCLUDED.primary_insurance_pcn,
