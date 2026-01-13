@@ -465,7 +465,8 @@ router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) =
           'coverageStatus', tbv.coverage_status,
           'verifiedAt', tbv.verified_at,
           'verifiedClaimCount', tbv.verified_claim_count,
-          'avgReimbursement', tbv.avg_reimbursement
+          'avgReimbursement', tbv.avg_reimbursement,
+          'avgQty', tbv.avg_qty
         )) FROM trigger_bin_values tbv WHERE tbv.trigger_id = t.trigger_id) as bin_values,
         (SELECT json_agg(json_build_object(
           'type', tr.restriction_type,
@@ -542,6 +543,7 @@ router.get('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
         verified_at as "verifiedAt",
         verified_claim_count as "verifiedClaimCount",
         avg_reimbursement as "avgReimbursement",
+        avg_qty as "avgQty",
         created_at as "createdAt",
         updated_at as "updatedAt"
       FROM trigger_bin_values
@@ -895,7 +897,7 @@ router.get('/bins/:bin/groups', authenticateToken, requireSuperAdmin, async (req
 router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id: triggerId } = req.params;
-    const { minClaims = 1, daysBack = 365, searchKeywords, minMargin = 0 } = req.body;
+    const { minClaims = 1, daysBack = 365, searchKeywords, minMargin = 10 } = req.body;
 
     // Get trigger info
     const triggerResult = await db.query(
@@ -983,6 +985,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_group as "group",
           COUNT(*) as claim_count,
           AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
+          AVG(COALESCE(quantity, 1)) as avg_qty,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (
@@ -1010,6 +1013,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_group as "group",
           COUNT(*) as claim_count,
           AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
+          AVG(COALESCE(quantity, 1)) as avg_qty,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
@@ -1031,22 +1035,24 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       const result = await db.query(`
         INSERT INTO trigger_bin_values (
           trigger_id, insurance_bin, insurance_group, coverage_status,
-          verified_at, verified_claim_count, avg_reimbursement, gp_value
+          verified_at, verified_claim_count, avg_reimbursement, avg_qty, gp_value
         )
-        VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $5)
+        VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $6, $5)
         ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
         DO UPDATE SET
           coverage_status = 'verified',
           verified_at = NOW(),
           verified_claim_count = $4,
-          avg_reimbursement = $5
+          avg_reimbursement = $5,
+          avg_qty = $6
         RETURNING *
       `, [
         triggerId,
         match.bin,
         match.group || null,
         parseInt(match.claim_count),
-        parseFloat(match.avg_reimbursement) || 0
+        parseFloat(match.avg_reimbursement) || 0,
+        parseFloat(match.avg_qty) || 1
       ]);
       verified.push(result.rows[0]);
     }
@@ -1320,20 +1326,24 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
         const annualValue = netGain * annualFills;
         const rationale = trigger.action_instructions || trigger.clinical_rationale || `${trigger.display_name || trigger.trigger_type} opportunity`;
 
+        // Get avg_qty from binConfig if available
+        const avgDispensedQty = binConfig?.avg_qty || null;
+
         // Insert opportunity - use trigger_type for opportunity_type (matches DB constraint)
         await db.query(`
           INSERT INTO opportunities (
             opportunity_id, pharmacy_id, patient_id, opportunity_type,
             current_drug_name, recommended_drug_name, potential_margin_gain,
             annual_margin_gain, current_margin, prescriber_name,
-            status, clinical_priority, clinical_rationale, staff_notes
-          ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            status, clinical_priority, clinical_rationale, staff_notes, avg_dispensed_qty
+          ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         `, [
           pharmacy.pharmacy_id, patientId, trigger.trigger_type,
           matchedDrug, trigger.recommended_drug, netGain, annualValue,
           currentGP, matchedRx?.prescriber_name || null,
           'Not Submitted', trigger.priority || 'medium', rationale,
-          `Scanned for trigger "${trigger.display_name}" on ${new Date().toISOString().split('T')[0]}`
+          `Scanned for trigger "${trigger.display_name}" on ${new Date().toISOString().split('T')[0]}`,
+          avgDispensedQty
         ]);
 
         existingOpps.add(oppKey);
@@ -1792,13 +1802,16 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           // Use action_instructions for clinical rationale (what staff should do)
           const rationale = trigger.action_instructions || trigger.clinical_rationale || `${trigger.display_name || trigger.trigger_type} opportunity`;
 
+          // Get avg_qty from binConfig if available
+          const avgDispensedQty = binConfig?.avg_qty || null;
+
           await db.query(`
             INSERT INTO opportunities (
               opportunity_id, pharmacy_id, patient_id, opportunity_type,
               current_drug_name, recommended_drug_name, potential_margin_gain,
               annual_margin_gain, current_margin, prescriber_name,
-              status, clinical_priority, clinical_rationale, staff_notes
-            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+              status, clinical_priority, clinical_rationale, staff_notes, avg_dispensed_qty
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
           `, [
             pharmacyId,
             patientId,
@@ -1812,7 +1825,8 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
             'Not Submitted',
             trigger.priority || 'medium',
             rationale,
-            `Auto-detected by rescan on ${new Date().toISOString().split('T')[0]}`
+            `Auto-detected by rescan on ${new Date().toISOString().split('T')[0]}`,
+            avgDispensedQty
           ]);
 
           newOpportunities++;
@@ -2198,6 +2212,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               ndc,
               COUNT(*) as claim_count,
               AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin,
+              AVG(COALESCE(quantity, 1)) as avg_qty,
               ROW_NUMBER() OVER (
                 PARTITION BY insurance_bin, insurance_group
                 ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) DESC
@@ -2210,7 +2225,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
             HAVING COUNT(*) >= $${minClaimsParamIndex}
               AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
           )
-          SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc, claim_count, avg_margin
+          SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc, claim_count, avg_margin, avg_qty
           FROM ranked_products
           WHERE rank = 1
           ORDER BY avg_margin DESC
@@ -2227,7 +2242,8 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               drug_name as best_drug,
               ndc as best_ndc,
               COUNT(*) as claim_count,
-              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin
+              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin,
+              AVG(COALESCE(quantity, 1)) as avg_qty
             FROM prescriptions
             WHERE (${keywordConditions ? `(${keywordConditions})` : 'FALSE'} OR ndc = $${ndcParamIndex})
               AND insurance_bin IS NOT NULL AND insurance_bin != ''
@@ -2245,7 +2261,8 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               drug_name as best_drug,
               ndc as best_ndc,
               COUNT(*) as claim_count,
-              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin
+              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin,
+              AVG(COALESCE(quantity, 1)) as avg_qty
             FROM prescriptions
             WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
               AND insurance_bin IS NOT NULL AND insurance_bin != ''
@@ -2276,9 +2293,9 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
           INSERT INTO trigger_bin_values (
             trigger_id, insurance_bin, insurance_group, coverage_status,
             verified_at, verified_claim_count, avg_reimbursement, gp_value,
-            best_drug_name, best_ndc
+            best_drug_name, best_ndc, avg_qty
           )
-          VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $5, $6, $7)
+          VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $5, $6, $7, $8)
           ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
           DO UPDATE SET
             coverage_status = 'verified',
@@ -2287,7 +2304,8 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
             avg_reimbursement = $5,
             gp_value = $5,
             best_drug_name = $6,
-            best_ndc = $7
+            best_ndc = $7,
+            avg_qty = $8
         `, [
           trigger.trigger_id,
           match.bin,
@@ -2295,7 +2313,8 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
           parseInt(match.claim_count),
           parseFloat(match.avg_margin) || 0,
           match.best_drug || null,
-          match.best_ndc || null
+          match.best_ndc || null,
+          parseFloat(match.avg_qty) || null
         ]);
         verifiedCount++;
       }
@@ -2309,7 +2328,8 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
           bin: m.bin,
           group: m.group,
           bestDrug: m.best_drug,
-          avgMargin: parseFloat(m.avg_margin).toFixed(2)
+          avgMargin: parseFloat(m.avg_margin).toFixed(2),
+          avgQty: parseFloat(m.avg_qty || 0).toFixed(1)
         }))
       });
     }
