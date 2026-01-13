@@ -17,9 +17,10 @@ const pool = new Pool({
 });
 
 // ============================================
-// COLUMN MAPPING - PioneerRx Format
+// COLUMN MAPPING - Supports PioneerRx & RX30
 // ============================================
 const COLUMN_MAP = {
+  // PioneerRx Format
   'Rx Number': 'rx_number',
   'Patient Full Name Last then First': 'patient_name',
   'Patient Date of Birth': 'patient_dob',
@@ -44,6 +45,27 @@ const COLUMN_MAP = {
   'Primary Network Reimbursement': 'insurance_pay',
   'Prescriber Full Name': 'prescriber_name',
   'Prescriber Fax Number': 'prescriber_fax',
+
+  // RX30 Format
+  'Fill Date': 'dispensed_date',
+  'Refill Number': 'refill_number',
+  'Customer Name': 'patient_name',
+  'Date of Birth': 'patient_dob',
+  'Drug Name': 'drug_name',
+  'NDC': 'ndc',
+  'DEA Class': 'dea_class',
+  'Price': 'awp',
+  'Plan Paid Amount - Total': 'insurance_pay',
+  'Patient Pay Amount': 'patient_pay',
+  'Total Paid': 'total_paid',
+  'Actual Cost': 'acquisition_cost',
+  'Gross Profit': 'gross_profit',
+  'Written Date': 'date_written',
+  'Delivered Date': 'delivered_date',
+  'Plan ID': 'plan_name',
+  'PCN': 'insurance_pcn',
+  'BIN': 'insurance_bin',
+  'Prescriber Name': 'prescriber_name',
 };
 
 // Parse CSV (auto-detect delimiter)
@@ -267,8 +289,9 @@ async function ingestData(clientEmail, csvFilePath) {
       }
       
       // Insert prescription (upsert based on rx_number)
-      const dispensedDate = parseDate(row.date_written) || new Date().toISOString().split('T')[0];
-      
+      // RX30 uses Fill Date -> dispensed_date, PioneerRx uses Date Written -> date_written
+      const dispensedDate = parseDate(row.dispensed_date) || parseDate(row.date_written) || new Date().toISOString().split('T')[0];
+
       await pool.query(`
         INSERT INTO prescriptions (
           prescription_id, pharmacy_id, patient_id, rx_number, ndc, drug_name,
@@ -280,7 +303,10 @@ async function ingestData(clientEmail, csvFilePath) {
         ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO UPDATE SET
           drug_name = EXCLUDED.drug_name,
           quantity_dispensed = EXCLUDED.quantity_dispensed,
-          patient_pay = EXCLUDED.patient_pay
+          patient_pay = EXCLUDED.patient_pay,
+          insurance_pay = EXCLUDED.insurance_pay,
+          acquisition_cost = EXCLUDED.acquisition_cost,
+          raw_data = EXCLUDED.raw_data
       `, [
         uuidv4(),
         pharmacy_id,
@@ -288,14 +314,14 @@ async function ingestData(clientEmail, csvFilePath) {
         row.rx_number,
         row.ndc?.replace(/-/g, ''),
         row.drug_name,
-        parseFloat(row.quantity) || 0,
+        parseFloat(row.quantity) || parseFloat(row.quantity_dispensed) || 0,
         parseInt(row.days_supply) || 30,
         dispensedDate,
         row.insurance_bin,
-        row.group_number,
+        row.group_number || row.insurance_pcn,
         parseAmount(row.patient_pay),
         parseAmount(row.insurance_pay),
-        0, // acquisition_cost - would need pricing data
+        parseAmount(row.acquisition_cost) || 0,
         row.prescriber_name,
         row.daw_code,
         'csv_upload',
@@ -304,7 +330,9 @@ async function ingestData(clientEmail, csvFilePath) {
           pdc: row.pdc,
           awp: parseAmount(row.awp),
           net_profit: parseAmount(row.net_profit),
-          plan_name: row.plan_name
+          gross_profit: parseAmount(row.gross_profit),
+          plan_name: row.plan_name,
+          total_paid: parseAmount(row.total_paid)
         })
       ]);
       
