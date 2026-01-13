@@ -370,7 +370,7 @@ async function runScanner(clientEmail) {
         opp.potential_margin_gain * 12,
         opp.clinical_rationale,
         opp.clinical_priority,
-        'new'
+        'Not Submitted'
       ]);
       inserted++;
     } catch (error) {
