@@ -158,6 +158,39 @@ function padBin(bin) {
   return cleaned.padStart(6, '0');
 }
 
+// Parse patient name and return first 3 letters of first/last for privacy
+function parsePatientName(fullName) {
+  if (!fullName) return { firstName: null, lastName: null };
+
+  // Clean up the name - remove suffixes like (BP), Jr, etc
+  const cleanName = fullName.replace(/\([^)]*\)/g, '').replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').trim();
+
+  let firstName = '';
+  let lastName = '';
+
+  if (cleanName.includes(',')) {
+    // Format: "Last, First" or "Last, First Middle"
+    const parts = cleanName.split(',').map(p => p.trim());
+    lastName = parts[0] || '';
+    firstName = (parts[1] || '').split(/\s+/)[0] || ''; // First word after comma
+  } else {
+    // Format: "First Last" or "First Middle Last"
+    const parts = cleanName.split(/\s+/);
+    if (parts.length >= 2) {
+      firstName = parts[0] || '';
+      lastName = parts[parts.length - 1] || ''; // Last word is last name
+    } else {
+      lastName = parts[0] || '';
+    }
+  }
+
+  // Return first 3 letters of each, uppercase
+  return {
+    firstName: firstName.substring(0, 3).toUpperCase() || null,
+    lastName: lastName.substring(0, 3).toUpperCase() || null
+  };
+}
+
 // Extract chronic conditions from therapeutic classes
 function inferConditions(therapeuticClass) {
   const conditions = [];
@@ -269,13 +302,16 @@ async function ingestData(clientEmail, csvFilePath) {
         } else {
           patientId = uuidv4();
           const conditions = inferConditions(row.therapeutic_class);
-          
+          const { firstName, lastName } = parsePatientName(row.patient_name);
+
           const result = await pool.query(`
             INSERT INTO patients (
-              patient_id, pharmacy_id, patient_hash, date_of_birth,
+              patient_id, pharmacy_id, patient_hash, first_name, last_name, date_of_birth,
               chronic_conditions, primary_insurance_bin, primary_insurance_pcn
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT ON CONSTRAINT patients_patient_hash_key DO UPDATE SET
+              first_name = COALESCE(EXCLUDED.first_name, patients.first_name),
+              last_name = COALESCE(EXCLUDED.last_name, patients.last_name),
               chronic_conditions = EXCLUDED.chronic_conditions,
               primary_insurance_bin = EXCLUDED.primary_insurance_bin,
               primary_insurance_pcn = EXCLUDED.primary_insurance_pcn,
@@ -285,13 +321,15 @@ async function ingestData(clientEmail, csvFilePath) {
             patientId,
             pharmacy_id,
             patientHash,
+            firstName,
+            lastName,
             parseDate(row.patient_dob),
             conditions,
             padBin(row.insurance_bin),
             row.group_number
           ]);
           patientId = result.rows[0].patient_id;
-          
+
           patients.set(patientHash, { patientId, conditions });
         }
       }
