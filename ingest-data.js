@@ -54,6 +54,7 @@ const COLUMN_MAP = {
   'Drug Name': 'drug_name',
   'NDC': 'ndc',
   'DEA Class': 'dea_class',
+  'Quantity Dispensed': 'quantity',
   'Price': 'awp',
   'Plan Paid Amount - Total': 'insurance_pay',
   'Patient Pay Amount': 'patient_pay',
