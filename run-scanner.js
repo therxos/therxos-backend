@@ -51,7 +51,7 @@ async function scanNDCOptimizations(pharmacyId) {
       WHERE pharmacy_id = $1 AND patient_id = $2 
         AND opportunity_type = 'ndc_optimization'
         AND current_drug_name = $3
-        AND status IN ('new', 'reviewed')
+        AND status NOT IN ('Denied', 'Declined')
     `, [pharmacyId, row.patient_id, row.drug_name]);
     
     if (existing.rows.length === 0) {
@@ -106,7 +106,7 @@ async function scanBrandToGeneric(pharmacyId) {
       WHERE pharmacy_id = $1 AND patient_id = $2 
         AND opportunity_type = 'brand_to_generic'
         AND current_drug_name = $3
-        AND status IN ('new', 'reviewed')
+        AND status NOT IN ('Denied', 'Declined')
     `, [pharmacyId, row.patient_id, row.drug_name]);
     
     if (existing.rows.length === 0) {
@@ -183,7 +183,7 @@ async function scanTherapeuticInterchange(pharmacyId) {
         WHERE pharmacy_id = $1 AND patient_id = $2 
           AND opportunity_type = 'therapeutic_interchange'
           AND current_drug_name = $3
-          AND status IN ('new', 'reviewed')
+          AND status NOT IN ('Denied', 'Declined')
       `, [pharmacyId, row.patient_id, row.drug_name]);
       
       if (existing.rows.length === 0) {
@@ -238,7 +238,7 @@ async function scanMissingTherapy(pharmacyId) {
       WHERE pharmacy_id = $1 AND patient_id = $2 
         AND opportunity_type = 'missing_therapy'
         AND recommended_drug_name LIKE '%statin%'
-        AND status IN ('new', 'reviewed')
+        AND status NOT IN ('Denied', 'Declined')
     `, [pharmacyId, row.patient_id]);
     
     if (existing.rows.length === 0) {
@@ -283,7 +283,7 @@ async function scanMissingTherapy(pharmacyId) {
       WHERE pharmacy_id = $1 AND patient_id = $2 
         AND opportunity_type = 'missing_therapy'
         AND recommended_drug_name LIKE '%Lisinopril%'
-        AND status IN ('new', 'reviewed')
+        AND status NOT IN ('Denied', 'Declined')
     `, [pharmacyId, row.patient_id]);
     
     if (existing.rows.length === 0) {
@@ -449,11 +449,12 @@ async function scanAdminTriggers(pharmacyId) {
       if (createdOpps.has(oppKey)) continue;
 
       // Check if opportunity already exists in DB (same patient + same recommended drug)
+      // Skip if ANY existing opp found (except Denied/Declined which can be retried)
       const existing = await pool.query(`
         SELECT opportunity_id FROM opportunities
         WHERE pharmacy_id = $1 AND patient_id = $2
           AND recommended_drug_name = $3
-          AND status IN ('Not Submitted', 'Submitted', 'Pending')
+          AND status NOT IN ('Denied', 'Declined')
       `, [pharmacyId, rx.patient_id, trigger.recommended_drug || trigger.display_name]);
 
       if (existing.rows.length > 0) {
