@@ -14,7 +14,8 @@ const pool = new Pool({
 
 // Test connection on startup
 pool.on('connect', () => {
-  console.log('Database connection established');
+  const dbHost = process.env.DATABASE_URL?.split('@')[1]?.split(':')[0] || 'unknown';
+  console.log(`Database connection established to: ${dbHost}`);
 });
 
 pool.on('error', (err) => {
