@@ -240,11 +240,17 @@ async function ingestData(clientEmail, csvFilePath) {
           patientId = uuidv4();
           const conditions = inferConditions(row.therapeutic_class);
           
-          await pool.query(`
+          const result = await pool.query(`
             INSERT INTO patients (
               patient_id, pharmacy_id, patient_hash, date_of_birth,
               chronic_conditions, primary_insurance_bin, primary_insurance_pcn
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (patient_hash) DO UPDATE SET
+              chronic_conditions = EXCLUDED.chronic_conditions,
+              primary_insurance_bin = EXCLUDED.primary_insurance_bin,
+              primary_insurance_pcn = EXCLUDED.primary_insurance_pcn,
+              updated_at = NOW()
+            RETURNING patient_id
           `, [
             patientId,
             pharmacy_id,
@@ -254,6 +260,7 @@ async function ingestData(clientEmail, csvFilePath) {
             row.insurance_bin,
             row.group_number
           ]);
+          patientId = result.rows[0].patient_id;
           
           patients.set(patientHash, { patientId, conditions });
         }
