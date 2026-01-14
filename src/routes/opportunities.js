@@ -58,7 +58,7 @@ router.get('/', authenticateToken, async (req, res) => {
       params.push(priority);
     }
     if (search) {
-      query += ` AND (o.current_drug_name ILIKE $${paramIndex} OR o.recommended_drug_name ILIKE $${paramIndex} OR o.clinical_rationale ILIKE $${paramIndex})`;
+      query += ` AND (o.current_drug_name ILIKE $${paramIndex} OR o.recommended_drug_name ILIKE $${paramIndex} OR o.clinical_rationale ILIKE $${paramIndex} OR p.first_name ILIKE $${paramIndex} OR p.last_name ILIKE $${paramIndex})`;
       params.push(`%${search}%`);
       paramIndex++;
     }
