@@ -11,6 +11,7 @@ import { logger, requestLogger } from './utils/logger.js';
 import db from './database/index.js';
 import { ingestCSV, resolveClientFromEmail } from './services/ingestion.js';
 import { runOpportunityScan, updatePatientProfiles } from './services/scanner.js';
+import { verifyOpportunityCoverage } from './services/medicare.js';
 import authRoutes from './routes/auth.js';
 import clientRoutes from './routes/clients.js';
 import opportunityRoutes from './routes/opportunities.js';
@@ -21,6 +22,7 @@ import adminRoutes from './routes/admin.js';
 import automationRoutes from './routes/automation.js';
 import settingsRoutes from './routes/settings.js';
 import feedbackRoutes from './routes/feedback.js';
+import pricingRoutes from './routes/pricing.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -104,6 +106,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/automation', automationRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/pricing', pricingRoutes);
 
 // CSV Upload endpoint
 app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
@@ -411,8 +414,19 @@ cron.schedule('0 6 * * *', async () => {
 cron.schedule('0 7 * * *', async () => {
   logger.info('Starting scheduled nightly scan');
   try {
-    await runOpportunityScan({ scanType: 'nightly_batch', lookbackHours: 24 });
-    logger.info('Nightly scan completed');
+    // Run regular opportunity scan
+    const scanResult = await runOpportunityScan({ scanType: 'nightly_batch', lookbackHours: 24 });
+    logger.info('Nightly scan completed', { opportunities: scanResult.opportunitiesFound });
+
+    // Run Medicare coverage verification for opportunities with Part D plans
+    logger.info('Starting Medicare coverage verification');
+    const medicareResult = await verifyOpportunityCoverage();
+    logger.info('Medicare verification completed', {
+      verified: medicareResult.verified,
+      covered: medicareResult.covered,
+      notCovered: medicareResult.notCovered
+    });
+
   } catch (error) {
     logger.error('Nightly scan failed', { error: error.message });
   }
