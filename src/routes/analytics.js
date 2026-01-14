@@ -657,6 +657,215 @@ router.get('/audit-flags', authenticateToken, async (req, res) => {
   }
 });
 
+// Prescriber opportunity analytics
+router.get('/prescriber-stats', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { limit = 50, status = 'all' } = req.query;
+
+    // Top prescribers by opportunity value
+    let statusFilter = '';
+    if (status !== 'all') {
+      statusFilter = `AND o.status = '${status}'`;
+    }
+
+    const topByValue = await db.query(`
+      SELECT
+        COALESCE(o.prescriber_name, 'Unknown') as prescriber_name,
+        COUNT(*) as opportunity_count,
+        COUNT(DISTINCT o.patient_id) as patient_count,
+        COALESCE(SUM(o.potential_margin_gain), 0) as monthly_potential,
+        COALESCE(SUM(o.annual_margin_gain), 0) as annual_potential,
+        COALESCE(AVG(o.potential_margin_gain), 0) as avg_opportunity_value,
+        COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) as actioned_count,
+        CASE
+          WHEN COUNT(*) > 0
+          THEN ROUND(100.0 * COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) / COUNT(*), 1)
+          ELSE 0
+        END as action_rate
+      FROM opportunities o
+      WHERE o.pharmacy_id = $1 ${statusFilter}
+      GROUP BY COALESCE(o.prescriber_name, 'Unknown')
+      ORDER BY SUM(o.annual_margin_gain) DESC
+      LIMIT $2
+    `, [pharmacyId, parseInt(limit)]);
+
+    // Top prescribers by opportunity count
+    const topByCount = await db.query(`
+      SELECT
+        COALESCE(o.prescriber_name, 'Unknown') as prescriber_name,
+        COUNT(*) as opportunity_count,
+        COALESCE(SUM(o.annual_margin_gain), 0) as annual_potential
+      FROM opportunities o
+      WHERE o.pharmacy_id = $1 ${statusFilter}
+      GROUP BY COALESCE(o.prescriber_name, 'Unknown')
+      ORDER BY COUNT(*) DESC
+      LIMIT $2
+    `, [pharmacyId, parseInt(limit)]);
+
+    // Top prescribers by action rate (min 5 opportunities)
+    const topByActionRate = await db.query(`
+      SELECT
+        COALESCE(o.prescriber_name, 'Unknown') as prescriber_name,
+        COUNT(*) as opportunity_count,
+        COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) as actioned_count,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) / COUNT(*), 1) as action_rate,
+        COALESCE(SUM(o.annual_margin_gain), 0) as annual_potential
+      FROM opportunities o
+      WHERE o.pharmacy_id = $1
+      GROUP BY COALESCE(o.prescriber_name, 'Unknown')
+      HAVING COUNT(*) >= 5
+      ORDER BY ROUND(100.0 * COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) / COUNT(*), 1) DESC
+      LIMIT $2
+    `, [pharmacyId, parseInt(limit)]);
+
+    // Opportunity type breakdown by prescriber (top 10 prescribers)
+    const byTypeResult = await db.query(`
+      WITH top_prescribers AS (
+        SELECT prescriber_name
+        FROM opportunities
+        WHERE pharmacy_id = $1 AND prescriber_name IS NOT NULL
+        GROUP BY prescriber_name
+        ORDER BY SUM(annual_margin_gain) DESC
+        LIMIT 10
+      )
+      SELECT
+        o.prescriber_name,
+        o.opportunity_type,
+        COUNT(*) as count,
+        COALESCE(SUM(o.annual_margin_gain), 0) as annual_value
+      FROM opportunities o
+      WHERE o.pharmacy_id = $1
+        AND o.prescriber_name IN (SELECT prescriber_name FROM top_prescribers)
+      GROUP BY o.prescriber_name, o.opportunity_type
+      ORDER BY o.prescriber_name, SUM(o.annual_margin_gain) DESC
+    `, [pharmacyId]);
+
+    // Group by prescriber for the type breakdown
+    const byPrescriberType = {};
+    for (const row of byTypeResult.rows) {
+      if (!byPrescriberType[row.prescriber_name]) {
+        byPrescriberType[row.prescriber_name] = [];
+      }
+      byPrescriberType[row.prescriber_name].push({
+        type: row.opportunity_type,
+        count: parseInt(row.count),
+        annual_value: parseFloat(row.annual_value)
+      });
+    }
+
+    // Summary stats
+    const summary = await db.query(`
+      SELECT
+        COUNT(DISTINCT prescriber_name) as total_prescribers,
+        COUNT(*) as total_opportunities,
+        COALESCE(SUM(annual_margin_gain), 0) as total_annual_value,
+        COUNT(DISTINCT prescriber_name) FILTER (WHERE prescriber_name IS NOT NULL AND prescriber_name != 'Unknown') as known_prescribers
+      FROM opportunities
+      WHERE pharmacy_id = $1 ${statusFilter}
+    `, [pharmacyId]);
+
+    res.json({
+      summary: {
+        total_prescribers: parseInt(summary.rows[0].total_prescribers) || 0,
+        known_prescribers: parseInt(summary.rows[0].known_prescribers) || 0,
+        total_opportunities: parseInt(summary.rows[0].total_opportunities) || 0,
+        total_annual_value: parseFloat(summary.rows[0].total_annual_value) || 0
+      },
+      top_by_value: topByValue.rows.map(r => ({
+        prescriber_name: r.prescriber_name,
+        opportunity_count: parseInt(r.opportunity_count) || 0,
+        patient_count: parseInt(r.patient_count) || 0,
+        monthly_potential: parseFloat(r.monthly_potential) || 0,
+        annual_potential: parseFloat(r.annual_potential) || 0,
+        avg_opportunity_value: parseFloat(r.avg_opportunity_value) || 0,
+        actioned_count: parseInt(r.actioned_count) || 0,
+        action_rate: parseFloat(r.action_rate) || 0
+      })),
+      top_by_count: topByCount.rows.map(r => ({
+        prescriber_name: r.prescriber_name,
+        opportunity_count: parseInt(r.opportunity_count) || 0,
+        annual_potential: parseFloat(r.annual_potential) || 0
+      })),
+      top_by_action_rate: topByActionRate.rows.map(r => ({
+        prescriber_name: r.prescriber_name,
+        opportunity_count: parseInt(r.opportunity_count) || 0,
+        actioned_count: parseInt(r.actioned_count) || 0,
+        action_rate: parseFloat(r.action_rate) || 0,
+        annual_potential: parseFloat(r.annual_potential) || 0
+      })),
+      by_prescriber_type: byPrescriberType
+    });
+  } catch (error) {
+    logger.error('Prescriber stats error', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to get prescriber stats' });
+  }
+});
+
+// Recommended drug performance analytics
+router.get('/recommended-drug-stats', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { limit = 30 } = req.query;
+
+    // Top recommended drugs by opportunity value
+    const topDrugs = await db.query(`
+      SELECT
+        COALESCE(o.recommended_drug, o.recommended_drug_name, 'Unknown') as recommended_drug,
+        COUNT(*) as opportunity_count,
+        COUNT(DISTINCT o.patient_id) as patient_count,
+        COALESCE(SUM(o.potential_margin_gain), 0) as monthly_potential,
+        COALESCE(SUM(o.annual_margin_gain), 0) as annual_potential,
+        COALESCE(AVG(o.potential_margin_gain), 0) as avg_gp_per_fill,
+        COUNT(*) FILTER (WHERE o.status = 'Not Submitted') as pending,
+        COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending')) as in_progress,
+        COUNT(*) FILTER (WHERE o.status IN ('Approved', 'Completed')) as captured
+      FROM opportunities o
+      WHERE o.pharmacy_id = $1
+      GROUP BY COALESCE(o.recommended_drug, o.recommended_drug_name, 'Unknown')
+      ORDER BY SUM(o.annual_margin_gain) DESC
+      LIMIT $2
+    `, [pharmacyId, parseInt(limit)]);
+
+    // Current drugs being targeted
+    const topCurrentDrugs = await db.query(`
+      SELECT
+        o.current_drug_name,
+        COALESCE(o.recommended_drug, o.recommended_drug_name) as recommended_drug,
+        COUNT(*) as opportunity_count,
+        COALESCE(SUM(o.annual_margin_gain), 0) as annual_potential
+      FROM opportunities o
+      WHERE o.pharmacy_id = $1 AND o.current_drug_name IS NOT NULL
+      GROUP BY o.current_drug_name, COALESCE(o.recommended_drug, o.recommended_drug_name)
+      ORDER BY SUM(o.annual_margin_gain) DESC
+      LIMIT $2
+    `, [pharmacyId, parseInt(limit)]);
+
+    res.json({
+      top_recommended_drugs: topDrugs.rows.map(r => ({
+        recommended_drug: r.recommended_drug,
+        opportunity_count: parseInt(r.opportunity_count) || 0,
+        patient_count: parseInt(r.patient_count) || 0,
+        monthly_potential: parseFloat(r.monthly_potential) || 0,
+        annual_potential: parseFloat(r.annual_potential) || 0,
+        avg_gp_per_fill: parseFloat(r.avg_gp_per_fill) || 0,
+        pending: parseInt(r.pending) || 0,
+        in_progress: parseInt(r.in_progress) || 0,
+        captured: parseInt(r.captured) || 0
+      })),
+      top_current_drugs: topCurrentDrugs.rows.map(r => ({
+        current_drug: r.current_drug_name,
+        recommended_drug: r.recommended_drug,
+        opportunity_count: parseInt(r.opportunity_count) || 0,
+        annual_potential: parseFloat(r.annual_potential) || 0
+      }))
+    });
+  } catch (error) {
+    logger.error('Recommended drug stats error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get recommended drug stats' });
+  }
+});
+
 // Update audit flag status
 router.put('/audit-flags/:flagId', authenticateToken, async (req, res) => {
   try {
