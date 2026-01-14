@@ -2180,6 +2180,358 @@ router.get('/pharmacies/:id/cvs-aberrant-metrics', authenticateToken, requireSup
   }
 });
 
+// GET /api/admin/reimbursement-monitor - Monitor recommended drug reimbursements by BIN
+router.get('/reimbursement-monitor', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { bin, pharmacyId } = req.query;
+
+    // Get all triggers with recommended drugs
+    const triggers = await db.query(`
+      SELECT trigger_id, display_name, recommended_drug, recommended_ndc, default_gp_value
+      FROM triggers
+      WHERE is_enabled = true AND recommended_drug IS NOT NULL
+    `);
+
+    const results = [];
+
+    for (const trigger of triggers.rows) {
+      const recDrug = (trigger.recommended_drug || '').toUpperCase();
+      const keywords = recDrug.split(/[\s,()-]+/).filter(w => w.length > 3);
+
+      if (keywords.length === 0) continue;
+
+      // Build dynamic query to find matching drugs
+      let query = `
+        SELECT
+          insurance_bin,
+          insurance_group,
+          COUNT(*) as rx_count,
+          AVG(COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) as avg_gp,
+          AVG(COALESCE(insurance_pay, 0)) as avg_ins_pay,
+          MAX(dispensed_date) as last_fill_date
+        FROM prescriptions
+        WHERE 1=1
+      `;
+      const params = [];
+      let paramIndex = 1;
+
+      if (pharmacyId) {
+        query += ` AND pharmacy_id = $${paramIndex++}`;
+        params.push(pharmacyId);
+      }
+
+      if (bin) {
+        query += ` AND insurance_bin = $${paramIndex++}`;
+        params.push(bin);
+      }
+
+      // Match by keywords
+      const keywordConditions = keywords.map(kw => {
+        params.push(kw);
+        return `UPPER(drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+      }).join(' OR ');
+      query += ` AND (${keywordConditions})`;
+
+      query += `
+        GROUP BY insurance_bin, insurance_group
+        HAVING COUNT(*) >= 3
+        ORDER BY AVG(COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) DESC
+        LIMIT 20
+      `;
+
+      const claimData = await db.query(query, params);
+
+      if (claimData.rows.length > 0) {
+        results.push({
+          triggerId: trigger.trigger_id,
+          triggerName: trigger.display_name,
+          recommendedDrug: trigger.recommended_drug,
+          defaultGp: trigger.default_gp_value,
+          reimbursementByBin: claimData.rows.map(r => ({
+            bin: r.insurance_bin,
+            group: r.insurance_group,
+            rxCount: parseInt(r.rx_count),
+            avgGp: Math.round(parseFloat(r.avg_gp || 0) * 100) / 100,
+            avgInsPay: Math.round(parseFloat(r.avg_ins_pay || 0) * 100) / 100,
+            lastFillDate: r.last_fill_date
+          }))
+        });
+      }
+    }
+
+    res.json({
+      triggerCount: results.length,
+      filters: { bin, pharmacyId },
+      triggers: results
+    });
+
+  } catch (error) {
+    console.error('Error in reimbursement monitor:', error);
+    res.status(500).json({ error: 'Failed to get reimbursement data: ' + error.message });
+  }
+});
+
+// POST /api/admin/pharmacies/:id/scan-reimbursement-changes - Scan for reimbursement changes between refills
+router.post('/pharmacies/:id/scan-reimbursement-changes', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const pharmacyId = req.params.id;
+    const { thresholdPercent = 25, thresholdDollars = 20 } = req.body;
+
+    // Verify pharmacy exists
+    const pharmacyResult = await db.query(
+      'SELECT pharmacy_name FROM pharmacies WHERE pharmacy_id = $1',
+      [pharmacyId]
+    );
+    if (pharmacyResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+    const pharmacyName = pharmacyResult.rows[0].pharmacy_name;
+
+    console.log(`Scanning reimbursement changes for ${pharmacyName}...`);
+
+    // Find prescriptions with multiple fills (refills) and compare reimbursements
+    // Group by rx_number base (without refill suffix) and patient
+    const rxChanges = await db.query(`
+      WITH rx_history AS (
+        SELECT
+          prescription_id,
+          patient_id,
+          rx_number,
+          drug_name,
+          ndc,
+          insurance_bin,
+          insurance_group,
+          COALESCE(insurance_pay, 0) as insurance_pay,
+          COALESCE(acquisition_cost, 0) as acquisition_cost,
+          COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0) as gross_profit,
+          dispensed_date,
+          LAG(COALESCE(insurance_pay, 0)) OVER (
+            PARTITION BY patient_id, UPPER(TRIM(drug_name))
+            ORDER BY dispensed_date
+          ) as prev_ins_pay,
+          LAG(COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) OVER (
+            PARTITION BY patient_id, UPPER(TRIM(drug_name))
+            ORDER BY dispensed_date
+          ) as prev_gp,
+          LAG(dispensed_date) OVER (
+            PARTITION BY patient_id, UPPER(TRIM(drug_name))
+            ORDER BY dispensed_date
+          ) as prev_fill_date
+        FROM prescriptions
+        WHERE pharmacy_id = $1
+          AND insurance_pay IS NOT NULL
+          AND insurance_pay > 0
+      )
+      SELECT *,
+        insurance_pay - prev_ins_pay as pay_change,
+        gross_profit - prev_gp as gp_change,
+        CASE
+          WHEN prev_ins_pay > 0 THEN ((insurance_pay - prev_ins_pay) / prev_ins_pay * 100)
+          ELSE 0
+        END as pay_change_pct
+      FROM rx_history
+      WHERE prev_ins_pay IS NOT NULL
+        AND (
+          ABS(insurance_pay - prev_ins_pay) >= $2
+          OR (prev_ins_pay > 0 AND ABS((insurance_pay - prev_ins_pay) / prev_ins_pay * 100) >= $3)
+        )
+      ORDER BY ABS(insurance_pay - prev_ins_pay) DESC
+      LIMIT 500
+    `, [pharmacyId, thresholdDollars, thresholdPercent]);
+
+    console.log(`Found ${rxChanges.rows.length} significant reimbursement changes`);
+
+    // Get existing flags to avoid duplicates
+    const existingFlagsResult = await db.query(
+      `SELECT patient_id, rule_type, drug_name, dispensed_date
+       FROM audit_flags
+       WHERE pharmacy_id = $1 AND rule_type IN ('reimbursement_increase', 'reimbursement_decrease')`,
+      [pharmacyId]
+    );
+    const existingFlags = new Set(
+      existingFlagsResult.rows.map(f => `${f.patient_id}|${f.rule_type}|${(f.drug_name || '').toUpperCase()}|${f.dispensed_date}`)
+    );
+
+    let increasesCreated = 0;
+    let decreasesCreated = 0;
+    let skipped = 0;
+
+    for (const rx of rxChanges.rows) {
+      const isIncrease = rx.pay_change > 0;
+      const ruleType = isIncrease ? 'reimbursement_increase' : 'reimbursement_decrease';
+      const severity = Math.abs(rx.pay_change) >= 50 ? 'high' : 'medium';
+
+      const flagKey = `${rx.patient_id}|${ruleType}|${(rx.drug_name || '').toUpperCase()}|${rx.dispensed_date}`;
+      if (existingFlags.has(flagKey)) {
+        skipped++;
+        continue;
+      }
+
+      const changeDir = isIncrease ? 'INCREASED' : 'DECREASED';
+      const violation = `REIMBURSEMENT ${changeDir}: ${rx.drug_name} payment ${changeDir.toLowerCase()} from $${rx.prev_ins_pay?.toFixed(2)} to $${rx.insurance_pay?.toFixed(2)} (${rx.pay_change >= 0 ? '+' : ''}$${rx.pay_change?.toFixed(2)}, ${rx.pay_change_pct?.toFixed(1)}%). Previous fill: ${rx.prev_fill_date?.toISOString().split('T')[0]}`;
+
+      await db.query(`
+        INSERT INTO audit_flags (
+          pharmacy_id, patient_id, prescription_id,
+          rule_type, severity, drug_name, ndc,
+          gross_profit, violation_message,
+          expected_value, actual_value,
+          status, dispensed_date
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `, [
+        pharmacyId,
+        rx.patient_id,
+        rx.prescription_id,
+        ruleType,
+        severity,
+        rx.drug_name,
+        rx.ndc,
+        rx.gross_profit,
+        violation,
+        `Previous: $${rx.prev_ins_pay?.toFixed(2)}`,
+        `Current: $${rx.insurance_pay?.toFixed(2)} (${rx.pay_change >= 0 ? '+' : ''}${rx.pay_change_pct?.toFixed(1)}%)`,
+        'open',
+        rx.dispensed_date
+      ]);
+
+      if (isIncrease) {
+        increasesCreated++;
+      } else {
+        decreasesCreated++;
+      }
+      existingFlags.add(flagKey);
+    }
+
+    // Summary statistics
+    const increases = rxChanges.rows.filter(r => r.pay_change > 0);
+    const decreases = rxChanges.rows.filter(r => r.pay_change < 0);
+
+    res.json({
+      success: true,
+      pharmacy: pharmacyName,
+      thresholds: { thresholdPercent, thresholdDollars },
+      results: {
+        totalChangesFound: rxChanges.rows.length,
+        flagsCreated: increasesCreated + decreasesCreated,
+        increasesCreated,
+        decreasesCreated,
+        skipped
+      },
+      summary: {
+        increases: {
+          count: increases.length,
+          avgChange: increases.length > 0 ? Math.round(increases.reduce((s, r) => s + r.pay_change, 0) / increases.length * 100) / 100 : 0,
+          maxChange: increases.length > 0 ? Math.max(...increases.map(r => r.pay_change)) : 0
+        },
+        decreases: {
+          count: decreases.length,
+          avgChange: decreases.length > 0 ? Math.round(decreases.reduce((s, r) => s + r.pay_change, 0) / decreases.length * 100) / 100 : 0,
+          maxChange: decreases.length > 0 ? Math.min(...decreases.map(r => r.pay_change)) : 0
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error scanning reimbursement changes:', error);
+    res.status(500).json({ error: 'Failed to scan reimbursement changes: ' + error.message });
+  }
+});
+
+// GET /api/admin/recommended-drug-gp/:bin - Get actual GP for recommended drugs on a specific BIN
+router.get('/recommended-drug-gp/:bin', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { bin } = req.params;
+    const { pharmacyId } = req.query;
+
+    // Get all triggers with recommended drugs
+    const triggers = await db.query(`
+      SELECT t.trigger_id, t.display_name, t.recommended_drug, t.recommended_ndc,
+             tbv.gp_value as configured_gp, t.default_gp_value
+      FROM triggers t
+      LEFT JOIN trigger_bin_values tbv ON t.trigger_id = tbv.trigger_id AND tbv.insurance_bin = $1
+      WHERE t.is_enabled = true AND t.recommended_drug IS NOT NULL
+      ORDER BY t.display_name
+    `, [bin]);
+
+    const results = [];
+
+    for (const trigger of triggers.rows) {
+      const recDrug = (trigger.recommended_drug || '').toUpperCase();
+      const keywords = recDrug.split(/[\s,()-]+/).filter(w => w.length > 3);
+
+      if (keywords.length === 0) continue;
+
+      // Build query for this BIN
+      let query = `
+        SELECT
+          drug_name,
+          COUNT(*) as rx_count,
+          AVG(COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) as avg_gp,
+          AVG(COALESCE(insurance_pay, 0)) as avg_ins_pay,
+          MIN(dispensed_date) as first_fill,
+          MAX(dispensed_date) as last_fill
+        FROM prescriptions
+        WHERE insurance_bin = $1
+      `;
+      const params = [bin];
+      let paramIndex = 2;
+
+      if (pharmacyId) {
+        query += ` AND pharmacy_id = $${paramIndex++}`;
+        params.push(pharmacyId);
+      }
+
+      const keywordConditions = keywords.map(kw => {
+        params.push(kw);
+        return `UPPER(drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+      }).join(' OR ');
+      query += ` AND (${keywordConditions})`;
+      query += ` GROUP BY drug_name ORDER BY COUNT(*) DESC LIMIT 5`;
+
+      const claimData = await db.query(query, params);
+
+      const totalRx = claimData.rows.reduce((s, r) => s + parseInt(r.rx_count), 0);
+      const weightedGp = totalRx > 0
+        ? claimData.rows.reduce((s, r) => s + (parseFloat(r.avg_gp || 0) * parseInt(r.rx_count)), 0) / totalRx
+        : null;
+
+      results.push({
+        triggerId: trigger.trigger_id,
+        triggerName: trigger.display_name,
+        recommendedDrug: trigger.recommended_drug,
+        configuredGp: trigger.configured_gp,
+        defaultGp: trigger.default_gp_value,
+        actualGp: weightedGp ? Math.round(weightedGp * 100) / 100 : null,
+        rxCount: totalRx,
+        difference: weightedGp && trigger.configured_gp
+          ? Math.round((weightedGp - trigger.configured_gp) * 100) / 100
+          : null,
+        matchingDrugs: claimData.rows.map(r => ({
+          drugName: r.drug_name,
+          rxCount: parseInt(r.rx_count),
+          avgGp: Math.round(parseFloat(r.avg_gp || 0) * 100) / 100,
+          lastFill: r.last_fill
+        }))
+      });
+    }
+
+    // Sort by difference (biggest discrepancies first)
+    results.sort((a, b) => Math.abs(b.difference || 0) - Math.abs(a.difference || 0));
+
+    res.json({
+      bin,
+      pharmacyId: pharmacyId || 'all',
+      triggerCount: results.length,
+      verified: results.filter(r => r.actualGp !== null).length,
+      triggers: results
+    });
+
+  } catch (error) {
+    console.error('Error getting recommended drug GP:', error);
+    res.status(500).json({ error: 'Failed to get recommended drug GP: ' + error.message });
+  }
+});
+
 // POST /api/admin/clients - Create a new client (super admin only)
 router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
