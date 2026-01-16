@@ -3,6 +3,7 @@ import express from 'express';
 import db from '../database/index.js';
 import { logger } from '../utils/logger.js';
 import { authenticateToken } from './auth.js';
+import glp1Scanner from '../services/glp1-audit-scanner.js';
 
 const router = express.Router();
 
@@ -891,6 +892,241 @@ router.put('/audit-flags/:flagId', authenticateToken, async (req, res) => {
   } catch (error) {
     logger.error('Update audit flag error', { error: error.message });
     res.status(500).json({ error: 'Failed to update audit flag' });
+  }
+});
+
+// ===========================================
+// GLP-1 AUDIT ENDPOINTS
+// ===========================================
+
+// GET /api/analytics/glp1/summary - GLP-1 audit summary
+router.get('/glp1/summary', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { days = 30 } = req.query;
+
+    // Get GLP-1 prescription counts
+    const rxStats = await db.query(`
+      SELECT
+        COUNT(*) as total_glp1_rx,
+        COUNT(DISTINCT patient_id) as glp1_patients,
+        SUM(CASE WHEN (COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) < 0 THEN 1 ELSE 0 END) as negative_margin_count,
+        SUM(CASE WHEN (COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) < 0
+            THEN (COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) ELSE 0 END) as total_loss
+      FROM prescriptions
+      WHERE pharmacy_id = $1
+        AND drug_name ~* 'OZEMPIC|WEGOVY|MOUNJARO|ZEPBOUND|TRULICITY|VICTOZA|SAXENDA|RYBELSUS|SEMAGLUTIDE|TIRZEPATIDE|LIRAGLUTIDE|DULAGLUTIDE|EXENATIDE'
+        AND dispensed_date >= CURRENT_DATE - ($2 || ' days')::INTERVAL
+    `, [pharmacyId, days]);
+
+    // Get open audit flags by type
+    const flagStats = await db.query(`
+      SELECT
+        rule_type,
+        severity,
+        COUNT(*) as count
+      FROM audit_flags
+      WHERE pharmacy_id = $1
+        AND rule_type LIKE '%glp1%' OR rule_type IN ('quantity_mismatch', 'days_supply_mismatch', 'early_refill', 'negative_profit', 'duplicate_therapy', 'compounding_risk', 'indication_mismatch', 'high_quantity')
+        AND status = 'open'
+      GROUP BY rule_type, severity
+      ORDER BY severity DESC, count DESC
+    `, [pharmacyId]);
+
+    // Get top negative margin BINs
+    const negativeBins = await glp1Scanner.getGLP1NegativeMarginByBIN(pharmacyId, parseInt(days));
+
+    res.json({
+      period: `${days} days`,
+      prescriptions: rxStats.rows[0],
+      openFlags: flagStats.rows,
+      negativeMarginBINs: negativeBins.slice(0, 10)
+    });
+  } catch (error) {
+    logger.error('GLP-1 summary error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get GLP-1 summary' });
+  }
+});
+
+// GET /api/analytics/glp1/audit-flags - GLP-1 specific audit flags
+router.get('/glp1/audit-flags', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { status = 'open', severity, limit = 100, offset = 0 } = req.query;
+
+    let whereClause = 'WHERE af.pharmacy_id = $1';
+    const params = [pharmacyId];
+    let paramIndex = 2;
+
+    if (status !== 'all') {
+      whereClause += ` AND af.status = $${paramIndex++}`;
+      params.push(status);
+    }
+
+    if (severity) {
+      whereClause += ` AND af.severity = $${paramIndex++}`;
+      params.push(severity);
+    }
+
+    // Only GLP-1 related flags
+    whereClause += ` AND (af.drug_name ~* 'OZEMPIC|WEGOVY|MOUNJARO|ZEPBOUND|TRULICITY|VICTOZA|SAXENDA|RYBELSUS|SEMAGLUTIDE|TIRZEPATIDE|LIRAGLUTIDE|DULAGLUTIDE|EXENATIDE')`;
+
+    const result = await db.query(`
+      SELECT
+        af.flag_id,
+        af.rule_type,
+        af.severity,
+        af.drug_name,
+        af.ndc,
+        af.dispensed_quantity,
+        af.days_supply,
+        af.gross_profit,
+        af.violation_message,
+        af.expected_value,
+        af.actual_value,
+        af.status,
+        af.dispensed_date,
+        af.flagged_at,
+        p.first_name as patient_first,
+        p.last_name as patient_last,
+        ar.rule_name,
+        ar.audit_risk_score
+      FROM audit_flags af
+      LEFT JOIN patients p ON af.patient_id = p.patient_id
+      LEFT JOIN audit_rules ar ON af.rule_id = ar.rule_id
+      ${whereClause}
+      ORDER BY
+        CASE af.severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+        af.flagged_at DESC
+      LIMIT $${paramIndex++} OFFSET $${paramIndex}
+    `, [...params, parseInt(limit), parseInt(offset)]);
+
+    const countResult = await db.query(`
+      SELECT COUNT(*) as total
+      FROM audit_flags af
+      ${whereClause}
+    `, params);
+
+    res.json({
+      flags: result.rows,
+      total: parseInt(countResult.rows[0].total),
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+  } catch (error) {
+    logger.error('GLP-1 audit flags error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get GLP-1 audit flags' });
+  }
+});
+
+// POST /api/analytics/glp1/scan - Run GLP-1 audit scan
+router.post('/glp1/scan', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { lookbackDays = 30, createFlags = true } = req.body;
+
+    logger.info('Starting GLP-1 audit scan', { pharmacyId, lookbackDays });
+
+    const results = await glp1Scanner.runGLP1AuditScan(pharmacyId, {
+      lookbackDays: parseInt(lookbackDays),
+      createFlags
+    });
+
+    // Summarize results
+    const summary = {
+      prescriptionsScanned: results.prescriptionsScanned,
+      flagsCreated: results.flagsCreated,
+      anomalies: {
+        quantity: results.anomalies.quantity.length,
+        daysSupply: results.anomalies.daysSupply.length,
+        earlyRefill: results.anomalies.earlyRefill.length,
+        negativeMargin: results.anomalies.negativeMargin.length,
+        duplicateTherapy: results.anomalies.duplicateTherapy.length,
+        compounding: results.anomalies.compounding.length,
+        dawCode: results.anomalies.dawCode.length,
+        indicationMismatch: results.anomalies.indicationMismatch.length,
+        highQuantity: results.anomalies.highQuantity.length
+      },
+      totalAnomalies: Object.values(results.anomalies).reduce((sum, arr) => sum + arr.length, 0)
+    };
+
+    res.json({ success: true, summary });
+  } catch (error) {
+    logger.error('GLP-1 audit scan error', { error: error.message });
+    res.status(500).json({ error: 'Failed to run GLP-1 audit scan' });
+  }
+});
+
+// GET /api/analytics/glp1/negative-margin - Negative margin claims by BIN
+router.get('/glp1/negative-margin', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { days = 90 } = req.query;
+
+    const results = await glp1Scanner.getGLP1NegativeMarginByBIN(pharmacyId, parseInt(days));
+
+    res.json({
+      period: `${days} days`,
+      bins: results
+    });
+  } catch (error) {
+    logger.error('GLP-1 negative margin error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get negative margin data' });
+  }
+});
+
+// GET /api/analytics/glp1/duplicate-therapy - Patients on multiple GLP-1s
+router.get('/glp1/duplicate-therapy', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    const { days = 90 } = req.query;
+
+    const result = await db.query(`
+      WITH patient_glp1 AS (
+        SELECT
+          rx.patient_id,
+          p.first_name,
+          p.last_name,
+          ARRAY_AGG(DISTINCT
+            CASE
+              WHEN rx.drug_name ~* 'OZEMPIC|WEGOVY|RYBELSUS' THEN 'SEMAGLUTIDE'
+              WHEN rx.drug_name ~* 'MOUNJARO|ZEPBOUND' THEN 'TIRZEPATIDE'
+              WHEN rx.drug_name ~* 'VICTOZA|SAXENDA' THEN 'LIRAGLUTIDE'
+              WHEN rx.drug_name ~* 'TRULICITY' THEN 'DULAGLUTIDE'
+              WHEN rx.drug_name ~* 'BYETTA|BYDUREON' THEN 'EXENATIDE'
+              ELSE 'OTHER'
+            END
+          ) as glp1_classes,
+          ARRAY_AGG(DISTINCT rx.drug_name) as drugs,
+          MAX(rx.dispensed_date) as last_fill
+        FROM prescriptions rx
+        LEFT JOIN patients p ON rx.patient_id = p.patient_id
+        WHERE rx.pharmacy_id = $1
+          AND rx.drug_name ~* 'OZEMPIC|WEGOVY|MOUNJARO|ZEPBOUND|TRULICITY|VICTOZA|SAXENDA|RYBELSUS|BYETTA|BYDUREON|SEMAGLUTIDE|TIRZEPATIDE|LIRAGLUTIDE|DULAGLUTIDE|EXENATIDE'
+          AND rx.dispensed_date >= CURRENT_DATE - ($2 || ' days')::INTERVAL
+        GROUP BY rx.patient_id, p.first_name, p.last_name
+        HAVING COUNT(DISTINCT
+          CASE
+            WHEN rx.drug_name ~* 'OZEMPIC|WEGOVY|RYBELSUS' THEN 'SEMAGLUTIDE'
+            WHEN rx.drug_name ~* 'MOUNJARO|ZEPBOUND' THEN 'TIRZEPATIDE'
+            WHEN rx.drug_name ~* 'VICTOZA|SAXENDA' THEN 'LIRAGLUTIDE'
+            WHEN rx.drug_name ~* 'TRULICITY' THEN 'DULAGLUTIDE'
+            WHEN rx.drug_name ~* 'BYETTA|BYDUREON' THEN 'EXENATIDE'
+            ELSE 'OTHER'
+          END
+        ) > 1
+      )
+      SELECT * FROM patient_glp1
+      ORDER BY last_fill DESC
+    `, [pharmacyId, days]);
+
+    res.json({
+      period: `${days} days`,
+      patients: result.rows
+    });
+  } catch (error) {
+    logger.error('GLP-1 duplicate therapy error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get duplicate therapy data' });
   }
 });
 
