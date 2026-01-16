@@ -1260,6 +1260,7 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
         const patientGroup = matchedRx?.insurance_group || matchedRx?.group_number || patientRxs[0]?.insurance_group || patientRxs[0]?.group_number;
 
         let gpValue;
+        let binConfig = null;
 
         // If trigger has NO bin_values configured, use default GP for all patients
         if (binValues.length === 0) {
@@ -1268,7 +1269,7 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
           // Trigger HAS bin_values - only allow BINs that have entries
 
           // Try exact BIN + GROUP match first
-          let binConfig = binValues.find(bv =>
+          binConfig = binValues.find(bv =>
             (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
             bv.insurance_group === patientGroup
           );
