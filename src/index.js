@@ -23,6 +23,7 @@ import automationRoutes from './routes/automation.js';
 import settingsRoutes from './routes/settings.js';
 import feedbackRoutes from './routes/feedback.js';
 import pricingRoutes from './routes/pricing.js';
+import secureUploadRoutes from './routes/secure-upload.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -107,6 +108,7 @@ app.use('/api/automation', automationRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/pricing', pricingRoutes);
+app.use('/api/secure-upload', secureUploadRoutes);
 
 // CSV Upload endpoint
 app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
@@ -429,6 +431,20 @@ cron.schedule('0 7 * * *', async () => {
 
   } catch (error) {
     logger.error('Nightly scan failed', { error: error.message });
+  }
+}, {
+  timezone: 'America/New_York'
+});
+
+// Schedule daily cleanup of expired secure uploads (3 AM daily)
+cron.schedule('0 3 * * *', async () => {
+  logger.info('Starting scheduled secure upload cleanup');
+  try {
+    const secureUpload = await import('./services/secure-upload.js');
+    const cleanedCount = await secureUpload.cleanupExpiredUploads();
+    logger.info('Secure upload cleanup completed', { cleanedCount });
+  } catch (error) {
+    logger.error('Secure upload cleanup failed', { error: error.message });
   }
 }, {
   timezone: 'America/New_York'

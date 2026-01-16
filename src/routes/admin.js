@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs';
 import db from '../database/index.js';
 import { authenticateToken } from './auth.js';
 import { ROLES } from '../utils/permissions.js';
+import auditScanner from '../services/audit-scanner.js';
 
 const router = express.Router();
 
@@ -2901,6 +2902,189 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
   } catch (error) {
     console.error('Error in bulk coverage verification:', error);
     res.status(500).json({ error: 'Failed to verify coverage: ' + error.message });
+  }
+});
+
+// ===========================================
+// AUDIT SCANNING ENDPOINTS
+// ===========================================
+
+// POST /api/admin/audit/scan - Run audit scan for a pharmacy or all pharmacies
+router.post('/audit/scan', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId, lookbackDays = 90, clearExisting = true } = req.body;
+
+    let results;
+
+    if (pharmacyId) {
+      // Scan single pharmacy
+      results = await auditScanner.runFullAuditScan(pharmacyId, {
+        lookbackDays: parseInt(lookbackDays),
+        clearExisting
+      });
+    } else {
+      // Scan all pharmacies
+      results = await auditScanner.runAuditScanAll({
+        lookbackDays: parseInt(lookbackDays),
+        clearExisting
+      });
+    }
+
+    res.json({
+      success: true,
+      results
+    });
+  } catch (error) {
+    console.error('Audit scan error:', error);
+    res.status(500).json({ error: 'Audit scan failed: ' + error.message });
+  }
+});
+
+// GET /api/admin/audit/summary - Get audit summary across all pharmacies
+router.get('/audit/summary', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const [bySeverity, byPharmacy, byType, recentCritical] = await Promise.all([
+      // Total by severity
+      db.query(`
+        SELECT severity, COUNT(*) as count
+        FROM audit_flags
+        WHERE status = 'open'
+        GROUP BY severity
+        ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END
+      `),
+
+      // By pharmacy
+      db.query(`
+        SELECT
+          p.pharmacy_name,
+          p.pharmacy_id,
+          COUNT(*) as total_flags,
+          COUNT(*) FILTER (WHERE af.severity = 'critical') as critical_count,
+          COUNT(*) FILTER (WHERE af.severity = 'warning') as warning_count
+        FROM audit_flags af
+        JOIN pharmacies p ON p.pharmacy_id = af.pharmacy_id
+        WHERE af.status = 'open'
+        GROUP BY p.pharmacy_id, p.pharmacy_name
+        ORDER BY critical_count DESC, total_flags DESC
+      `),
+
+      // By rule type
+      db.query(`
+        SELECT rule_type, COUNT(*) as count
+        FROM audit_flags
+        WHERE status = 'open'
+        GROUP BY rule_type
+        ORDER BY count DESC
+      `),
+
+      // Recent critical flags
+      db.query(`
+        SELECT
+          af.flag_id,
+          af.drug_name,
+          af.violation_message,
+          af.dispensed_date,
+          af.flagged_at,
+          p.pharmacy_name
+        FROM audit_flags af
+        JOIN pharmacies p ON p.pharmacy_id = af.pharmacy_id
+        WHERE af.status = 'open' AND af.severity = 'critical'
+        ORDER BY af.flagged_at DESC
+        LIMIT 20
+      `)
+    ]);
+
+    res.json({
+      bySeverity: bySeverity.rows,
+      byPharmacy: byPharmacy.rows,
+      byType: byType.rows,
+      recentCritical: recentCritical.rows,
+      totalOpen: bySeverity.rows.reduce((sum, r) => sum + parseInt(r.count), 0)
+    });
+  } catch (error) {
+    console.error('Audit summary error:', error);
+    res.status(500).json({ error: 'Failed to get audit summary: ' + error.message });
+  }
+});
+
+// GET /api/admin/audit/pharmacy/:pharmacyId - Get audit details for specific pharmacy
+router.get('/audit/pharmacy/:pharmacyId', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId } = req.params;
+
+    const summary = await auditScanner.getAuditSummary(pharmacyId);
+
+    // Get pharmacy info
+    const pharmacyResult = await db.query(`
+      SELECT p.pharmacy_name, c.client_name
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE p.pharmacy_id = $1
+    `, [pharmacyId]);
+
+    res.json({
+      pharmacy: pharmacyResult.rows[0],
+      ...summary
+    });
+  } catch (error) {
+    console.error('Pharmacy audit error:', error);
+    res.status(500).json({ error: 'Failed to get pharmacy audit: ' + error.message });
+  }
+});
+
+// PUT /api/admin/audit/flags/:flagId - Update audit flag status (bulk or single)
+router.put('/audit/flags/:flagId', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { flagId } = req.params;
+    const { status, resolution_notes } = req.body;
+
+    const result = await db.query(`
+      UPDATE audit_flags
+      SET status = $1,
+          resolution_notes = $2,
+          reviewed_by = $3,
+          reviewed_at = NOW()
+      WHERE flag_id = $4
+      RETURNING *
+    `, [status, resolution_notes, req.user.userId, flagId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Audit flag not found' });
+    }
+
+    res.json({ flag: result.rows[0] });
+  } catch (error) {
+    console.error('Update audit flag error:', error);
+    res.status(500).json({ error: 'Failed to update audit flag: ' + error.message });
+  }
+});
+
+// POST /api/admin/audit/flags/bulk-update - Bulk update audit flags
+router.post('/audit/flags/bulk-update', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { flagIds, status, resolution_notes } = req.body;
+
+    if (!Array.isArray(flagIds) || flagIds.length === 0) {
+      return res.status(400).json({ error: 'flagIds array required' });
+    }
+
+    const result = await db.query(`
+      UPDATE audit_flags
+      SET status = $1,
+          resolution_notes = $2,
+          reviewed_by = $3,
+          reviewed_at = NOW()
+      WHERE flag_id = ANY($4)
+      RETURNING flag_id
+    `, [status, resolution_notes, req.user.userId, flagIds]);
+
+    res.json({
+      success: true,
+      updatedCount: result.rows.length
+    });
+  } catch (error) {
+    console.error('Bulk update audit flags error:', error);
+    res.status(500).json({ error: 'Failed to bulk update audit flags: ' + error.message });
   }
 });
 
