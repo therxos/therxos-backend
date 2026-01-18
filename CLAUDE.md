@@ -74,10 +74,14 @@ therxos-v2/
 │   │   │   ├── analytics.js    # Analytics & monthly reports
 │   │   │   ├── auth.js         # Login, register, JWT
 │   │   │   ├── clients.js      # Client management
+│   │   │   ├── coverage-intelligence.js # Coverage/formulary lookup
+│   │   │   ├── data-quality.js # Data quality issue management
 │   │   │   ├── opportunities.js # Opportunity CRUD
 │   │   │   ├── patients.js     # Patient queries
-│   │   │   └── prospects.js    # Sales funnel & Stripe
+│   │   │   ├── prospects.js    # Sales funnel & Stripe
+│   │   │   └── secure-upload.js # HIPAA-compliant file uploads
 │   │   ├── utils/
+│   │   │   ├── formatters.js   # Name/currency formatting
 │   │   │   ├── logger.js       # Winston logging
 │   │   │   └── permissions.js  # Role definitions
 │   │   └── index.js            # Express app entry
@@ -185,6 +189,25 @@ opportunities (
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ
 )
+
+-- Data Quality Issues (opportunities with missing/unknown data)
+data_quality_issues (
+  issue_id UUID PRIMARY KEY,
+  pharmacy_id UUID NOT NULL REFERENCES pharmacies,
+  opportunity_id UUID REFERENCES opportunities ON DELETE CASCADE,
+  prescription_id UUID REFERENCES prescriptions ON DELETE CASCADE,
+  patient_id UUID REFERENCES patients,
+  issue_type VARCHAR(50) NOT NULL,  -- 'missing_prescriber', 'unknown_prescriber', 'missing_current_drug', etc.
+  issue_description TEXT,
+  original_value TEXT,
+  field_name VARCHAR(100),
+  status VARCHAR(20) DEFAULT 'pending',  -- 'pending', 'resolved', 'ignored', 'auto_fixed'
+  resolved_value TEXT,
+  resolved_by UUID REFERENCES users,
+  resolved_at TIMESTAMPTZ,
+  resolution_notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)
 ```
 
 ### Status Values
@@ -271,6 +294,20 @@ NEXT_PUBLIC_API_URL=https://therxos-backend-production.up.railway.app
 - Stripe checkout integration
 - Auto-onboarding via webhook
 
+### 7. Data Quality System
+- Auto-detects opportunities with missing/unknown prescriber or drug data
+- Automatically flags issues when opportunities are created (via DB trigger)
+- Hidden from clients until resolved by admin
+- Admin review queue for resolving issues
+- Bulk update capabilities for efficient processing
+- Impact tracking (blocked margin, affected opportunities)
+
+### 8. Name Formatting
+- Patient names formatted as "First Last" (proper case)
+- Handles truncated privacy names (3-letter abbreviations)
+- Prescriber names properly formatted with credentials
+- Utility functions in `src/utils/formatters.js`
+
 ---
 
 ## API Endpoints
@@ -301,6 +338,13 @@ NEXT_PUBLIC_API_URL=https://therxos-backend-production.up.railway.app
 - `GET /api/admin/stats` - Platform stats
 - `POST /api/admin/impersonate` - Login as pharmacy
 - `POST /api/admin/create-super-admin` - Initial setup
+
+### Data Quality (Admin only)
+- `GET /api/data-quality` - List data quality issues (filterable by status, type)
+- `GET /api/data-quality/:issueId` - Get single issue details
+- `PATCH /api/data-quality/:issueId` - Update issue (resolve, ignore)
+- `POST /api/data-quality/bulk-update` - Bulk update issues
+- `GET /api/data-quality/stats/summary` - Get summary statistics
 
 ---
 
@@ -404,6 +448,34 @@ Statuses from V1 are stored in `v1_status` and `v1_notes` columns. The main `sta
 - [ ] Stripe integration incomplete (needs keys)
 - [x] Gmail polling for auto-capture - IMPLEMENTED, needs OAuth credentials (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET)
 - [ ] Aracoma Drug RX30 data import pending
+- [x] Data quality issues - Hidden from clients, admin review queue implemented
+- [x] Patient name formatting - Proper case "First Last" format
+- [x] Monthly reports data quality filter - Excludes pending issues from all stats
+- [ ] UI improvements needed (Admin Panel, Opportunities, Analytics, Dashboard)
+
+## Recent Changes (January 2026)
+
+### Data Quality System
+- Created `data_quality_issues` table with auto-trigger on opportunity insert
+- Opportunities with unknown/missing prescriber or drug are flagged automatically
+- Client-facing APIs now exclude opportunities with pending data quality issues
+- Admin API endpoints for managing data quality issues (`/api/data-quality`)
+
+### Name Formatting
+- Created `src/utils/formatters.js` with utility functions
+- `formatPatientName()` - Converts truncated names to proper case
+- `formatPrescriberName()` - Handles "LAST, FIRST MD" format
+- Applied to all patient/prescriber name outputs across API endpoints
+
+### Monthly Reports Fix
+- All queries now exclude opportunities with pending data quality issues
+- Consistent filtering across stats, by-status, by-type, daily, weekly, and BIN breakdowns
+- Export endpoint also applies data quality filter
+
+### Scanner Improvements
+- GP lookup caching for combo therapy triggers
+- Flexible drug name matching for combo drugs (5-char prefix patterns)
+- Fixed combo_therapy triggers to require BOTH component drugs
 
 ---
 

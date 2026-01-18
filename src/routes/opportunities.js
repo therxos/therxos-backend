@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../database/index.js';
 import { logger } from '../utils/logger.js';
 import { authenticateToken } from './auth.js';
+import { formatPatientName, formatPrescriberName } from '../utils/formatters.js';
 
 const router = express.Router();
 
@@ -18,8 +19,9 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     // Query using columns that exist in the patients and prescriptions tables
+    // Excludes opportunities with pending data quality issues (missing prescriber, unknown drug, etc.)
     let query = `
-      SELECT o.*, 
+      SELECT o.*,
         p.patient_hash,
         p.first_name as patient_first_name,
         p.last_name as patient_last_name,
@@ -40,6 +42,10 @@ router.get('/', authenticateToken, async (req, res) => {
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       WHERE o.pharmacy_id = $1
+        AND o.opportunity_id NOT IN (
+          SELECT dqi.opportunity_id FROM data_quality_issues dqi
+          WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
+        )
     `;
     const params = [pharmacyId];
     let paramIndex = 2;
@@ -77,14 +83,18 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const result = await db.query(query, params);
 
-    // Get counts by status
+    // Get counts by status (excluding opportunities with pending data quality issues)
     const countsResult = await db.query(`
-      SELECT 
+      SELECT
         status,
         COUNT(*) as count,
         SUM(potential_margin_gain) as total_margin
       FROM opportunities
       WHERE pharmacy_id = $1
+        AND opportunity_id NOT IN (
+          SELECT dqi.opportunity_id FROM data_quality_issues dqi
+          WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
+        )
       GROUP BY status
     `, [pharmacyId]);
 
@@ -96,8 +106,15 @@ router.get('/', authenticateToken, async (req, res) => {
       };
     }
 
+    // Format patient and prescriber names for display
+    const formattedOpportunities = result.rows.map(opp => ({
+      ...opp,
+      patient_name: formatPatientName(opp.patient_first_name, opp.patient_last_name),
+      prescriber_name_formatted: formatPrescriberName(opp.prescriber_name)
+    }));
+
     res.json({
-      opportunities: result.rows,
+      opportunities: formattedOpportunities,
       counts,
       pagination: {
         limit: parseInt(limit),
@@ -118,7 +135,8 @@ router.get('/:opportunityId', authenticateToken, async (req, res) => {
 
     const result = await db.query(`
       SELECT o.*,
-        p.patient_hash, p.chronic_conditions, p.date_of_birth, p.primary_insurance_bin, p.primary_insurance_pcn, p.primary_insurance_group,
+        p.patient_hash, p.first_name as patient_first_name, p.last_name as patient_last_name,
+        p.chronic_conditions, p.date_of_birth, p.primary_insurance_bin, p.primary_insurance_pcn, p.primary_insurance_group,
         pr.rx_number, pr.quantity_dispensed, pr.days_supply, pr.sig, pr.prescriber_name, pr.prescriber_npi,
         nr_current.drug_name as current_ndc_drug, nr_current.manufacturer as current_manufacturer, nr_current.is_brand as current_is_brand,
         nr_rec.drug_name as recommended_ndc_drug, nr_rec.manufacturer as recommended_manufacturer, nr_rec.is_brand as recommended_is_brand
@@ -143,9 +161,15 @@ router.get('/:opportunityId', authenticateToken, async (req, res) => {
       ORDER BY oa.performed_at DESC
     `, [opportunityId]);
 
+    const opp = result.rows[0];
     res.json({
-      ...result.rows[0],
-      actions: actions.rows
+      ...opp,
+      patient_name: formatPatientName(opp.patient_first_name, opp.patient_last_name),
+      prescriber_name_formatted: formatPrescriberName(opp.prescriber_name),
+      actions: actions.rows.map(a => ({
+        ...a,
+        performed_by_name: formatPatientName(a.first_name, a.last_name)
+      }))
     });
   } catch (error) {
     logger.error('Get opportunity error', { error: error.message });
@@ -341,6 +365,7 @@ router.get('/summary/stats', authenticateToken, async (req, res) => {
     const pharmacyId = req.user.pharmacyId;
     const { days = 30 } = req.query;
 
+    // Exclude opportunities with pending data quality issues from stats
     const stats = await db.query(`
       SELECT
         COUNT(*) FILTER (WHERE status = 'Not Submitted') as new_count,
@@ -353,28 +378,40 @@ router.get('/summary/stats', authenticateToken, async (req, res) => {
       FROM opportunities
       WHERE pharmacy_id = $1
         AND created_at >= NOW() - INTERVAL '${parseInt(days)} days'
+        AND opportunity_id NOT IN (
+          SELECT dqi.opportunity_id FROM data_quality_issues dqi
+          WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
+        )
     `, [pharmacyId]);
 
     const byType = await db.query(`
-      SELECT 
+      SELECT
         opportunity_type,
         COUNT(*) as count,
         SUM(potential_margin_gain) as total_margin
       FROM opportunities
       WHERE pharmacy_id = $1
         AND status = 'Not Submitted'
+        AND opportunity_id NOT IN (
+          SELECT dqi.opportunity_id FROM data_quality_issues dqi
+          WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
+        )
       GROUP BY opportunity_type
       ORDER BY total_margin DESC
     `, [pharmacyId]);
 
     const trend = await db.query(`
-      SELECT 
+      SELECT
         DATE(created_at) as date,
         COUNT(*) as count,
         SUM(potential_margin_gain) as margin
       FROM opportunities
       WHERE pharmacy_id = $1
         AND created_at >= NOW() - INTERVAL '${parseInt(days)} days'
+        AND opportunity_id NOT IN (
+          SELECT dqi.opportunity_id FROM data_quality_issues dqi
+          WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
+        )
       GROUP BY DATE(created_at)
       ORDER BY date ASC
     `, [pharmacyId]);

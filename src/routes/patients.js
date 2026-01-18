@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../database/index.js';
 import { logger } from '../utils/logger.js';
 import { authenticateToken } from './auth.js';
+import { formatPatientName, formatPrescriberName } from '../utils/formatters.js';
 
 const router = express.Router();
 
@@ -44,8 +45,14 @@ router.get('/', authenticateToken, async (req, res) => {
     const result = await db.query(query, params);
     const countResult = await db.query(`SELECT COUNT(*) as total FROM patients WHERE pharmacy_id = $1`, [pharmacyId]);
 
+    // Format patient names for display
+    const formattedPatients = result.rows.map(p => ({
+      ...p,
+      patient_name: formatPatientName(p.first_name, p.last_name)
+    }));
+
     res.json({
-      patients: result.rows,
+      patients: formattedPatients,
       total: parseInt(countResult.rows[0].total),
       pagination: { limit: parseInt(limit), offset: parseInt(offset) }
     });
@@ -90,15 +97,22 @@ router.get('/:patientId', authenticateToken, async (req, res) => {
 
     const isMedSyncCandidate = parseInt(medSyncCheck.rows[0].chronic_med_count) >= 3;
 
+    const patientData = patient.rows[0];
     res.json({
-      patient: patient.rows[0],
-      prescriptions: medications.rows,
+      patient: {
+        ...patientData,
+        patient_name: formatPatientName(patientData.first_name, patientData.last_name)
+      },
+      prescriptions: medications.rows.map(m => ({
+        ...m,
+        prescriber_name_formatted: formatPrescriberName(m.prescriber_name)
+      })),
       opportunities: opportunities.rows,
       drugClasses,
       isMedSyncCandidate,
       summary: {
         totalMedications: medications.rows.length,
-        chronicConditions: patient.rows[0].chronic_conditions || [],
+        chronicConditions: patientData.chronic_conditions || [],
         activeOpportunities: opportunities.rows.length,
         potentialMargin: opportunities.rows.reduce((sum, o) => sum + (parseFloat(o.potential_margin_gain) || 0), 0)
       }

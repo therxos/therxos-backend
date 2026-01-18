@@ -48,7 +48,7 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
   }
 });
 
-// GET /api/admin/stats - Get platform-wide stats
+// GET /api/admin/stats - Get platform-wide stats (authenticated)
 router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     // Exclude Hero Pharmacy and any demo pharmacies from stats
@@ -59,14 +59,16 @@ router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
         (SELECT COUNT(*) FROM users u JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_users,
         (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_opportunities,
         (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_value,
-        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as captured_value
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as captured_value,
+        (SELECT COUNT(*) FROM data_quality_issues WHERE status = 'pending') as pending_quality_issues,
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN data_quality_issues dqi ON dqi.opportunity_id = o.opportunity_id WHERE dqi.status = 'pending') as blocked_margin
     `);
 
     // Calculate MRR and ARR ($599/mo per active pharmacy)
     const activePharmacies = stats.rows[0]?.active_pharmacies || 0;
     const mrr = activePharmacies * 599;
     const arr = mrr * 12;
-    
+
     res.json({
       ...stats.rows[0],
       mrr,
@@ -74,6 +76,57 @@ router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching stats:', error);
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+// GET /api/admin/public-stats - Public stats for main website (no auth required)
+router.get('/public-stats', async (req, res) => {
+  try {
+    // Exclude Hero Pharmacy and demo pharmacies from public stats
+    const stats = await db.query(`
+      SELECT
+        (SELECT COUNT(*) FROM prescriptions pr JOIN pharmacies p ON p.pharmacy_id = pr.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as claims_analyzed,
+        (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status = 'active' AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as pharmacies_live,
+        (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as opportunities_found,
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as profit_identified,
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as profit_captured
+    `);
+
+    const data = stats.rows[0];
+
+    // Format numbers for display
+    const formatNumber = (num) => {
+      const n = parseInt(num) || 0;
+      if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M+';
+      if (n >= 1000) return (n / 1000).toFixed(0) + 'K+';
+      return n.toString();
+    };
+
+    const formatMoney = (num) => {
+      const n = parseFloat(num) || 0;
+      if (n >= 1000000) return '$' + (n / 1000000).toFixed(1) + 'M+';
+      if (n >= 1000) return '$' + (n / 1000).toFixed(0) + 'K+';
+      return '$' + n.toFixed(0);
+    };
+
+    res.json({
+      claims_analyzed: formatNumber(data.claims_analyzed),
+      pharmacies_live: parseInt(data.pharmacies_live) || 0,
+      opportunities_found: formatNumber(data.opportunities_found),
+      profit_identified: formatMoney(data.profit_identified),
+      profit_captured: formatMoney(data.profit_captured),
+      // Raw values for custom formatting
+      raw: {
+        claims_analyzed: parseInt(data.claims_analyzed) || 0,
+        pharmacies_live: parseInt(data.pharmacies_live) || 0,
+        opportunities_found: parseInt(data.opportunities_found) || 0,
+        profit_identified: parseFloat(data.profit_identified) || 0,
+        profit_captured: parseFloat(data.profit_captured) || 0
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching public stats:', error);
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
