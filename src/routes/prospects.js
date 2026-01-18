@@ -579,6 +579,38 @@ router.post('/checkout/create-session', async (req, res) => {
   }
 });
 
+// GET /api/prospects/stripe-status - Check Stripe configuration status
+router.get('/stripe-status', async (req, res) => {
+  const status = {
+    stripe_configured: !!stripe,
+    stripe_key_type: process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_') ? 'LIVE' :
+                     process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_') ? 'TEST' : 'UNKNOWN',
+    price_id_set: !!process.env.STRIPE_PRICE_ID,
+    webhook_secret_set: !!process.env.STRIPE_WEBHOOK_SECRET,
+    website_url: process.env.WEBSITE_URL || 'https://therxos.com (default)',
+  };
+
+  // Test Stripe connection by retrieving the price
+  if (stripe && process.env.STRIPE_PRICE_ID) {
+    try {
+      const price = await stripe.prices.retrieve(process.env.STRIPE_PRICE_ID);
+      status.price_valid = true;
+      status.price_amount = price.unit_amount / 100;
+      status.price_currency = price.currency.toUpperCase();
+      status.price_interval = price.recurring?.interval || 'one-time';
+      status.price_product = price.product;
+    } catch (error) {
+      status.price_valid = false;
+      status.price_error = error.message;
+    }
+  }
+
+  // Overall status
+  status.ready = status.stripe_configured && status.price_valid && status.webhook_secret_set;
+
+  res.json(status);
+});
+
 // POST /api/checkout/webhook - Stripe webhook for payment confirmation
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
