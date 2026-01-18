@@ -453,18 +453,18 @@ Statuses from V1 are stored in `v1_status` and `v1_notes` columns. The main `sta
 ## INCOMPLETE FEATURES - MUST BE IMPLEMENTED
 
 ### Admin Panel - Trigger Editor
-- [ ] **"Synced On" timestamp** - Show when each trigger was last synced/scanned for coverage
-- [ ] **Sorting** - Allow sorting triggers by name, date, match count
-- [ ] **Panels start collapsed** - Trigger sections should start collapsed by default
-- [ ] **CMS Formulary Data display** - Show CMS data when available for Medicare plans
+- [x] **"Synced On" timestamp** - Show when each trigger was last synced/scanned for coverage (Jan 2026)
+- [x] **Sorting** - Allow sorting triggers by name, date, match count (Already implemented)
+- [x] **Panels start collapsed** - Trigger sections should start collapsed by default (Jan 2026)
+- [x] **CMS Formulary Data display** - Show Medicare Part D coverage data in trigger editor (Jan 2026)
 
 ### Coverage Scanner
-- [ ] **Coverage scan not working** - Returns 0 for many triggers. Need to debug why
-- [ ] **Avg Qty not populating** - The avg_qty field should be captured and displayed in trigger_bin_values
-- [ ] **Bulk scan all triggers** - Endpoint POST /api/admin/triggers/scan-all exists but needs frontend button
+- [x] **Coverage scan not working** - Fixed: quantity_dispensed column name issue (Jan 2026)
+- [x] **Avg Qty not populating** - Fixed: Now displaying in BIN values table (Jan 2026)
+- [x] **Bulk scan all triggers** - Working: "Scan All Coverage" button in admin panel
 
 ### Trigger Scanning
-- [ ] **Combo drug matching** - Triggers like "Losartan-HCTZ" should find matching prescriptions
+- [x] **Combo drug matching** - Fixed: Triggers like "Losartan-HCTZ" now find matching prescriptions
 
 ---
 

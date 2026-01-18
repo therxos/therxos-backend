@@ -1125,6 +1125,115 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
   }
 });
 
+// GET /api/admin/triggers/:id/medicare-data - Get Medicare coverage data for a trigger
+router.get('/triggers/:id/medicare-data', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id: triggerId } = req.params;
+
+    // Get trigger info
+    const triggerResult = await db.query(
+      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name FROM triggers WHERE trigger_id = $1',
+      [triggerId]
+    );
+
+    if (triggerResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    const trigger = triggerResult.rows[0];
+    const recommendedDrug = trigger.recommended_drug || '';
+
+    // Parse search words from recommended drug
+    const skipWords = ['mg', 'ml', 'mcg', 'er', 'sr', 'xr', 'dr', 'hcl', 'sodium', 'potassium'];
+    const words = recommendedDrug
+      .split(/[\s,.\-\(\)\[\]]+/)
+      .map(w => w.trim().toUpperCase())
+      .filter(w => w.length >= 2 && !skipWords.includes(w.toLowerCase()) && !/^\d+$/.test(w));
+
+    if (words.length === 0 && !trigger.recommended_ndc) {
+      return res.json({
+        trigger: { id: triggerId, name: trigger.display_name },
+        medicare: { available: false, reason: 'No recommended drug or NDC' }
+      });
+    }
+
+    // Build search conditions
+    const conditions = words.map((w, i) => `UPPER(drug_name) LIKE '%' || $${i + 1} || '%'`);
+    let params = [...words];
+
+    // Find Medicare claims (BINs starting with 610 are typically Medicare Part D)
+    const medicareQuery = `
+      SELECT
+        contract_id,
+        plan_name,
+        insurance_bin as bin,
+        COUNT(*) as claim_count,
+        AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_gp,
+        AVG(COALESCE((raw_data->>'insurance_pay')::numeric, 0)) as avg_insurance_pay,
+        MIN(dispensed_date) as first_claim,
+        MAX(dispensed_date) as last_claim
+      FROM prescriptions
+      WHERE ${conditions.length > 0 ? `(${conditions.join(' AND ')})` : 'FALSE'}
+      ${trigger.recommended_ndc ? `OR ndc = $${params.length + 1}` : ''}
+      AND insurance_bin LIKE '610%'
+      AND contract_id IS NOT NULL
+      GROUP BY contract_id, plan_name, insurance_bin
+      ORDER BY claim_count DESC
+      LIMIT 20
+    `;
+
+    if (trigger.recommended_ndc) {
+      params.push(trigger.recommended_ndc);
+    }
+
+    const medicareResult = await db.query(medicareQuery, params);
+
+    // Get summary stats
+    const summaryQuery = `
+      SELECT
+        COUNT(*) as total_claims,
+        COUNT(DISTINCT contract_id) as unique_plans,
+        AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_gp,
+        AVG(COALESCE((raw_data->>'insurance_pay')::numeric, 0)) as avg_insurance_pay
+      FROM prescriptions
+      WHERE ${conditions.length > 0 ? `(${conditions.join(' AND ')})` : 'FALSE'}
+      ${trigger.recommended_ndc ? `OR ndc = $${words.length + 1}` : ''}
+      AND insurance_bin LIKE '610%'
+      AND contract_id IS NOT NULL
+    `;
+
+    const summaryResult = await db.query(summaryQuery, params);
+    const summary = summaryResult.rows[0];
+
+    res.json({
+      trigger: { id: triggerId, name: trigger.display_name, recommendedDrug },
+      medicare: {
+        available: parseInt(summary.total_claims) > 0,
+        summary: {
+          totalClaims: parseInt(summary.total_claims) || 0,
+          uniquePlans: parseInt(summary.unique_plans) || 0,
+          avgGP: parseFloat(summary.avg_gp) || 0,
+          avgInsurancePay: parseFloat(summary.avg_insurance_pay) || 0
+        },
+        plans: medicareResult.rows.map(r => ({
+          contractId: r.contract_id,
+          planName: r.plan_name,
+          bin: r.bin,
+          claimCount: parseInt(r.claim_count),
+          avgGP: parseFloat(r.avg_gp) || 0,
+          avgInsurancePay: parseFloat(r.avg_insurance_pay) || 0,
+          firstClaim: r.first_claim,
+          lastClaim: r.last_claim
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('Error getting Medicare data:', error);
+    res.status(500).json({ error: 'Failed to get Medicare data: ' + error.message });
+  }
+});
+
 // POST /api/admin/triggers/scan-all - Scan ALL triggers for coverage at once
 router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
