@@ -24,6 +24,7 @@ import settingsRoutes from './routes/settings.js';
 import feedbackRoutes from './routes/feedback.js';
 import pricingRoutes from './routes/pricing.js';
 import secureUploadRoutes from './routes/secure-upload.js';
+import coverageIntelligenceRoutes from './routes/coverage-intelligence.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -109,6 +110,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/pricing', pricingRoutes);
 app.use('/api/secure-upload', secureUploadRoutes);
+app.use('/api/coverage', coverageIntelligenceRoutes);
 
 // CSV Upload endpoint
 app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
@@ -445,6 +447,39 @@ cron.schedule('0 3 * * *', async () => {
     logger.info('Secure upload cleanup completed', { cleanedCount });
   } catch (error) {
     logger.error('Secure upload cleanup failed', { error: error.message });
+  }
+}, {
+  timezone: 'America/New_York'
+});
+
+// Schedule coverage intelligence scan (8 AM daily - after nightly scan)
+cron.schedule('0 8 * * *', async () => {
+  logger.info('Starting scheduled coverage intelligence scan');
+  try {
+    const coverageIntelligence = await import('./services/coverage-intelligence.js');
+    const result = await coverageIntelligence.runCoverageIntelligenceScan({
+      verifyLimit: 200,
+      scoreLimit: 500
+    });
+
+    logger.info('Coverage intelligence scan completed', {
+      verified: result.totals.verified,
+      scored: result.totals.scored,
+      errors: result.totals.errors,
+      duration: result.duration
+    });
+
+    // Check for critical alerts
+    const dashboard = await coverageIntelligence.getCoverageDashboard();
+    const criticalAlerts = dashboard.alerts.filter(a => a.severity === 'critical');
+
+    if (criticalAlerts.length > 0) {
+      logger.warn('Coverage intelligence critical alerts', { alerts: criticalAlerts });
+      // TODO: Send notification to admin
+    }
+
+  } catch (error) {
+    logger.error('Coverage intelligence scan failed', { error: error.message });
   }
 }, {
   timezone: 'America/New_York'
