@@ -441,17 +441,44 @@ Statuses from V1 are stored in `v1_status` and `v1_notes` columns. The main `sta
 
 ---
 
+## CRITICAL RULES - NEVER VIOLATE
+
+1. **NEVER filter or hide worked opportunities** - Any opportunity with status != 'Not Submitted' must ALWAYS be visible. This includes Submitted, Approved, Completed, Denied, etc.
+2. **NEVER delete worked opportunities** - Only delete opportunities with status = 'Not Submitted'
+3. **NEVER make changes without explicit request** - Don't "fix" or "improve" things that weren't asked for
+4. **NEVER change default values** without asking first (e.g., minMargin)
+
+---
+
+## INCOMPLETE FEATURES - MUST BE IMPLEMENTED
+
+### Admin Panel - Trigger Editor
+- [ ] **"Synced On" timestamp** - Show when each trigger was last synced/scanned for coverage
+- [ ] **Sorting** - Allow sorting triggers by name, date, match count
+- [ ] **Panels start collapsed** - Trigger sections should start collapsed by default
+- [ ] **CMS Formulary Data display** - Show CMS data when available for Medicare plans
+
+### Coverage Scanner
+- [ ] **Coverage scan not working** - Returns 0 for many triggers. Need to debug why
+- [ ] **Avg Qty not populating** - The avg_qty field should be captured and displayed in trigger_bin_values
+- [ ] **Bulk scan all triggers** - Endpoint POST /api/admin/triggers/scan-all exists but needs frontend button
+
+### Trigger Scanning
+- [ ] **Combo drug matching** - Triggers like "Losartan-HCTZ" should find matching prescriptions
+
+---
+
 ## Known Issues / TODO
 
 - [ ] Logout causes client-side error (React hydration)
 - [ ] `/change-password` page returns 404
-- [ ] Stripe integration incomplete (needs keys)
+- [x] Stripe integration - WORKING (live keys configured, checkout creates sessions)
 - [x] Gmail polling for auto-capture - IMPLEMENTED, needs OAuth credentials (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET)
 - [ ] Aracoma Drug RX30 data import pending
 - [x] Data quality issues - Hidden from clients, admin review queue implemented
 - [x] Patient name formatting - Proper case "First Last" format
 - [x] Monthly reports data quality filter - Excludes pending issues from all stats
-- [ ] UI improvements needed (Admin Panel, Opportunities, Analytics, Dashboard)
+- [x] Diclofenac false positives - Deleted 318 invalid opportunities (Jan 2026)
 
 ## Recent Changes (January 2026)
 
