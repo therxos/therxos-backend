@@ -43,26 +43,26 @@ export async function verifyCoverage(opportunityId, options = {}) {
     let result = null;
     let source = null;
 
-    // 1. Try CMS API if Medicare
+    // 1. Try CMS API if Medicare (CONTRACT_ID + PLAN_NAME is primary match)
     if (insurance.contract_id && insurance.contract_id.match(/^[HSR]\d{4}$/)) {
       result = await tryVerificationSource('cms_api', async () => {
         return await checkCMSFormulary(
           insurance.contract_id,
-          insurance.plan_id || '001',
+          insurance.plan_name || '001',
           opp.recommended_ndc
         );
       });
       if (result) source = 'cms_api';
     }
 
-    // 2. Try local formulary cache
+    // 2. Try local formulary cache (CONTRACT_ID + PLAN first, then BIN + GROUP)
     if (!result) {
       result = await tryVerificationSource('local_cache', async () => {
         return await checkLocalFormulary(
           insurance.contract_id,
-          insurance.plan_id,
+          insurance.plan_name,
           insurance.bin,
-          insurance.pcn,
+          insurance.group_number,
           opp.recommended_ndc
         );
       });
@@ -102,9 +102,9 @@ export async function verifyCoverage(opportunityId, options = {}) {
         ndc: opp.recommended_ndc,
         drugName: opp.recommended_drug,
         contractId: insurance.contract_id,
-        planId: insurance.plan_id,
+        planName: insurance.plan_name,
         bin: insurance.bin,
-        pcn: insurance.pcn,
+        groupNumber: insurance.group_number,
         source,
         success: result.covered !== null,
         result,
@@ -649,7 +649,7 @@ export async function diagnoseCoverageIssues(opportunityId) {
     try {
       const cmsResult = await checkCMSFormulary(
         insurance.contract_id,
-        insurance.plan_id || '001',
+        insurance.plan_name || '001',
         opp.recommended_ndc
       );
       if (cmsResult) {
@@ -668,12 +668,12 @@ export async function diagnoseCoverageIssues(opportunityId) {
     diagnosis.checks.push({ name: 'CMS API', passed: null, value: 'Not Medicare plan' });
   }
 
-  // Check 4: Local formulary
+  // Check 4: Local formulary (CONTRACT_ID + PLAN first, then BIN + GROUP)
   const localFormulary = await checkLocalFormulary(
     insurance.contract_id,
-    insurance.plan_id,
+    insurance.plan_name,
     insurance.bin,
-    insurance.pcn,
+    insurance.group_number,
     opp.recommended_ndc
   );
 
@@ -736,10 +736,11 @@ async function getOpportunityDetails(opportunityId) {
 
 async function getPatientInsurance(patientId) {
   // Get most recent prescription with insurance info
+  // Priority: CONTRACT_ID + PLAN_NAME (CMS), then BIN + GROUP (commercial)
   const result = await db.query(`
     SELECT
       contract_id,
-      plan_name as plan_id,
+      plan_name,
       insurance_bin as bin,
       insurance_pcn as pcn,
       group_number
@@ -876,18 +877,22 @@ async function checkCMSFormulary(contractId, planId, ndc) {
   }
 }
 
-async function checkLocalFormulary(contractId, planId, bin, pcn, ndc) {
+async function checkLocalFormulary(contractId, planName, bin, groupNumber, ndc) {
+  // Priority 1: CONTRACT_ID + PLAN_NAME (Medicare Part D)
+  // Priority 2: BIN + GROUP (Commercial)
   const result = await db.query(`
     SELECT *
     FROM formulary_items
     WHERE ndc = $1
       AND (
-        (contract_id = $2 AND (plan_id = $3 OR plan_id IS NULL))
-        OR (bin = $4 AND (pcn = $5 OR pcn IS NULL))
+        (contract_id = $2 AND (plan_name = $3 OR plan_name IS NULL))
+        OR (bin = $4 AND (group_number = $5 OR group_number IS NULL))
       )
-    ORDER BY last_verified_at DESC NULLS LAST
+    ORDER BY
+      CASE WHEN contract_id = $2 THEN 0 ELSE 1 END,  -- Prefer contract_id match
+      last_verified_at DESC NULLS LAST
     LIMIT 1
-  `, [ndc, contractId, planId, bin, pcn]);
+  `, [ndc, contractId, planName, bin, groupNumber]);
 
   if (result.rows.length === 0) return null;
 
@@ -936,14 +941,14 @@ async function logVerification(data) {
     await db.query(`
       INSERT INTO coverage_verification_log (
         opportunity_id, patient_id, pharmacy_id,
-        ndc, drug_name, contract_id, plan_id, bin, pcn,
+        ndc, drug_name, contract_id, plan_name, bin, group_number,
         verification_source, verification_success, error_message,
         is_covered, tier, prior_auth, step_therapy, quantity_limit,
         estimated_copay, reimbursement_rate, response_time_ms
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
     `, [
       data.opportunityId, data.patientId, data.pharmacyId,
-      data.ndc, data.drugName, data.contractId, data.planId, data.bin, data.pcn,
+      data.ndc, data.drugName, data.contractId, data.planName, data.bin, data.groupNumber,
       data.source, data.success, data.errorMessage,
       data.result?.covered, data.result?.tier, data.result?.priorAuth,
       data.result?.stepTherapy, data.result?.quantityLimit,

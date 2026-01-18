@@ -9,12 +9,11 @@
 CREATE TABLE IF NOT EXISTS formulary_items (
   formulary_item_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-  -- Plan identification
+  -- Plan identification (PRIMARY: contract_id + plan_name, SECONDARY: bin + group_number)
   contract_id VARCHAR(20),          -- Medicare contract (H1234) or commercial
-  plan_id VARCHAR(20),              -- Plan within contract
+  plan_name VARCHAR(100),           -- Plan name/ID within contract
   bin VARCHAR(10),                  -- BIN for commercial plans
-  pcn VARCHAR(20),                  -- PCN for commercial plans
-  group_number VARCHAR(50),         -- Group number
+  group_number VARCHAR(50),         -- Group number (primary for commercial matching)
 
   -- Drug identification
   ndc VARCHAR(13) NOT NULL,         -- 11-digit NDC
@@ -51,12 +50,12 @@ CREATE TABLE IF NOT EXISTS formulary_items (
   updated_at TIMESTAMPTZ DEFAULT NOW(),
 
   -- Unique constraint per plan/drug combination
-  CONSTRAINT uq_formulary_item UNIQUE (contract_id, plan_id, ndc)
+  CONSTRAINT uq_formulary_item UNIQUE (contract_id, plan_name, ndc)
 );
 
 CREATE INDEX IF NOT EXISTS idx_formulary_ndc ON formulary_items(ndc);
-CREATE INDEX IF NOT EXISTS idx_formulary_contract ON formulary_items(contract_id, plan_id);
-CREATE INDEX IF NOT EXISTS idx_formulary_bin_pcn ON formulary_items(bin, pcn);
+CREATE INDEX IF NOT EXISTS idx_formulary_contract ON formulary_items(contract_id, plan_name);
+CREATE INDEX IF NOT EXISTS idx_formulary_bin_group ON formulary_items(bin, group_number);
 CREATE INDEX IF NOT EXISTS idx_formulary_preferred ON formulary_items(preferred) WHERE preferred = true;
 CREATE INDEX IF NOT EXISTS idx_formulary_tier ON formulary_items(tier);
 
@@ -68,15 +67,15 @@ CREATE INDEX IF NOT EXISTS idx_formulary_tier ON formulary_items(tier);
 CREATE TABLE IF NOT EXISTS insurance_contracts (
   contract_id_internal UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-  -- Identification
-  bin VARCHAR(10) NOT NULL,
-  pcn VARCHAR(20),
-  group_pattern VARCHAR(100),       -- Can be regex pattern for matching
+  -- Identification (PRIMARY: contract_id for Medicare, BIN + GROUP for commercial)
+  contract_id VARCHAR(20),          -- Medicare contract (H1234)
+  plan_name VARCHAR(100),           -- Plan name within contract
+  bin VARCHAR(10),
+  group_number VARCHAR(50),         -- Group for commercial matching
 
   -- Contract details
   payer_name VARCHAR(255),
   plan_type VARCHAR(50),            -- 'medicare_part_d', 'medicaid', 'commercial', 'pbm'
-  medicare_contract_id VARCHAR(20), -- Link to CMS contract (H1234)
 
   -- Coverage info
   formulary_id VARCHAR(50),
@@ -95,12 +94,12 @@ CREATE TABLE IF NOT EXISTS insurance_contracts (
 
   created_at TIMESTAMPTZ DEFAULT NOW(),
 
-  CONSTRAINT uq_insurance_contract UNIQUE (bin, pcn, group_pattern)
+  CONSTRAINT uq_insurance_contract UNIQUE (contract_id, plan_name, bin, group_number)
 );
 
-CREATE INDEX IF NOT EXISTS idx_insurance_bin ON insurance_contracts(bin);
-CREATE INDEX IF NOT EXISTS idx_insurance_bin_pcn ON insurance_contracts(bin, pcn);
-CREATE INDEX IF NOT EXISTS idx_insurance_medicare ON insurance_contracts(medicare_contract_id);
+CREATE INDEX IF NOT EXISTS idx_insurance_contract ON insurance_contracts(contract_id);
+CREATE INDEX IF NOT EXISTS idx_insurance_bin_group ON insurance_contracts(bin, group_number);
+CREATE INDEX IF NOT EXISTS idx_insurance_plan_type ON insurance_contracts(plan_type);
 
 
 -- ===========================================
@@ -119,11 +118,11 @@ CREATE TABLE IF NOT EXISTS coverage_verification_log (
   ndc VARCHAR(13),
   drug_name VARCHAR(255),
 
-  -- Insurance info
+  -- Insurance info (matches prescriptions table naming)
   contract_id VARCHAR(20),
-  plan_id VARCHAR(20),
+  plan_name VARCHAR(100),
   bin VARCHAR(10),
-  pcn VARCHAR(20),
+  group_number VARCHAR(50),
 
   -- Verification result
   verification_source VARCHAR(50),  -- 'cms_api', 'local_cache', 'edi_832', 'manual'
