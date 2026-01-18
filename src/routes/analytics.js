@@ -15,7 +15,8 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
     const { period = '30' } = req.query;
     const days = parseInt(period);
 
-    // Subquery to get clean opportunities (excluding pending data quality issues)
+    // Subquery to filter only Not Submitted opportunities with data quality issues
+    // Worked opportunities (Submitted, Approved, Completed) are NEVER filtered
     const cleanOppFilter = `AND opportunity_id NOT IN (
       SELECT dqi.opportunity_id FROM data_quality_issues dqi
       WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
@@ -23,11 +24,11 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
 
     const overview = await db.query(`
       SELECT
-        -- Opportunity stats (excluding items with data quality issues)
+        -- Opportunity stats (only filter Not Submitted, never filter worked opps)
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_opportunities,
         (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_margin,
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Submitted', 'Approved', 'Completed') AND actioned_at >= NOW() - INTERVAL '${days} days' ${cleanOppFilter}) as actioned_count,
-        (SELECT COALESCE(SUM(actual_margin_realized), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed' AND actioned_at >= NOW() - INTERVAL '${days} days' ${cleanOppFilter}) as realized_margin,
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Submitted', 'Approved', 'Completed') AND actioned_at >= NOW() - INTERVAL '${days} days') as actioned_count,
+        (SELECT COALESCE(SUM(actual_margin_realized), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed' AND actioned_at >= NOW() - INTERVAL '${days} days') as realized_margin,
 
         -- Prescription stats
         (SELECT COUNT(*) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '${days} days') as rx_count,
@@ -37,13 +38,13 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
         (SELECT COUNT(*) FROM patients WHERE pharmacy_id = $1) as total_patients,
         (SELECT COUNT(*) FROM patients WHERE pharmacy_id = $1 AND med_sync_enrolled = true) as med_sync_patients,
 
-        -- Action rate: opportunities acted on / total opportunities (excluding Not Submitted)
+        -- Action rate: opportunities acted on / total opportunities
         (SELECT
           CASE WHEN COUNT(*) > 0
           THEN ROUND(100.0 * COUNT(*) FILTER (WHERE status NOT IN ('Not Submitted', 'Denied', 'Declined')) / COUNT(*), 1)
           ELSE 0 END
         FROM opportunities
-        WHERE pharmacy_id = $1 ${cleanOppFilter}) as action_rate
+        WHERE pharmacy_id = $1) as action_rate
     `, [pharmacyId]);
 
     res.json(overview.rows[0]);
@@ -59,6 +60,13 @@ router.get('/opportunities/by-type', authenticateToken, async (req, res) => {
     const pharmacyId = req.user.pharmacyId;
     const { status = 'Not Submitted' } = req.query;
 
+    // CRITICAL: Only filter data quality issues for 'Not Submitted' - NEVER filter worked opportunities
+    const dataQualityFilter = status === 'Not Submitted' ? `
+        AND opportunity_id NOT IN (
+          SELECT dqi.opportunity_id FROM data_quality_issues dqi
+          WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
+        )` : '';
+
     const result = await db.query(`
       SELECT
         opportunity_type,
@@ -68,10 +76,7 @@ router.get('/opportunities/by-type', authenticateToken, async (req, res) => {
         COUNT(DISTINCT patient_id) as patient_count
       FROM opportunities
       WHERE pharmacy_id = $1 AND status = $2
-        AND opportunity_id NOT IN (
-          SELECT dqi.opportunity_id FROM data_quality_issues dqi
-          WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
-        )
+        ${dataQualityFilter}
       GROUP BY opportunity_type
       ORDER BY total_margin DESC
     `, [pharmacyId, status]);
@@ -393,11 +398,8 @@ router.get('/monthly', authenticateToken, async (req, res) => {
     const startDate = `${yearNum}-${monthNum.toString().padStart(2, '0')}-01`;
     const endDate = new Date(yearNum, monthNum, 0).toISOString().split('T')[0]; // Last day of month
 
-    // Data quality filter - exclude opportunities with pending issues
-    const cleanFilter = `AND opportunity_id NOT IN (
-      SELECT dqi.opportunity_id FROM data_quality_issues dqi
-      WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
-    )`;
+    // CRITICAL: Monthly reports show ALL historical data - NEVER filter worked opportunities
+    // Data quality filter only applies to the active opportunity queue, not historical reports
 
     // Overall stats for the month
     const statsResult = await db.query(`
@@ -412,7 +414,6 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       FROM opportunities
       WHERE pharmacy_id = $1
         AND ((created_at >= $2 AND created_at <= $3) OR (updated_at >= $2 AND updated_at <= $3))
-        ${cleanFilter}
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
     
     const stats = statsResult.rows[0];
@@ -425,7 +426,7 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       ? stats.captured / stats.submitted 
       : 0;
     
-    // By status
+    // By status - NO data quality filter on historical reports
     const byStatusResult = await db.query(`
       SELECT
         status,
@@ -434,12 +435,11 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       FROM opportunities
       WHERE pharmacy_id = $1
         AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
-        ${cleanFilter}
       GROUP BY status
       ORDER BY count DESC
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
     
-    // By type
+    // By type - NO data quality filter on historical reports
     const byTypeResult = await db.query(`
       SELECT
         COALESCE(trigger_type, 'Other') as type,
@@ -449,12 +449,11 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       FROM opportunities
       WHERE pharmacy_id = $1
         AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
-        ${cleanFilter}
       GROUP BY trigger_type
       ORDER BY count DESC
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
     
-    // Daily activity
+    // Daily activity - NO data quality filter on historical reports
     const dailyResult = await db.query(`
       SELECT
         DATE(updated_at) as date,
@@ -463,12 +462,11 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       FROM opportunities
       WHERE pharmacy_id = $1
         AND updated_at >= $2 AND updated_at <= $3
-        ${cleanFilter}
       GROUP BY DATE(updated_at)
       ORDER BY date
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
 
-    // By BIN - using prescription data joined to opportunities
+    // By BIN - NO data quality filter on historical reports
     const byBinResult = await db.query(`
       SELECT
         COALESCE(pr.insurance_bin, 'Unknown') as bin,
@@ -480,15 +478,11 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       WHERE o.pharmacy_id = $1
         AND (o.created_at >= $2 AND o.created_at <= $3 OR o.updated_at >= $2 AND o.updated_at <= $3)
-        AND o.opportunity_id NOT IN (
-          SELECT dqi.opportunity_id FROM data_quality_issues dqi
-          WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
-        )
       GROUP BY COALESCE(pr.insurance_bin, 'Unknown')
       ORDER BY count DESC
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
 
-    // Weekly breakdown by actioned date
+    // Weekly breakdown by actioned date - NO data quality filter on historical reports
     const weeklyResult = await db.query(`
       SELECT
         DATE_TRUNC('week', actioned_at) as week_start,
@@ -498,7 +492,6 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       WHERE pharmacy_id = $1
         AND actioned_at >= $2 AND actioned_at <= $3
         AND status IN ('Submitted', 'Approved', 'Completed', 'Captured')
-        ${cleanFilter}
       GROUP BY DATE_TRUNC('week', actioned_at)
       ORDER BY week_start
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
@@ -562,7 +555,7 @@ router.get('/monthly/export', authenticateToken, async (req, res) => {
     const startDate = `${yearNum}-${monthNum.toString().padStart(2, '0')}-01`;
     const endDate = new Date(yearNum, monthNum, 0).toISOString().split('T')[0];
 
-    // Get all opportunities for the month (excluding those with data quality issues)
+    // Get all opportunities for the month - NO data quality filter on exports (historical data)
     const result = await db.query(`
       SELECT
         o.opportunity_id,
@@ -578,10 +571,6 @@ router.get('/monthly/export', authenticateToken, async (req, res) => {
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       WHERE o.pharmacy_id = $1
         AND (o.created_at >= $2 AND o.created_at <= $3 OR o.updated_at >= $2 AND o.updated_at <= $3)
-        AND o.opportunity_id NOT IN (
-          SELECT dqi.opportunity_id FROM data_quality_issues dqi
-          WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
-        )
       ORDER BY o.updated_at DESC
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
 

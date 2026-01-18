@@ -42,10 +42,10 @@ router.get('/', authenticateToken, async (req, res) => {
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       WHERE o.pharmacy_id = $1
-        AND o.opportunity_id NOT IN (
+        AND (o.status != 'Not Submitted' OR o.opportunity_id NOT IN (
           SELECT dqi.opportunity_id FROM data_quality_issues dqi
           WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
-        )
+        ))
     `;
     const params = [pharmacyId];
     let paramIndex = 2;
@@ -91,10 +91,10 @@ router.get('/', authenticateToken, async (req, res) => {
         SUM(potential_margin_gain) as total_margin
       FROM opportunities
       WHERE pharmacy_id = $1
-        AND opportunity_id NOT IN (
+        AND (status != 'Not Submitted' OR opportunity_id NOT IN (
           SELECT dqi.opportunity_id FROM data_quality_issues dqi
           WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
-        )
+        ))
       GROUP BY status
     `, [pharmacyId]);
 
