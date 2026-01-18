@@ -1039,7 +1039,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_group as "group",
           COUNT(*) as claim_count,
           AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
-          AVG(COALESCE(quantity, 1)) as avg_qty,
+          AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (
@@ -1067,7 +1067,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           insurance_group as "group",
           COUNT(*) as claim_count,
           AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
-          AVG(COALESCE(quantity, 1)) as avg_qty,
+          AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
@@ -1197,7 +1197,7 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
           insurance_group as "group",
           COUNT(*) as claim_count,
           AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
-          AVG(COALESCE(quantity, 1)) as avg_qty,
+          AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
         WHERE (${keywordCondition}${ndcCondition})
@@ -2973,7 +2973,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               ndc,
               COUNT(*) as claim_count,
               AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin,
-              AVG(COALESCE(quantity, 1)) as avg_qty,
+              AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
               ROW_NUMBER() OVER (
                 PARTITION BY insurance_bin, insurance_group
                 ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) DESC
@@ -3004,7 +3004,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               ndc as best_ndc,
               COUNT(*) as claim_count,
               AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin,
-              AVG(COALESCE(quantity, 1)) as avg_qty
+              AVG(COALESCE(quantity_dispensed, 1)) as avg_qty
             FROM prescriptions
             WHERE (${keywordConditions ? `(${keywordConditions})` : 'FALSE'} OR ndc = $${ndcParamIndex})
               AND insurance_bin IS NOT NULL AND insurance_bin != ''
@@ -3023,7 +3023,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               ndc as best_ndc,
               COUNT(*) as claim_count,
               AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin,
-              AVG(COALESCE(quantity, 1)) as avg_qty
+              AVG(COALESCE(quantity_dispensed, 1)) as avg_qty
             FROM prescriptions
             WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
               AND insurance_bin IS NOT NULL AND insurance_bin != ''
