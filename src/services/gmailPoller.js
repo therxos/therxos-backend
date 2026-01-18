@@ -178,18 +178,18 @@ export async function autoCompleteOpportunities(pharmacyId, newPrescriptions) {
   const completedCount = { matched: 0, updated: 0 };
 
   try {
-    // Get all opportunities in "Submitted" or "Pending" status for this pharmacy
+    // Get all opportunities in "Submitted", "Pending", or "Approved" status for this pharmacy
     const opportunities = await db.query(`
       SELECT o.*, p.first_name as pat_first, p.last_name as pat_last, p.date_of_birth as pat_dob
       FROM opportunities o
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       WHERE o.pharmacy_id = $1
-      AND o.status IN ('Submitted', 'Pending', 'submitted', 'pending')
+      AND o.status IN ('Submitted', 'Pending', 'Approved', 'submitted', 'pending', 'approved')
       AND (o.recommended_drug IS NOT NULL OR o.recommended_drug_name IS NOT NULL)
     `, [pharmacyId]);
 
     if (opportunities.rows.length === 0) {
-      logger.info('No submitted opportunities to match', { pharmacyId });
+      logger.info('No submitted/approved opportunities to match', { pharmacyId });
       return completedCount;
     }
 
