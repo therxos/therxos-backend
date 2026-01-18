@@ -951,8 +951,7 @@ router.get('/bins/:bin/groups', authenticateToken, requireSuperAdmin, async (req
 router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id: triggerId } = req.params;
-    // minMargin = 0 by default so combo drugs and DME don't get filtered out
-    const { minClaims = 1, daysBack = 365, searchKeywords, minMargin = 0 } = req.body;
+    const { minClaims = 1, daysBack = 365, searchKeywords, minMargin = 10 } = req.body;
 
     // Get trigger info
     const triggerResult = await db.query(
