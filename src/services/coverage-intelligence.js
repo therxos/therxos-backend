@@ -2,7 +2,7 @@
  * Coverage Intelligence Service for TheRxOS V2
  *
  * Provides intelligent coverage verification with:
- * - Multi-source CMS formulary fetching
+ * - Local CMS formulary database lookups (1.3M+ drug records)
  * - Workability scoring for opportunities
  * - Success/failure tracking and alerting
  * - Auto-retry and fallback mechanisms
@@ -10,13 +10,7 @@
 
 import db from '../database/index.js';
 import { logger } from '../utils/logger.js';
-
-// Configuration
-const CMS_API_BASE = 'https://data.cms.gov/data-api/v1/dataset';
-const CMS_FORMULARY_DATASET = process.env.CMS_FORMULARY_DATASET_ID || '92e6c325-eb8e-40a1-9e56-cb66afee89f6';
-const API_TIMEOUT = 15000;  // 15 seconds
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000;   // 1 second base delay
+import { checkMedicareCoverage } from './medicare.js';
 
 // In-memory cache with TTL
 const cache = new Map();
@@ -644,7 +638,7 @@ export async function diagnoseCoverageIssues(opportunityId) {
     diagnosis.checks.push({ name: 'Insurance Data', passed: true, value: insurance });
   }
 
-  // Check 3: CMS API for Medicare
+  // Check 3: CMS Local Formulary for Medicare
   if (insurance.contract_id?.match(/^[HSR]\d{4}$/)) {
     try {
       const cmsResult = await checkCMSFormulary(
@@ -653,19 +647,19 @@ export async function diagnoseCoverageIssues(opportunityId) {
         opp.recommended_ndc
       );
       if (cmsResult) {
-        diagnosis.checks.push({ name: 'CMS API', passed: true, value: cmsResult });
+        diagnosis.checks.push({ name: 'CMS Local Formulary', passed: true, value: cmsResult });
       } else {
-        diagnosis.checks.push({ name: 'CMS API', passed: false, value: 'No data returned' });
-        diagnosis.issues.push('CMS API did not return coverage data');
-        diagnosis.recommendations.push('Check if contract_id and NDC are valid');
+        diagnosis.checks.push({ name: 'CMS Local Formulary', passed: false, value: 'Contract not in CMS data' });
+        diagnosis.issues.push('Medicare contract not found in CMS formulary database');
+        diagnosis.recommendations.push('Check if contract_id is valid or if CMS data needs refresh');
       }
     } catch (error) {
-      diagnosis.checks.push({ name: 'CMS API', passed: false, value: error.message });
-      diagnosis.issues.push(`CMS API error: ${error.message}`);
-      diagnosis.recommendations.push('Check API connectivity and rate limits');
+      diagnosis.checks.push({ name: 'CMS Local Formulary', passed: false, value: error.message });
+      diagnosis.issues.push(`CMS lookup error: ${error.message}`);
+      diagnosis.recommendations.push('Check database connectivity');
     }
   } else {
-    diagnosis.checks.push({ name: 'CMS API', passed: null, value: 'Not Medicare plan' });
+    diagnosis.checks.push({ name: 'CMS Local Formulary', passed: null, value: 'Not Medicare plan' });
   }
 
   // Check 4: Local formulary (CONTRACT_ID + PLAN first, then BIN + GROUP)
@@ -816,64 +810,43 @@ async function tryVerificationSource(sourceName, verifyFn) {
 async function checkCMSFormulary(contractId, planId, ndc) {
   if (!contractId || !ndc) return null;
 
-  const cacheKey = `cms_${contractId}_${planId}_${ndc}`;
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
+  try {
+    // Use the local CMS formulary database (1.3M+ drug records)
+    const result = await checkMedicareCoverage(contractId, planId, ndc);
 
-  // Format NDC to 11 digits with leading zeros
-  const formattedNdc = ndc.replace(/[^0-9]/g, '').padStart(11, '0');
-
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), API_TIMEOUT);
-
-      const url = `${CMS_API_BASE}/${CMS_FORMULARY_DATASET}/data?` +
-        `filter[CONTRACT_ID]=${contractId}&` +
-        `filter[PLAN_ID]=${planId}&` +
-        `filter[NDC]=${formattedNdc}`;
-
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: { 'Accept': 'application/json' }
-      });
-
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        throw new Error(`CMS API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (data && data.length > 0) {
-        const item = data[0];
-        const result = {
-          covered: true,
-          tier: parseInt(item.TIER_LEVEL_VALUE) || null,
-          tierDescription: getTierDescription(item.TIER_LEVEL_VALUE),
-          priorAuth: item.PRIOR_AUTHORIZATION_YN === 'Y',
-          stepTherapy: item.STEP_THERAPY_YN === 'Y',
-          quantityLimit: item.QUANTITY_LIMIT_YN === 'Y' ? parseInt(item.QUANTITY_LIMIT_AMOUNT) : null,
-          confidence: 'high',
-          source: 'cms_api'
-        };
-
-        cache.set(cacheKey, { data: result, timestamp: Date.now() });
-        return result;
-      }
-
+    if (result.covered) {
+      return {
+        covered: true,
+        tier: result.tier,
+        tierDescription: result.tierDescription,
+        priorAuth: result.priorAuth,
+        stepTherapy: result.stepTherapy,
+        quantityLimit: result.quantityLimit,
+        quantityLimitDays: result.quantityLimitDays,
+        planName: result.planName,
+        formularyId: result.formularyId,
+        confidence: 'high',
+        source: 'cms_local'
+      };
+    } else if (result.reason === 'Not on formulary') {
+      // Drug not covered but plan exists
+      return {
+        covered: false,
+        reason: result.reason,
+        planName: result.planName,
+        confidence: 'high',
+        source: 'cms_local'
+      };
+    } else if (result.reason === 'Contract/plan not found') {
+      // Plan not in our CMS data
       return null;
-
-    } catch (error) {
-      if (attempt < MAX_RETRIES - 1) {
-        await new Promise(r => setTimeout(r, RETRY_DELAY * (attempt + 1)));
-      } else {
-        throw error;
-      }
     }
+
+    return null;
+
+  } catch (error) {
+    logger.error('CMS local formulary check failed', { contractId, planId, ndc, error: error.message });
+    return null;
   }
 }
 

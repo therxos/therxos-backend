@@ -28,7 +28,17 @@
       "Bash(node restore-bravo.js:*)",
       "Bash(node:*)",
       "Bash(vercel --prod)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(dir \"C:\\\\Users\\\\Stan\\\\Desktop\\\\therxos-backend\\\\*.csv\")",
+      "Bash(dir C:UsersStanDesktop)",
+      "Bash(grep:*)",
+      "Bash(timeout /t 15 /nobreak)",
+      "Bash(dir:*)",
+      "WebSearch",
+      "WebFetch(domain:data.cms.gov)",
+      "WebFetch(domain:www.cms.gov)",
+      "Bash(unzip:*)",
+      "Bash(git gc:*)"
     ]
   }
 }

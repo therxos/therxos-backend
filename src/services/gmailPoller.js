@@ -252,10 +252,9 @@ export async function autoCompleteOpportunities(pharmacyId, newPrescriptions) {
           UPDATE opportunities
           SET status = 'Completed',
               actioned_at = NOW(),
-              updated_at = NOW(),
-              staff_notes = COALESCE(staff_notes, '') || E'\n[Auto-completed] Patient filled ' || $1 || ' on ' || $2
-          WHERE opportunity_id = $3
-        `, [matchingRx.drug_name, matchingRx.dispensed_date, opp.opportunity_id]);
+              updated_at = NOW()
+          WHERE opportunity_id = $1
+        `, [opp.opportunity_id]);
 
         completedCount.updated++;
 

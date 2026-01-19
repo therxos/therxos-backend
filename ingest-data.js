@@ -140,14 +140,17 @@ function generatePatientHash(name, dob, rxNumber = null) {
 // Parse date from various formats
 function parseDate(dateStr) {
   if (!dateStr) return null;
-  
+
+  // Strip time portion if present (e.g., "10/6/2025 9:44 AM" -> "10/6/2025")
+  const dateOnly = dateStr.split(' ')[0];
+
   // Handle MM/DD/YYYY format
-  const parts = dateStr.split('/');
+  const parts = dateOnly.split('/');
   if (parts.length === 3) {
     const [month, day, year] = parts;
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
   }
-  
+
   return dateStr;
 }
 

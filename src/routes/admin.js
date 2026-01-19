@@ -450,8 +450,7 @@ router.post('/flag-group', authenticateToken, requireSuperAdmin, async (req, res
     const result = await db.query(`
       UPDATE opportunities o
       SET status = 'Flagged',
-          staff_notes = COALESCE(staff_notes, '') || ' [Auto-flagged: ' || $1 || ' on ' || $2 || ' needs review]',
-          flagged_by = $4,
+          flagged_by = $3,
           flagged_at = NOW(),
           updated_at = NOW()
       FROM prescriptions pr
@@ -460,7 +459,7 @@ router.post('/flag-group', authenticateToken, requireSuperAdmin, async (req, res
         AND COALESCE(pr.insurance_group, '') = $2
         AND o.status NOT IN ('Denied', 'Completed', 'Approved', 'Flagged', 'Didn''t Work')
       RETURNING o.opportunity_id
-    `, [opportunityType, insuranceGroup || '', opportunityId, req.user.userId]);
+    `, [opportunityType, insuranceGroup || '', req.user.userId]);
 
     res.json({
       success: true,
@@ -645,6 +644,7 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
     const isEnabled = body.isEnabled !== undefined ? body.isEnabled : (body.is_enabled !== false);
     const binValues = body.binValues || body.bin_values;
     const restrictions = body.restrictions;
+    const binRestrictions = body.binRestrictions || body.bin_restrictions;
 
     // Insert trigger
     const result = await db.query(`
@@ -652,14 +652,14 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
         trigger_code, display_name, trigger_type, category,
         detection_keywords, exclude_keywords, if_has_keywords, if_not_has_keywords,
         recommended_drug, recommended_ndc, action_instructions, clinical_rationale,
-        priority, annual_fills, default_gp_value, is_enabled
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        priority, annual_fills, default_gp_value, is_enabled, bin_restrictions
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING *
     `, [
       triggerCode, displayName, triggerType, category,
       detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
       recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
-      priority, annualFills, defaultGpValue, isEnabled
+      priority, annualFills, defaultGpValue, isEnabled, binRestrictions || null
     ]);
 
     const triggerId = result.rows[0].trigger_id;
@@ -718,6 +718,7 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
     const isEnabled = body.isEnabled !== undefined ? body.isEnabled : body.is_enabled;
     const binValues = body.binValues || body.bin_values;
     const restrictions = body.restrictions;
+    const binRestrictions = body.binRestrictions || body.bin_restrictions;
 
     // Update trigger
     const result = await db.query(`
@@ -738,14 +739,15 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
         annual_fills = COALESCE($14, annual_fills),
         default_gp_value = $15,
         is_enabled = COALESCE($16, is_enabled),
+        bin_restrictions = $17,
         updated_at = NOW()
-      WHERE trigger_id = $17
+      WHERE trigger_id = $18
       RETURNING *
     `, [
       triggerCode, displayName, triggerType, category,
       detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
       recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
-      priority, annualFills, defaultGpValue, isEnabled, id
+      priority, annualFills, defaultGpValue, isEnabled, binRestrictions || null, id
     ]);
 
     if (result.rows.length === 0) {
@@ -953,9 +955,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     const { id: triggerId } = req.params;
     const { minClaims = 1, daysBack = 365, searchKeywords, minMargin = 10 } = req.body;
 
-    // Get trigger info
+    // Get trigger info including bin_restrictions
     const triggerResult = await db.query(
-      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name FROM triggers WHERE trigger_id = $1',
+      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name, bin_restrictions FROM triggers WHERE trigger_id = $1',
       [triggerId]
     );
 
@@ -965,8 +967,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     const trigger = triggerResult.rows[0];
     const recommendedDrug = trigger.recommended_drug || '';
+    const binRestrictions = trigger.bin_restrictions || [];
 
-    console.log(`Verifying coverage for trigger: ${trigger.display_name}, recommended_drug: "${recommendedDrug}", ndc: ${trigger.recommended_ndc || 'none'}`);
+    console.log(`Verifying coverage for trigger: ${trigger.display_name}, recommended_drug: "${recommendedDrug}", ndc: ${trigger.recommended_ndc || 'none'}, bin_restrictions: ${binRestrictions.length > 0 ? binRestrictions.join(', ') : 'none'}`);
 
     // Find matching completed claims from last N days (default 365, configurable via daysBack param)
     let matchQuery;
@@ -1023,6 +1026,17 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     // Calculate margin as: (insurance_pay + patient_pay) - acquisition_cost
     // matchParams already contains the keyword params from the loop above
     // minMargin defaults to 10 but can be set to 0 for DME items like monitors
+
+    // Build BIN restriction condition if set
+    let binRestrictionCondition = '';
+    let binRestrictionParamIndex = null;
+    if (binRestrictions.length > 0) {
+      binRestrictionParamIndex = matchParams.length + 1;
+      matchParams.push(binRestrictions);
+      binRestrictionCondition = `AND insurance_bin = ANY($${binRestrictionParamIndex})`;
+      console.log(`Restricting coverage scan to BINs: ${binRestrictions.join(', ')}`);
+    }
+
     if (trigger.recommended_ndc) {
       const ndcParamIndex = matchParams.length + 1;
       matchParams.push(trigger.recommended_ndc);
@@ -1047,6 +1061,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           OR ndc = $${ndcParamIndex}
         )
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
+        ${binRestrictionCondition}
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $${minClaimsParamIndex}
@@ -1072,6 +1087,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         FROM prescriptions
         WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
+        ${binRestrictionCondition}
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $${minClaimsParamIndex}

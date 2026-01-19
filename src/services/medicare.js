@@ -1,21 +1,17 @@
 // Medicare Part D Coverage Verification Service
-// Uses CMS Formulary API for real-time coverage lookups
-// Verifies opportunities have coverage and calculates actual reimbursement
+// Uses local CMS formulary database for fast coverage lookups
+// Data loaded from CMS SPUF quarterly files (cms_plan_formulary + cms_formulary_drugs tables)
 
 import { logger } from '../utils/logger.js';
 import db from '../database/index.js';
-import { v4 as uuidv4 } from 'uuid';
 
-// CMS Formulary API endpoints
-const CMS_API_BASE = 'https://data.cms.gov/data-api/v1/dataset';
-const FORMULARY_DATASET_ID = '9767cb68-8ea9-4f0b-8179-9431abc89f11'; // Part D Formulary dataset
-
-// Cache for API responses (15 min TTL)
+// Cache for coverage responses (15 min TTL)
 const coverageCache = new Map();
 const CACHE_TTL = 15 * 60 * 1000;
 
 /**
  * Check if a drug is covered under a Medicare Part D plan
+ * Uses local CMS formulary database (cms_plan_formulary + cms_formulary_drugs tables)
  * @param {string} contractId - Medicare contract ID (e.g., H2226)
  * @param {string} planId - Plan benefit package ID (e.g., 001)
  * @param {string} ndc - 11-digit NDC
@@ -26,121 +22,216 @@ export async function checkMedicareCoverage(contractId, planId, ndc) {
     return { covered: false, reason: 'Missing contract ID or NDC' };
   }
 
+  // Format inputs
+  const formattedNdc = ndc.replace(/-/g, '').padStart(11, '0');
+  const formattedPlanId = planId ? planId.toString().padStart(3, '0') : null;
+
   // Check cache first
-  const cacheKey = `${contractId}-${planId || '001'}-${ndc}`;
+  const cacheKey = `${contractId}-${formattedPlanId || 'any'}-${formattedNdc}`;
   const cached = coverageCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.data;
   }
 
   try {
-    // Format NDC for CMS lookup (remove dashes if present)
-    const formattedNdc = ndc.replace(/-/g, '').padStart(11, '0');
+    // Step 1: Get the formulary_id(s) for this contract/plan from cms_plan_formulary
+    let formularyQuery = `
+      SELECT DISTINCT formulary_id, plan_name
+      FROM cms_plan_formulary
+      WHERE contract_id = $1
+    `;
+    const formularyParams = [contractId];
 
-    // Query CMS API for formulary data
-    const url = `${CMS_API_BASE}/${FORMULARY_DATASET_ID}/data?` + new URLSearchParams({
-      'filter[FORMULARY_ID]': contractId,
-      'filter[NDC]': formattedNdc,
-      'size': '1'
-    });
-
-    const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/json'
-      },
-      timeout: 10000
-    });
-
-    if (!response.ok) {
-      // If CMS API is unavailable, try our local formulary cache
-      return await checkLocalFormulary(contractId, planId, ndc);
+    if (formattedPlanId) {
+      formularyQuery += ` AND plan_id = $2`;
+      formularyParams.push(formattedPlanId);
     }
 
-    const data = await response.json();
+    formularyQuery += ` LIMIT 5`;
 
-    if (!data.data || data.data.length === 0) {
-      // Drug not in formulary - check for therapeutic alternatives
+    const formularyResult = await db.query(formularyQuery, formularyParams);
+
+    if (formularyResult.rows.length === 0) {
+      // Contract/plan not found in our database
       const result = {
         covered: false,
-        reason: 'Not on formulary',
+        reason: 'Contract/plan not found',
         contractId,
-        planId,
-        ndc,
-        tier: null,
-        priorAuth: false,
-        stepTherapy: false,
-        quantityLimit: null
+        planId: formattedPlanId,
+        ndc: formattedNdc,
+        source: 'cms_local'
       };
-
       coverageCache.set(cacheKey, { data: result, timestamp: Date.now() });
       return result;
     }
 
-    const formularyEntry = data.data[0];
+    // Step 2: Check if the NDC is covered in any of these formularies
+    const formularyIds = formularyResult.rows.map(r => r.formulary_id);
+    const planName = formularyResult.rows[0].plan_name;
 
+    const coverageResult = await db.query(`
+      SELECT
+        formulary_id,
+        tier_level,
+        prior_authorization_yn,
+        step_therapy_yn,
+        quantity_limit_yn,
+        quantity_limit_amount,
+        quantity_limit_days,
+        rxcui
+      FROM cms_formulary_drugs
+      WHERE formulary_id = ANY($1)
+      AND ndc = $2
+      LIMIT 1
+    `, [formularyIds, formattedNdc]);
+
+    if (coverageResult.rows.length === 0) {
+      // Drug not in any of the plan's formularies
+      const result = {
+        covered: false,
+        reason: 'Not on formulary',
+        contractId,
+        planId: formattedPlanId,
+        planName,
+        ndc: formattedNdc,
+        tier: null,
+        priorAuth: false,
+        stepTherapy: false,
+        quantityLimit: null,
+        source: 'cms_local'
+      };
+      coverageCache.set(cacheKey, { data: result, timestamp: Date.now() });
+      return result;
+    }
+
+    // Drug is covered - build result
+    const coverage = coverageResult.rows[0];
     const result = {
       covered: true,
       contractId,
-      planId: planId || formularyEntry.PBP_ID,
-      ndc,
-      tier: parseInt(formularyEntry.TIER_LEVEL_VALUE) || null,
-      tierDescription: getTierDescription(formularyEntry.TIER_LEVEL_VALUE),
-      priorAuth: formularyEntry.PRIOR_AUTHORIZATION_YN === 'Y',
-      stepTherapy: formularyEntry.STEP_THERAPY_YN === 'Y',
-      quantityLimit: formularyEntry.QUANTITY_LIMIT_YN === 'Y' ? parseFloat(formularyEntry.QUANTITY_LIMIT_AMOUNT) : null,
-      quantityLimitDays: formularyEntry.QUANTITY_LIMIT_DAYS ? parseInt(formularyEntry.QUANTITY_LIMIT_DAYS) : null,
-      // Estimate patient cost based on tier
-      estimatedCopay: estimateCopayByTier(formularyEntry.TIER_LEVEL_VALUE),
-      // CMS standard 30-day cost share percentages
-      costSharePercentage: getCostShareByTier(formularyEntry.TIER_LEVEL_VALUE)
+      planId: formattedPlanId,
+      planName,
+      formularyId: coverage.formulary_id,
+      ndc: formattedNdc,
+      rxcui: coverage.rxcui,
+      tier: coverage.tier_level,
+      tierDescription: getTierDescription(coverage.tier_level),
+      priorAuth: coverage.prior_authorization_yn === true,
+      stepTherapy: coverage.step_therapy_yn === true,
+      quantityLimit: coverage.quantity_limit_yn === true ? coverage.quantity_limit_amount : null,
+      quantityLimitDays: coverage.quantity_limit_days,
+      estimatedCopay: estimateCopayByTier(coverage.tier_level),
+      costSharePercentage: getCostShareByTier(coverage.tier_level),
+      source: 'cms_local'
     };
 
     coverageCache.set(cacheKey, { data: result, timestamp: Date.now() });
     return result;
 
   } catch (error) {
-    logger.error('Medicare coverage check failed', { contractId, ndc, error: error.message });
-    // Fallback to local formulary on API failure
-    return await checkLocalFormulary(contractId, planId, ndc);
+    logger.error('Medicare coverage check failed', { contractId, planId, ndc, error: error.message });
+    return {
+      covered: false,
+      reason: 'Lookup failed: ' + error.message,
+      contractId,
+      planId: formattedPlanId,
+      ndc: formattedNdc,
+      source: 'error'
+    };
   }
 }
 
 /**
- * Check our local formulary cache (populated from 832 files or bulk CMS data)
+ * Batch check coverage for multiple NDCs under a single plan
+ * More efficient when checking multiple drugs for the same patient
  */
-async function checkLocalFormulary(contractId, planId, ndc) {
-  try {
-    const result = await db.query(`
-      SELECT * FROM medicare_formulary
-      WHERE contract_id = $1
-      AND ($2::text IS NULL OR plan_id = $2)
-      AND ndc = $3
-      AND (expiration_date IS NULL OR expiration_date > NOW())
-      LIMIT 1
-    `, [contractId, planId, ndc.replace(/-/g, '')]);
+export async function batchCheckMedicareCoverage(contractId, planId, ndcs) {
+  if (!contractId || !ndcs || ndcs.length === 0) {
+    return [];
+  }
 
-    if (result.rows.length === 0) {
-      return { covered: false, reason: 'Not in local formulary', source: 'local' };
+  const formattedPlanId = planId ? planId.toString().padStart(3, '0') : null;
+  const formattedNdcs = ndcs.map(n => n.replace(/-/g, '').padStart(11, '0'));
+
+  try {
+    // Get formulary_id(s) for this contract/plan
+    let formularyQuery = `
+      SELECT DISTINCT formulary_id, plan_name
+      FROM cms_plan_formulary
+      WHERE contract_id = $1
+    `;
+    const formularyParams = [contractId];
+
+    if (formattedPlanId) {
+      formularyQuery += ` AND plan_id = $2`;
+      formularyParams.push(formattedPlanId);
     }
 
-    const entry = result.rows[0];
-    return {
-      covered: true,
-      contractId,
-      planId: entry.plan_id,
-      ndc,
-      tier: entry.tier,
-      tierDescription: getTierDescription(entry.tier),
-      priorAuth: entry.prior_auth_required,
-      stepTherapy: entry.step_therapy_required,
-      quantityLimit: entry.quantity_limit,
-      estimatedCopay: entry.estimated_copay || estimateCopayByTier(entry.tier),
-      reimbursementRate: entry.reimbursement_rate, // From 832 data if available
-      source: 'local'
-    };
+    const formularyResult = await db.query(formularyQuery, formularyParams);
+
+    if (formularyResult.rows.length === 0) {
+      return formattedNdcs.map(ndc => ({
+        ndc,
+        covered: false,
+        reason: 'Contract/plan not found'
+      }));
+    }
+
+    const formularyIds = formularyResult.rows.map(r => r.formulary_id);
+    const planName = formularyResult.rows[0].plan_name;
+
+    // Batch query for all NDCs
+    const coverageResult = await db.query(`
+      SELECT
+        ndc,
+        formulary_id,
+        tier_level,
+        prior_authorization_yn,
+        step_therapy_yn,
+        quantity_limit_yn,
+        quantity_limit_amount,
+        quantity_limit_days
+      FROM cms_formulary_drugs
+      WHERE formulary_id = ANY($1)
+      AND ndc = ANY($2)
+    `, [formularyIds, formattedNdcs]);
+
+    // Create map of covered NDCs
+    const coverageMap = new Map();
+    for (const row of coverageResult.rows) {
+      coverageMap.set(row.ndc, row);
+    }
+
+    // Build results for all requested NDCs
+    return formattedNdcs.map(ndc => {
+      const coverage = coverageMap.get(ndc);
+      if (!coverage) {
+        return {
+          ndc,
+          covered: false,
+          reason: 'Not on formulary',
+          planName
+        };
+      }
+      return {
+        ndc,
+        covered: true,
+        planName,
+        tier: coverage.tier_level,
+        tierDescription: getTierDescription(coverage.tier_level),
+        priorAuth: coverage.prior_authorization_yn === true,
+        stepTherapy: coverage.step_therapy_yn === true,
+        quantityLimit: coverage.quantity_limit_yn === true ? coverage.quantity_limit_amount : null
+      };
+    });
+
   } catch (error) {
-    logger.error('Local formulary check failed', { error: error.message });
-    return { covered: false, reason: 'Lookup failed', source: 'error' };
+    logger.error('Batch Medicare coverage check failed', { contractId, error: error.message });
+    return formattedNdcs.map(ndc => ({
+      ndc,
+      covered: false,
+      reason: 'Lookup failed'
+    }));
   }
 }
 
@@ -324,8 +415,10 @@ export async function verifyOpportunityCoverage(pharmacyId = null) {
         }
         updated++;
 
-        // Add small delay to respect API rate limits
-        await new Promise(r => setTimeout(r, 100));
+        // Small delay to prevent DB connection exhaustion on large batches
+        if (updated % 50 === 0) {
+          await new Promise(r => setTimeout(r, 10));
+        }
 
       } catch (error) {
         logger.error('Failed to verify opportunity', {
@@ -401,50 +494,68 @@ export async function getCMSReimbursementRate(ndc, contractId = null) {
 
 /**
  * Find covered alternatives when recommended drug is not covered
+ * Uses CMS formulary data to find drugs in the same therapeutic class that are covered
  */
-export async function findCoveredAlternatives(contractId, planId, currentNdc, therapeuticClass) {
+export async function findCoveredAlternatives(contractId, planId, currentNdc, rxcui = null) {
   try {
-    // Get therapeutic class if not provided
-    if (!therapeuticClass) {
-      const ndcInfo = await db.query(
-        'SELECT therapeutic_class_code FROM ndc_reference WHERE ndc = $1',
-        [currentNdc]
-      );
-      therapeuticClass = ndcInfo.rows[0]?.therapeutic_class_code;
+    const formattedPlanId = planId ? planId.toString().padStart(3, '0') : null;
+    const formattedNdc = currentNdc.replace(/-/g, '').padStart(11, '0');
+
+    // Get formulary_id(s) for this contract/plan
+    let formularyQuery = `
+      SELECT DISTINCT formulary_id
+      FROM cms_plan_formulary
+      WHERE contract_id = $1
+    `;
+    const formularyParams = [contractId];
+
+    if (formattedPlanId) {
+      formularyQuery += ` AND plan_id = $2`;
+      formularyParams.push(formattedPlanId);
     }
 
-    if (!therapeuticClass) {
+    const formularyResult = await db.query(formularyQuery, formularyParams);
+
+    if (formularyResult.rows.length === 0) {
       return [];
     }
 
-    // Find covered alternatives in same therapeutic class
-    const alternatives = await db.query(`
-      SELECT DISTINCT
-        mf.ndc,
-        nr.drug_name,
-        nr.generic_name,
-        nr.is_brand,
-        mf.tier,
-        mf.prior_auth_required,
-        mf.reimbursement_rate,
-        nr.acquisition_cost
-      FROM medicare_formulary mf
-      JOIN ndc_reference nr ON nr.ndc = mf.ndc
-      WHERE mf.contract_id = $1
-      AND nr.therapeutic_class_code = $2
-      AND mf.ndc != $3
-      AND nr.is_active = true
-      ORDER BY mf.tier ASC, nr.acquisition_cost ASC
-      LIMIT 5
-    `, [contractId, therapeuticClass, currentNdc]);
+    const formularyIds = formularyResult.rows.map(r => r.formulary_id);
 
-    return alternatives.rows.map(alt => ({
-      ...alt,
-      estimatedMargin: alt.reimbursement_rate
-        ? alt.reimbursement_rate - (alt.acquisition_cost || 0)
-        : null,
-      tierDescription: getTierDescription(alt.tier)
-    }));
+    // If we have an RxCUI, try to find other NDCs with the same RxCUI (same drug, different manufacturers)
+    if (rxcui) {
+      const sameRxcui = await db.query(`
+        SELECT DISTINCT
+          f.ndc,
+          f.tier_level,
+          f.prior_authorization_yn,
+          f.step_therapy_yn,
+          f.quantity_limit_yn,
+          f.rxcui
+        FROM cms_formulary_drugs f
+        WHERE f.formulary_id = ANY($1)
+        AND f.rxcui = $2
+        AND f.ndc != $3
+        ORDER BY f.tier_level ASC
+        LIMIT 5
+      `, [formularyIds, rxcui, formattedNdc]);
+
+      if (sameRxcui.rows.length > 0) {
+        return sameRxcui.rows.map(alt => ({
+          ndc: alt.ndc,
+          rxcui: alt.rxcui,
+          tier: alt.tier_level,
+          tierDescription: getTierDescription(alt.tier_level),
+          priorAuth: alt.prior_authorization_yn === true,
+          stepTherapy: alt.step_therapy_yn === true,
+          quantityLimit: alt.quantity_limit_yn === true,
+          sameIngredient: true
+        }));
+      }
+    }
+
+    // If no RxCUI-based alternatives, return empty (therapeutic class lookup would require external NDC data)
+    return [];
 
   } catch (error) {
     logger.error('Find alternatives failed', { error: error.message });
@@ -452,9 +563,46 @@ export async function findCoveredAlternatives(contractId, planId, currentNdc, th
   }
 }
 
+/**
+ * Get plan information for a contract
+ */
+export async function getPlanInfo(contractId, planId = null) {
+  try {
+    let query = `
+      SELECT DISTINCT
+        contract_id,
+        plan_id,
+        plan_name,
+        contract_name,
+        formulary_id,
+        premium,
+        deductible
+      FROM cms_plan_formulary
+      WHERE contract_id = $1
+    `;
+    const params = [contractId];
+
+    if (planId) {
+      query += ` AND plan_id = $2`;
+      params.push(planId.toString().padStart(3, '0'));
+    }
+
+    query += ` ORDER BY plan_id LIMIT 10`;
+
+    const result = await db.query(query, params);
+    return result.rows;
+
+  } catch (error) {
+    logger.error('Get plan info failed', { contractId, error: error.message });
+    return [];
+  }
+}
+
 export default {
   checkMedicareCoverage,
+  batchCheckMedicareCoverage,
   verifyOpportunityCoverage,
   getCMSReimbursementRate,
-  findCoveredAlternatives
+  findCoveredAlternatives,
+  getPlanInfo
 };

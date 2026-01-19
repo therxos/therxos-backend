@@ -1,0 +1,44 @@
+name: Deploy to Production
+
+on:
+  # Manual trigger with button in GitHub Actions
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm production deployment'
+        required: true
+        default: ''
+
+  # Scheduled deployment (uncomment to enable)
+  # schedule:
+  #   - cron: '0 6 * * 1-5'  # 6 AM UTC, Monday-Friday
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'deploy' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Merge staging to main
+        run: |
+          git checkout main
+          git pull origin main
+          git merge origin/staging --no-edit
+          git push origin main
+
+      - name: Deployment Summary
+        run: |
+          echo "✅ Staging merged to main"
+          echo "📦 Railway will auto-deploy backend"
+          echo "🌐 Vercel will auto-deploy frontend"
