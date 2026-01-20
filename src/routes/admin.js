@@ -3861,13 +3861,30 @@ router.post('/clients/:clientId/send-welcome-email', authenticateToken, requireS
         isTest: isTestMode,
       });
     } else {
-      // Email failed but we can still return the temp password
-      res.json({
-        success: false,
-        error: emailResult.error,
-        tempPassword: isTestMode ? null : tempPassword,
-        message: 'Email failed - use temp password for manual follow-up',
-      });
+      // Email failed - in test mode, return preview HTML so user can still see what it looks like
+      if (isTestMode) {
+        res.json({
+          success: false,
+          error: emailResult.error,
+          message: 'Email transport not configured - showing preview instead',
+          isTest: true,
+          preview: {
+            to: recipientEmail,
+            subject: `Welcome to TheRxOS - ${pharmacyName} Account Ready`,
+            pharmacyName,
+            tempPassword,
+            hasDocuments: !!documents,
+          },
+        });
+      } else {
+        // Real send failed - return temp password for manual follow-up
+        res.json({
+          success: false,
+          error: emailResult.error,
+          tempPassword: tempPassword,
+          message: 'Email failed - use temp password for manual follow-up',
+        });
+      }
     }
   } catch (error) {
     console.error('Send welcome email error:', error);
