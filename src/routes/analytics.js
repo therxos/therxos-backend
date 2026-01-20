@@ -444,14 +444,14 @@ router.get('/monthly', authenticateToken, async (req, res) => {
     // By type - NO data quality filter on historical reports
     const byTypeResult = await db.query(`
       SELECT
-        COALESCE(trigger_type, 'Other') as type,
+        COALESCE(opportunity_type, 'Other') as type,
         COUNT(*) as count,
         COALESCE(SUM(annual_margin_gain), 0) as value,
         COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured')) as captured
       FROM opportunities
       WHERE pharmacy_id = $1
         AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
-      GROUP BY trigger_type
+      GROUP BY opportunity_type
       ORDER BY count DESC
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
     
@@ -565,7 +565,7 @@ router.get('/monthly/export', authenticateToken, async (req, res) => {
         o.opportunity_id,
         p.first_name as patient_first_name,
         p.last_name as patient_last_name,
-        o.trigger_type,
+        o.opportunity_type,
         o.status,
         o.annual_margin_gain,
         o.created_at,
@@ -583,7 +583,7 @@ router.get('/monthly/export', authenticateToken, async (req, res) => {
       const rows = result.rows.map(r => [
         r.opportunity_id,
         formatPatientName(r.patient_first_name, r.patient_last_name),
-        r.trigger_type || 'Other',
+        r.opportunity_type || 'Other',
         r.status,
         r.annual_margin_gain || 0,
         r.created_at?.toISOString().split('T')[0] || '',
