@@ -393,6 +393,54 @@ Run SQL directly in Supabase SQL Editor
 
 ---
 
+## Staging Environment - CRITICAL WORKFLOW
+
+**ALL changes must go through staging before production. Never deploy directly to production.**
+
+### Staging Setup
+- **Frontend URL:** staging.therxos.com
+- **Backend URL:** https://discerning-mindfulness-production-07d5.up.railway.app
+- **Branch:** `staging` (separate from `main`)
+- **Vercel:** Preview deployment with staging-specific environment variables
+
+### Deployment Workflow
+1. **Make changes on staging branch:**
+   ```bash
+   cd therxos-frontend
+   git checkout staging
+   # Make changes
+   git add . && git commit -m "Description"
+   git push origin staging
+   ```
+
+2. **Deploy to staging:**
+   ```bash
+   vercel --target preview --force
+   vercel alias <deployment-url> staging.therxos.com
+   ```
+
+3. **Test on staging.therxos.com**
+
+4. **Only after confirming staging works, merge to main and deploy production:**
+   ```bash
+   git checkout main
+   git merge staging
+   git push origin main
+   vercel --prod
+   ```
+
+### Environment Variables (Vercel)
+- Staging has its own `NEXT_PUBLIC_API_URL` for Preview (staging) branch
+- Don't remove or merge staging env vars with production
+
+### Rules
+- NEVER deploy to production without testing on staging first
+- NEVER merge staging and production backends/environments
+- Keep staging as a separate, parallel environment for testing
+- Both staging frontend + staging backend should be tested together
+
+---
+
 ## Development Setup
 
 ### Local Development
