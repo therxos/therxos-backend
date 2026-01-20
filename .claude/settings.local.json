@@ -50,7 +50,8 @@
       "Bash(del \"C:\\\\Users\\\\Stan\\\\Desktop\\\\therxos-backend\\\\update-aracoma-users.js\")",
       "Bash(git -C \"C:/Users/Stan/Desktop/therxos-frontend\" status)",
       "Bash(vercel:*)",
-      "Bash(GIT_BRANCH=staging npx vercel:*)"
+      "Bash(GIT_BRANCH=staging npx vercel:*)",
+      "Bash(git log:*)"
     ]
   }
 }

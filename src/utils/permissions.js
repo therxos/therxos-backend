@@ -38,7 +38,8 @@ export const PERMISSIONS = {
   
   // Analytics
   VIEW_ANALYTICS: 'view_analytics',
-  VIEW_FINANCIAL_DATA: 'view_financial_data',     // Can be toggled by admin
+  VIEW_FINANCIAL_DATA: 'view_financial_data',           // Full financial access (annual values, totals)
+  VIEW_LIMITED_FINANCIAL_DATA: 'view_limited_financial_data', // Single fill values only (no annual/totals)
   
   // Data
   UPLOAD_DATA: 'upload_data',
@@ -98,13 +99,15 @@ export const CONFIGURABLE_PERMISSIONS = {
   [ROLES.PHARMACIST]: [
     { key: PERMISSIONS.SEND_FAX_DIRECTLY, label: 'Send faxes directly', default: true },
     { key: PERMISSIONS.VIEW_PATIENT_DETAILS, label: 'View patient details', default: true },
-    { key: PERMISSIONS.VIEW_FINANCIAL_DATA, label: 'View financial data', default: true },
+    { key: PERMISSIONS.VIEW_FINANCIAL_DATA, label: 'View full financial data (annual values)', default: true },
+    { key: PERMISSIONS.VIEW_LIMITED_FINANCIAL_DATA, label: 'View limited financial data (single fill only)', default: false },
     { key: PERMISSIONS.UPLOAD_DATA, label: 'Upload data files', default: true },
   ],
   [ROLES.TECHNICIAN]: [
     { key: PERMISSIONS.SEND_FAX_DIRECTLY, label: 'Send faxes directly (skip approval)', default: false },
     { key: PERMISSIONS.VIEW_PATIENT_DETAILS, label: 'View patient details', default: true },
-    { key: PERMISSIONS.VIEW_FINANCIAL_DATA, label: 'View financial data', default: false },
+    { key: PERMISSIONS.VIEW_FINANCIAL_DATA, label: 'View full financial data (annual values)', default: false },
+    { key: PERMISSIONS.VIEW_LIMITED_FINANCIAL_DATA, label: 'View limited financial data (single fill only)', default: false },
     { key: PERMISSIONS.VIEW_ANALYTICS, label: 'View analytics', default: false },
     { key: PERMISSIONS.UPLOAD_DATA, label: 'Upload data files', default: false },
   ],
