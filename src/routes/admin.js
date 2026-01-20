@@ -3433,10 +3433,10 @@ router.post('/audit/flags/bulk-update', authenticateToken, requireSuperAdmin, as
 router.patch('/clients/:clientId', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { pharmacyName, clientName, email, state, address, city, zip, phone, npi } = req.body;
+    const { pharmacyName, clientName, email, state, address, city, zip, phone, npi, status } = req.body;
 
     // Get pharmacy_id for this client
-    const pharmacyResult = await pool.query(
+    const pharmacyResult = await db.query(
       'SELECT pharmacy_id FROM pharmacies WHERE client_id = $1',
       [clientId]
     );
@@ -3448,7 +3448,7 @@ router.patch('/clients/:clientId', authenticateToken, requireSuperAdmin, async (
     const pharmacyId = pharmacyResult.rows[0].pharmacy_id;
 
     // Update client
-    if (clientName || email) {
+    if (clientName || email || status) {
       const clientUpdates = [];
       const clientValues = [];
       let idx = 1;
@@ -3460,6 +3460,10 @@ router.patch('/clients/:clientId', authenticateToken, requireSuperAdmin, async (
       if (email) {
         clientUpdates.push(`submitter_email = $${idx++}`);
         clientValues.push(email);
+      }
+      if (status) {
+        clientUpdates.push(`status = $${idx++}`);
+        clientValues.push(status);
       }
 
       if (clientUpdates.length > 0) {
@@ -3503,7 +3507,7 @@ router.patch('/clients/:clientId', authenticateToken, requireSuperAdmin, async (
     // Fetch updated data
     const updated = await db.query(`
       SELECT p.pharmacy_name, p.state, p.address, p.city, p.zip, p.phone, p.pharmacy_npi,
-             c.client_name, c.submitter_email
+             c.client_name, c.submitter_email, c.status
       FROM pharmacies p
       JOIN clients c ON c.client_id = p.client_id
       WHERE c.client_id = $1

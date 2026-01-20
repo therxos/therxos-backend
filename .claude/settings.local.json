@@ -47,7 +47,8 @@
       "Bash(git stash:*)",
       "Bash(findstr:*)",
       "Bash(set \"DATABASE_URL=postgresql://postgres.vjqkgkpfkpdmfajiprkp:rX%%40pharmacystan@aws-0-us-west-2.pooler.supabase.com:5432/postgres\")",
-      "Bash(del \"C:\\\\Users\\\\Stan\\\\Desktop\\\\therxos-backend\\\\update-aracoma-users.js\")"
+      "Bash(del \"C:\\\\Users\\\\Stan\\\\Desktop\\\\therxos-backend\\\\update-aracoma-users.js\")",
+      "Bash(git -C \"C:/Users/Stan/Desktop/therxos-frontend\" status)"
     ]
   }
 }
