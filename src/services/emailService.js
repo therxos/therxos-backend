@@ -15,7 +15,41 @@ let transporter = null;
 async function getTransporter() {
   if (transporter) return transporter;
 
-  // Try Gmail OAuth first (if configured)
+  // Try Gmail OAuth first (if configured via env variables)
+  if (process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN) {
+    try {
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.GMAIL_CLIENT_ID,
+        process.env.GMAIL_CLIENT_SECRET,
+        process.env.GMAIL_REDIRECT_URI || 'https://developers.google.com/oauthplayground'
+      );
+
+      oauth2Client.setCredentials({
+        refresh_token: process.env.GMAIL_REFRESH_TOKEN
+      });
+
+      const accessToken = await oauth2Client.getAccessToken();
+
+      transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          type: 'OAuth2',
+          user: process.env.GMAIL_USER || 'stan@therxos.com',
+          clientId: process.env.GMAIL_CLIENT_ID,
+          clientSecret: process.env.GMAIL_CLIENT_SECRET,
+          refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+          accessToken: accessToken.token,
+        },
+      });
+
+      logger.info('Email transporter initialized with Gmail OAuth (env config)');
+      return transporter;
+    } catch (err) {
+      logger.warn('Gmail OAuth from env failed, trying database tokens', { error: err.message });
+    }
+  }
+
+  // Try Gmail OAuth from database (legacy/OAuth flow)
   try {
     const tokenResult = await db.query(
       "SELECT token_data FROM system_settings WHERE setting_key = 'gmail_oauth_tokens'"
@@ -56,7 +90,7 @@ async function getTransporter() {
         },
       });
 
-      logger.info('Email transporter initialized with Gmail OAuth');
+      logger.info('Email transporter initialized with Gmail OAuth (database)');
       return transporter;
     }
   } catch (err) {
