@@ -391,6 +391,8 @@ router.get('/monthly', authenticateToken, async (req, res) => {
     const pharmacyId = req.user.pharmacyId;
     const { month, year } = req.query;
 
+    console.log('Monthly report request:', { pharmacyId, month, year });
+
     const monthNum = parseInt(month) || (new Date().getMonth() + 1);
     const yearNum = parseInt(year) || new Date().getFullYear();
 
@@ -538,8 +540,10 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       })),
     });
   } catch (error) {
+    console.error('Monthly report error:', error.message);
+    console.error('Monthly report stack:', error.stack);
     logger.error('Monthly report error', { error: error.message, stack: error.stack });
-    res.status(500).json({ error: 'Failed to get monthly report' });
+    res.status(500).json({ error: 'Failed to get monthly report', details: error.message });
   }
 });
 
