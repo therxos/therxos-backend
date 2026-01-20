@@ -3423,4 +3423,33 @@ router.post('/audit/flags/bulk-update', authenticateToken, requireSuperAdmin, as
   }
 });
 
+// PATCH /api/admin/clients/:clientId/status - Update client status (onboarding -> active)
+router.patch('/clients/:clientId/status', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { status } = req.body;
+
+    if (!['onboarding', 'active', 'suspended'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be: onboarding, active, or suspended' });
+    }
+
+    const result = await db.query(`
+      UPDATE clients
+      SET status = $1
+      WHERE client_id = $2
+      RETURNING client_id, client_name, status
+    `, [status, clientId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    console.log(`Client ${result.rows[0].client_name} status updated to ${status}`);
+    res.json({ success: true, client: result.rows[0] });
+  } catch (error) {
+    console.error('Update client status error:', error);
+    res.status(500).json({ error: 'Failed to update client status' });
+  }
+});
+
 export default router;

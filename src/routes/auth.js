@@ -76,7 +76,7 @@ router.post('/login', async (req, res) => {
 
     // Find user
     const result = await db.query(`
-      SELECT u.*, c.client_name, c.dashboard_subdomain, p.pharmacy_name
+      SELECT u.*, c.client_name, c.dashboard_subdomain, c.status as client_status, p.pharmacy_name
       FROM users u
       JOIN clients c ON c.client_id = u.client_id
       LEFT JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id
@@ -116,6 +116,7 @@ router.post('/login', async (req, res) => {
         role: user.role,
         clientId: user.client_id,
         clientName: user.client_name,
+        clientStatus: user.client_status || 'active',
         pharmacyId: user.pharmacy_id,
         pharmacyName: user.pharmacy_name,
         subdomain: user.dashboard_subdomain,
