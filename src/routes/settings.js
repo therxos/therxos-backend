@@ -95,6 +95,27 @@ router.get('/triggers', authenticateToken, async (req, res) => {
   }
 });
 
+// Get current user's pharmacy info (for fax generation, etc.)
+router.get('/pharmacy-info', authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT pharmacy_id, pharmacy_name, pharmacy_npi as npi, ncpdp,
+              address, city, state, zip, phone, fax
+       FROM pharmacies WHERE pharmacy_id = $1`,
+      [req.user.pharmacyId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    res.json({ pharmacy: result.rows[0] });
+  } catch (error) {
+    logger.error('Get pharmacy info error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get pharmacy info' });
+  }
+});
+
 // Get pharmacy settings
 router.get('/pharmacy/:pharmacyId', authenticateToken, async (req, res) => {
   try {
