@@ -3738,7 +3738,8 @@ router.post('/clients/:clientId/generate-documents', authenticateToken, requireS
 router.post('/clients/:clientId/send-welcome-email', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { clientId } = req.params;
-    const { includeDocuments = true, resetPassword = false } = req.body;
+    const { includeDocuments = true, resetPassword = false, testEmail = null } = req.body;
+    const isTestMode = !!testEmail;
 
     // Get client, pharmacy, and user info
     const result = await db.query(`
@@ -3758,15 +3759,16 @@ router.post('/clients/:clientId/send-welcome-email', authenticateToken, requireS
 
     const client = result.rows[0];
     const pharmacyName = client.pharmacy_name || client.client_name;
-    const email = client.email || client.submitter_email;
+    const clientEmail = client.email || client.submitter_email;
+    const recipientEmail = isTestMode ? testEmail : clientEmail;
 
-    if (!email) {
-      return res.status(400).json({ error: 'No email address found for this client' });
+    if (!recipientEmail) {
+      return res.status(400).json({ error: 'No email address provided' });
     }
 
-    // Generate new password if requested or if user has no password
+    // Generate new password if requested (but NOT in test mode - we don't want to reset real passwords)
     let tempPassword = null;
-    if (resetPassword || !client.user_id) {
+    if (!isTestMode && (resetPassword || !client.user_id)) {
       tempPassword = `Welcome${Math.random().toString(36).slice(2, 8)}!`;
       const passwordHash = await bcrypt.hash(tempPassword, 12);
 
@@ -3776,6 +3778,11 @@ router.post('/clients/:clientId/send-welcome-email', authenticateToken, requireS
           [passwordHash, client.user_id]
         );
       }
+    }
+
+    // In test mode, show a sample password format
+    if (isTestMode) {
+      tempPassword = 'WelcomeXXXXXX! (sample - not a real password)';
     }
 
     // Generate documents if requested
@@ -3794,7 +3801,7 @@ router.post('/clients/:clientId/send-welcome-email', authenticateToken, requireS
 
     // Send welcome email
     const emailResult = await sendWelcomeEmail({
-      to: email,
+      to: recipientEmail,
       pharmacyName,
       tempPassword: tempPassword || '(use your existing password)',
       baaDocument: documents?.baa,
@@ -3804,19 +3811,21 @@ router.post('/clients/:clientId/send-welcome-email', authenticateToken, requireS
     });
 
     if (emailResult.success) {
-      console.log(`Welcome email sent to ${email} for ${pharmacyName}`);
+      const modeLabel = isTestMode ? '[TEST] ' : '';
+      console.log(`${modeLabel}Welcome email sent to ${recipientEmail} for ${pharmacyName}`);
       res.json({
         success: true,
-        message: `Welcome email sent to ${email}`,
+        message: `${modeLabel}Welcome email sent to ${recipientEmail}`,
         messageId: emailResult.messageId,
-        passwordReset: !!tempPassword,
+        passwordReset: !isTestMode && !!tempPassword,
+        isTest: isTestMode,
       });
     } else {
       // Email failed but we can still return the temp password
       res.json({
         success: false,
         error: emailResult.error,
-        tempPassword: tempPassword,
+        tempPassword: isTestMode ? null : tempPassword,
         message: 'Email failed - use temp password for manual follow-up',
       });
     }
