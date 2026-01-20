@@ -38,7 +38,11 @@
       "WebFetch(domain:data.cms.gov)",
       "WebFetch(domain:www.cms.gov)",
       "Bash(unzip:*)",
-      "Bash(git gc:*)"
+      "Bash(git gc:*)",
+      "Bash(git config:*)",
+      "Bash(npx vercel --help:*)",
+      "Bash(npx vercel:*)",
+      "Bash(npm ls:*)"
     ]
   }
 }

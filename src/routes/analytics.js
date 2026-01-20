@@ -498,6 +498,26 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       ORDER BY week_start
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
 
+    // Staff performance - who completed/actioned opportunities
+    const staffResult = await db.query(`
+      SELECT
+        u.user_id,
+        u.first_name,
+        u.last_name,
+        u.role,
+        COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed', 'Captured')) as actioned_count,
+        COUNT(*) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')) as completed_count,
+        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')), 0) as captured_value,
+        COALESCE(AVG(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')), 0) as avg_value_per_capture
+      FROM opportunities o
+      JOIN users u ON u.user_id = o.actioned_by
+      WHERE o.pharmacy_id = $1
+        AND o.actioned_at >= $2 AND o.actioned_at <= $3
+        AND o.actioned_by IS NOT NULL
+      GROUP BY u.user_id, u.first_name, u.last_name, u.role
+      ORDER BY completed_count DESC, captured_value DESC
+    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
+
     res.json({
       month: monthNum,
       year: yearNum,
@@ -537,6 +557,15 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         week_start: r.week_start,
         actioned_count: parseInt(r.actioned_count) || 0,
         actioned_value: parseFloat(r.actioned_value) || 0,
+      })),
+      staff_performance: staffResult.rows.map(r => ({
+        user_id: r.user_id,
+        name: `${r.first_name} ${r.last_name}`,
+        role: r.role,
+        actioned_count: parseInt(r.actioned_count) || 0,
+        completed_count: parseInt(r.completed_count) || 0,
+        captured_value: parseFloat(r.captured_value) || 0,
+        avg_value_per_capture: parseFloat(r.avg_value_per_capture) || 0,
       })),
     });
   } catch (error) {
