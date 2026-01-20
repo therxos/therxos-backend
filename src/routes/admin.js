@@ -22,8 +22,9 @@ function requireSuperAdmin(req, res, next) {
 router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const result = await db.query(`
-      SELECT 
+      SELECT
         p.pharmacy_id,
+        p.client_id,
         p.pharmacy_name,
         p.state,
         p.created_at,

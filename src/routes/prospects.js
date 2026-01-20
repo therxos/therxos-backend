@@ -3,6 +3,7 @@
 
 import express from 'express';
 import multer from 'multer';
+import bcrypt from 'bcryptjs';
 import { parse } from 'csv-parse/sync';
 import { v4 as uuidv4 } from 'uuid';
 import Stripe from 'stripe';
@@ -627,14 +628,15 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       const { analysisId, pharmacyName } = session.metadata;
       const email = session.customer_email;
 
-      // Create client account
+      // Create client account with 'onboarding' status
+      // They only see the upload page until activated by admin
       const clientId = uuidv4();
       const pharmacyId = uuidv4();
       const subdomain = pharmacyName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
 
       await db.query(`
         INSERT INTO clients (client_id, client_name, dashboard_subdomain, submitter_email, status, stripe_customer_id)
-        VALUES ($1, $2, $3, $4, 'active', $5)
+        VALUES ($1, $2, $3, $4, 'onboarding', $5)
       `, [clientId, pharmacyName, subdomain, email, session.customer]);
 
       await db.query(`
@@ -642,16 +644,27 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         VALUES ($1, $2, $3, $4, $5, $6)
       `, [pharmacyId, clientId, pharmacyName, 'PENDING', 'XX', 'pending']);
 
-      // Create user account (they'll set password on first login)
+      // Generate temporary password and create user account
       const userId = uuidv4();
+      const tempPassword = `Welcome${Math.random().toString(36).slice(2, 8)}!`;
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+      // Extract first name from pharmacy name or email
+      const firstName = pharmacyName.split(' ')[0] || email.split('@')[0];
+
       await db.query(`
-        INSERT INTO users (user_id, client_id, pharmacy_id, email, first_name, role, requires_password_reset)
-        VALUES ($1, $2, $3, $4, $5, $6, true)
-      `, [userId, clientId, pharmacyId, email, pharmacyName, 'admin']);
+        INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, true)
+      `, [userId, clientId, pharmacyId, email, passwordHash, firstName, 'Admin', 'owner']);
 
-      // TODO: Send welcome email with login link
+      // Log credentials for manual follow-up (in production, send welcome email)
+      console.log(`✅ New customer onboarded: ${pharmacyName}`);
+      console.log(`   Email: ${email}`);
+      console.log(`   Temp Password: ${tempPassword}`);
+      console.log(`   Status: onboarding (upload only until activated)`);
+      console.log(`   Client ID: ${clientId}`);
 
-      console.log(`✅ New customer onboarded: ${pharmacyName} (${email})`);
+      // TODO: Send welcome email with login credentials and instructions
     }
 
     res.json({ received: true });
