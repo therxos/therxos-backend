@@ -3429,6 +3429,229 @@ router.post('/audit/flags/bulk-update', authenticateToken, requireSuperAdmin, as
   }
 });
 
+// PATCH /api/admin/clients/:clientId - Update client and pharmacy details
+router.patch('/clients/:clientId', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { pharmacyName, clientName, email, state, address, city, zip, phone, npi } = req.body;
+
+    // Get pharmacy_id for this client
+    const pharmacyResult = await pool.query(
+      'SELECT pharmacy_id FROM pharmacies WHERE client_id = $1',
+      [clientId]
+    );
+
+    if (pharmacyResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const pharmacyId = pharmacyResult.rows[0].pharmacy_id;
+
+    // Update client
+    if (clientName || email) {
+      const clientUpdates = [];
+      const clientValues = [];
+      let idx = 1;
+
+      if (clientName) {
+        clientUpdates.push(`client_name = $${idx++}`);
+        clientValues.push(clientName);
+      }
+      if (email) {
+        clientUpdates.push(`submitter_email = $${idx++}`);
+        clientValues.push(email);
+      }
+
+      if (clientUpdates.length > 0) {
+        clientValues.push(clientId);
+        await db.query(
+          `UPDATE clients SET ${clientUpdates.join(', ')} WHERE client_id = $${idx}`,
+          clientValues
+        );
+      }
+    }
+
+    // Update pharmacy
+    const pharmUpdates = [];
+    const pharmValues = [];
+    let pIdx = 1;
+
+    if (pharmacyName) { pharmUpdates.push(`pharmacy_name = $${pIdx++}`); pharmValues.push(pharmacyName); }
+    if (state) { pharmUpdates.push(`state = $${pIdx++}`); pharmValues.push(state); }
+    if (address) { pharmUpdates.push(`address = $${pIdx++}`); pharmValues.push(address); }
+    if (city) { pharmUpdates.push(`city = $${pIdx++}`); pharmValues.push(city); }
+    if (zip) { pharmUpdates.push(`zip = $${pIdx++}`); pharmValues.push(zip); }
+    if (phone) { pharmUpdates.push(`phone = $${pIdx++}`); pharmValues.push(phone); }
+    if (npi) { pharmUpdates.push(`pharmacy_npi = $${pIdx++}`); pharmValues.push(npi); }
+
+    if (pharmUpdates.length > 0) {
+      pharmValues.push(pharmacyId);
+      await db.query(
+        `UPDATE pharmacies SET ${pharmUpdates.join(', ')} WHERE pharmacy_id = $${pIdx}`,
+        pharmValues
+      );
+    }
+
+    // Update user email if provided
+    if (email) {
+      await db.query(
+        `UPDATE users SET email = $1 WHERE pharmacy_id = $2 AND role IN ('owner', 'admin') LIMIT 1`,
+        [email, pharmacyId]
+      );
+    }
+
+    // Fetch updated data
+    const updated = await db.query(`
+      SELECT p.pharmacy_name, p.state, p.address, p.city, p.zip, p.phone, p.pharmacy_npi,
+             c.client_name, c.submitter_email
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE c.client_id = $1
+    `, [clientId]);
+
+    console.log(`Updated client ${clientId}:`, updated.rows[0]);
+    res.json({ success: true, data: updated.rows[0] });
+  } catch (error) {
+    console.error('Update client error:', error);
+    res.status(500).json({ error: 'Failed to update client: ' + error.message });
+  }
+});
+
+// POST /api/admin/clients/:clientId/email-documents - Email BAA and Agreement to client
+router.post('/clients/:clientId/email-documents', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    // Get client info
+    const result = await db.query(`
+      SELECT c.client_name, c.submitter_email, p.pharmacy_name, p.state, p.address, p.city, p.zip
+      FROM clients c
+      LEFT JOIN pharmacies p ON p.client_id = c.client_id
+      WHERE c.client_id = $1
+    `, [clientId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const client = result.rows[0];
+    const pharmacyName = client.pharmacy_name || client.client_name;
+    const email = client.submitter_email;
+
+    if (!email) {
+      return res.status(400).json({ error: 'No email address found for this client' });
+    }
+
+    // Generate documents
+    const documents = await generateOnboardingDocuments({
+      pharmacyName,
+      companyName: client.client_name,
+      email,
+      state: client.state,
+      address: client.address,
+      city: client.city,
+      zip: client.zip,
+    });
+
+    // Send email with just documents (no credentials)
+    const { sendWelcomeEmail } = await import('../services/emailService.js');
+
+    // Use a modified version - send docs only
+    const nodemailer = await import('nodemailer');
+    const transport = await getEmailTransport();
+
+    if (!transport) {
+      return res.json({
+        success: false,
+        error: 'Email not configured',
+        documents: {
+          baa: { filename: documents.baaFilename, base64: documents.baa.toString('base64') },
+          serviceAgreement: { filename: documents.serviceAgreementFilename, base64: documents.serviceAgreement.toString('base64') },
+        }
+      });
+    }
+
+    const mailResult = await transport.sendMail({
+      from: '"TheRxOS" <stan@therxos.com>',
+      to: email,
+      subject: `TheRxOS Documents - ${pharmacyName}`,
+      text: `Hello,\n\nPlease find attached your Business Associate Agreement (BAA) and Service Agreement for TheRxOS.\n\nPlease review, sign, and return these documents to stan@therxos.com.\n\nIf you have any questions, please reply to this email.\n\nBest regards,\nStan\nTheRxOS`,
+      html: `
+        <p>Hello,</p>
+        <p>Please find attached your <strong>Business Associate Agreement (BAA)</strong> and <strong>Service Agreement</strong> for TheRxOS.</p>
+        <p>Please review, sign, and return these documents to <a href="mailto:stan@therxos.com">stan@therxos.com</a>.</p>
+        <p>If you have any questions, please reply to this email.</p>
+        <p>Best regards,<br><strong>Stan</strong><br>TheRxOS</p>
+      `,
+      attachments: [
+        { filename: documents.baaFilename, content: documents.baa },
+        { filename: documents.serviceAgreementFilename, content: documents.serviceAgreement },
+      ],
+    });
+
+    console.log(`Documents emailed to ${email} for ${pharmacyName}`);
+    res.json({ success: true, messageId: mailResult.messageId });
+  } catch (error) {
+    console.error('Email documents error:', error);
+    res.status(500).json({ error: 'Failed to email documents: ' + error.message });
+  }
+});
+
+// Helper to get email transport
+async function getEmailTransport() {
+  const nodemailer = (await import('nodemailer')).default;
+
+  if (process.env.SMTP_HOST) {
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+  }
+
+  // Try Gmail OAuth
+  if (process.env.GMAIL_CLIENT_ID) {
+    try {
+      const { google } = await import('googleapis');
+      const tokenResult = await db.query(
+        "SELECT token_data FROM system_settings WHERE setting_key = 'gmail_oauth_tokens'"
+      );
+
+      if (tokenResult.rows.length > 0) {
+        const oauth2Client = new google.auth.OAuth2(
+          process.env.GMAIL_CLIENT_ID,
+          process.env.GMAIL_CLIENT_SECRET,
+          process.env.GMAIL_REDIRECT_URI
+        );
+
+        const tokens = typeof tokenResult.rows[0].token_data === 'string'
+          ? JSON.parse(tokenResult.rows[0].token_data)
+          : tokenResult.rows[0].token_data;
+        oauth2Client.setCredentials(tokens);
+
+        const accessToken = await oauth2Client.getAccessToken();
+
+        return nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            type: 'OAuth2',
+            user: process.env.GMAIL_USER || 'stan@therxos.com',
+            clientId: process.env.GMAIL_CLIENT_ID,
+            clientSecret: process.env.GMAIL_CLIENT_SECRET,
+            refreshToken: tokens.refresh_token,
+            accessToken: accessToken.token,
+          },
+        });
+      }
+    } catch (err) {
+      console.error('Gmail OAuth setup failed:', err.message);
+    }
+  }
+
+  return null;
+}
+
 // PATCH /api/admin/clients/:clientId/status - Update client status (onboarding -> active)
 router.patch('/clients/:clientId/status', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
