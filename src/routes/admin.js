@@ -3,10 +3,15 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
+import Stripe from 'stripe';
 import db from '../database/index.js';
 import { authenticateToken } from './auth.js';
 import { ROLES } from '../utils/permissions.js';
 import auditScanner from '../services/audit-scanner.js';
+import { generateOnboardingDocuments } from '../services/documentGenerator.js';
+import { sendWelcomeEmail } from '../services/emailService.js';
+
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
 const router = express.Router();
 
@@ -3450,6 +3455,288 @@ router.patch('/clients/:clientId/status', authenticateToken, requireSuperAdmin, 
   } catch (error) {
     console.error('Update client status error:', error);
     res.status(500).json({ error: 'Failed to update client status' });
+  }
+});
+
+// POST /api/admin/clients/:clientId/generate-documents - Generate BAA and Service Agreement
+router.post('/clients/:clientId/generate-documents', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    // Get client and pharmacy info
+    const result = await db.query(`
+      SELECT c.client_name, c.submitter_email, p.pharmacy_name, p.state
+      FROM clients c
+      LEFT JOIN pharmacies p ON p.client_id = c.client_id
+      WHERE c.client_id = $1
+    `, [clientId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const client = result.rows[0];
+    const pharmacyName = client.pharmacy_name || client.client_name;
+
+    // Generate documents
+    const documents = await generateOnboardingDocuments({
+      pharmacyName,
+      companyName: client.client_name,
+      email: client.submitter_email,
+      state: client.state,
+    });
+
+    console.log(`Generated documents for ${pharmacyName}`);
+
+    res.json({
+      success: true,
+      documents: {
+        baa: {
+          filename: documents.baaFilename,
+          base64: documents.baa.toString('base64'),
+        },
+        serviceAgreement: {
+          filename: documents.serviceAgreementFilename,
+          base64: documents.serviceAgreement.toString('base64'),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Generate documents error:', error);
+    res.status(500).json({ error: 'Failed to generate documents: ' + error.message });
+  }
+});
+
+// POST /api/admin/clients/:clientId/send-welcome-email - Send welcome email with credentials
+router.post('/clients/:clientId/send-welcome-email', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { includeDocuments = true, resetPassword = false } = req.body;
+
+    // Get client, pharmacy, and user info
+    const result = await db.query(`
+      SELECT
+        c.client_name, c.submitter_email,
+        p.pharmacy_name,
+        u.user_id, u.email, u.first_name
+      FROM clients c
+      LEFT JOIN pharmacies p ON p.client_id = c.client_id
+      LEFT JOIN users u ON u.client_id = c.client_id AND u.role = 'owner'
+      WHERE c.client_id = $1
+    `, [clientId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const client = result.rows[0];
+    const pharmacyName = client.pharmacy_name || client.client_name;
+    const email = client.email || client.submitter_email;
+
+    if (!email) {
+      return res.status(400).json({ error: 'No email address found for this client' });
+    }
+
+    // Generate new password if requested or if user has no password
+    let tempPassword = null;
+    if (resetPassword || !client.user_id) {
+      tempPassword = `Welcome${Math.random().toString(36).slice(2, 8)}!`;
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+      if (client.user_id) {
+        await db.query(
+          'UPDATE users SET password_hash = $1, must_change_password = true WHERE user_id = $2',
+          [passwordHash, client.user_id]
+        );
+      }
+    }
+
+    // Generate documents if requested
+    let documents = null;
+    if (includeDocuments) {
+      try {
+        documents = await generateOnboardingDocuments({
+          pharmacyName,
+          companyName: client.client_name,
+          email,
+        });
+      } catch (docError) {
+        console.error('Document generation failed:', docError.message);
+      }
+    }
+
+    // Send welcome email
+    const emailResult = await sendWelcomeEmail({
+      to: email,
+      pharmacyName,
+      tempPassword: tempPassword || '(use your existing password)',
+      baaDocument: documents?.baa,
+      baaFilename: documents?.baaFilename,
+      serviceAgreement: documents?.serviceAgreement,
+      serviceAgreementFilename: documents?.serviceAgreementFilename,
+    });
+
+    if (emailResult.success) {
+      console.log(`Welcome email sent to ${email} for ${pharmacyName}`);
+      res.json({
+        success: true,
+        message: `Welcome email sent to ${email}`,
+        messageId: emailResult.messageId,
+        passwordReset: !!tempPassword,
+      });
+    } else {
+      // Email failed but we can still return the temp password
+      res.json({
+        success: false,
+        error: emailResult.error,
+        tempPassword: tempPassword,
+        message: 'Email failed - use temp password for manual follow-up',
+      });
+    }
+  } catch (error) {
+    console.error('Send welcome email error:', error);
+    res.status(500).json({ error: 'Failed to send welcome email: ' + error.message });
+  }
+});
+
+// POST /api/admin/clients/:clientId/create-checkout - Create Stripe checkout link for client
+router.post('/clients/:clientId/create-checkout', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe not configured' });
+    }
+
+    const { clientId } = req.params;
+
+    // Get client info
+    const result = await db.query(`
+      SELECT c.client_name, c.submitter_email, p.pharmacy_name
+      FROM clients c
+      LEFT JOIN pharmacies p ON p.client_id = c.client_id
+      WHERE c.client_id = $1
+    `, [clientId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const client = result.rows[0];
+    const pharmacyName = client.pharmacy_name || client.client_name;
+    const email = client.submitter_email;
+
+    // Create Stripe checkout session
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: 'subscription',
+      customer_email: email,
+      line_items: [
+        {
+          price: process.env.STRIPE_PRICE_ID,
+          quantity: 1,
+        },
+      ],
+      metadata: {
+        clientId,
+        pharmacyName,
+        adminCreated: 'true',
+      },
+      success_url: `https://beta.therxos.com/login?checkout=success`,
+      cancel_url: `https://beta.therxos.com/login?checkout=cancelled`,
+    });
+
+    console.log(`Created Stripe checkout for ${pharmacyName}: ${session.url}`);
+
+    res.json({
+      success: true,
+      checkoutUrl: session.url,
+      sessionId: session.id,
+    });
+  } catch (error) {
+    console.error('Create checkout error:', error);
+    res.status(500).json({ error: 'Failed to create checkout: ' + error.message });
+  }
+});
+
+// POST /api/admin/clients/create-onboarding - Create a new client in onboarding status
+router.post('/clients/create-onboarding', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyName, email, firstName, lastName, sendEmail = true } = req.body;
+
+    if (!pharmacyName || !email) {
+      return res.status(400).json({ error: 'pharmacyName and email are required' });
+    }
+
+    // Check if email already exists
+    const existing = await db.query('SELECT user_id FROM users WHERE email = $1', [email.toLowerCase()]);
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'A user with this email already exists' });
+    }
+
+    // Create client, pharmacy, and user
+    const clientId = uuidv4();
+    const pharmacyId = uuidv4();
+    const userId = uuidv4();
+    const subdomain = pharmacyName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
+    const tempPassword = `Welcome${Math.random().toString(36).slice(2, 8)}!`;
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+    await db.query(`
+      INSERT INTO clients (client_id, client_name, dashboard_subdomain, submitter_email, status)
+      VALUES ($1, $2, $3, $4, 'onboarding')
+    `, [clientId, pharmacyName, subdomain, email]);
+
+    await db.query(`
+      INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, pharmacy_npi, state, pms_system)
+      VALUES ($1, $2, $3, 'PENDING', 'XX', 'pending')
+    `, [pharmacyId, clientId, pharmacyName]);
+
+    await db.query(`
+      INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'owner', true, true)
+    `, [userId, clientId, pharmacyId, email.toLowerCase(), passwordHash, firstName || pharmacyName.split(' ')[0], lastName || 'Admin']);
+
+    console.log(`Created onboarding client: ${pharmacyName} (${email})`);
+
+    // Generate documents and send email if requested
+    let emailResult = null;
+    if (sendEmail) {
+      try {
+        const documents = await generateOnboardingDocuments({
+          pharmacyName,
+          companyName: pharmacyName,
+          email,
+        });
+
+        emailResult = await sendWelcomeEmail({
+          to: email,
+          pharmacyName,
+          tempPassword,
+          baaDocument: documents?.baa,
+          baaFilename: documents?.baaFilename,
+          serviceAgreement: documents?.serviceAgreement,
+          serviceAgreementFilename: documents?.serviceAgreementFilename,
+        });
+      } catch (emailError) {
+        console.error('Email/document generation failed:', emailError.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      client: {
+        clientId,
+        pharmacyId,
+        pharmacyName,
+        email,
+        status: 'onboarding',
+      },
+      tempPassword,
+      emailSent: emailResult?.success || false,
+      emailError: emailResult?.error,
+    });
+  } catch (error) {
+    console.error('Create onboarding client error:', error);
+    res.status(500).json({ error: 'Failed to create client: ' + error.message });
   }
 });
 
