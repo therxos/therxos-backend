@@ -10,8 +10,8 @@ const router = express.Router();
 
 // Validation schemas
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8)
+  email: z.string().min(1), // Accepts email or username
+  password: z.string().min(1)
 });
 
 const registerSchema = z.object({
@@ -84,7 +84,7 @@ router.post('/login', async (req, res) => {
     `, [email.toLowerCase()]);
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const user = result.rows[0];
@@ -92,7 +92,7 @@ router.post('/login', async (req, res) => {
     // Verify password
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     // Update last login
