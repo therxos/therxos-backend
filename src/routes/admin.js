@@ -89,17 +89,38 @@ router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
 // GET /api/admin/public-stats - Public stats for main website (no auth required)
 router.get('/public-stats', async (req, res) => {
   try {
+    // Beta capacity limit
+    const BETA_MAX_CAPACITY = 10;
+
     // Exclude Hero Pharmacy and demo pharmacies from public stats
+    // Include both 'active' and 'onboarding' in pharmacies_live count
     const stats = await db.query(`
       SELECT
-        (SELECT COUNT(*) FROM prescriptions pr JOIN pharmacies p ON p.pharmacy_id = pr.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as claims_analyzed,
-        (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status = 'active' AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as pharmacies_live,
-        (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as opportunities_found,
-        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as profit_identified,
-        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as profit_captured
+        (SELECT COUNT(*) FROM prescriptions pr JOIN pharmacies p ON p.pharmacy_id = pr.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as claims_analyzed,
+        (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status IN ('active', 'onboarding') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as pharmacies_live,
+        (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as opportunities_found,
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as profit_identified,
+        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as profit_captured
     `);
 
     const data = stats.rows[0];
+    const pharmaciesLive = parseInt(data.pharmacies_live) || 0;
+    const slotsRemaining = Math.max(0, BETA_MAX_CAPACITY - pharmaciesLive);
+    const isBetaFull = pharmaciesLive >= BETA_MAX_CAPACITY;
+
+    // Get category breakdowns (excluding demo pharmacies)
+    const categoryStats = await db.query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN o.opportunity_type = 'therapeutic_interchange' THEN o.annual_margin_gain ELSE 0 END), 0) as therapeutic,
+        COALESCE(SUM(CASE WHEN o.opportunity_type = 'brand_to_generic' THEN o.annual_margin_gain ELSE 0 END), 0) as brand_to_generic,
+        COALESCE(SUM(CASE WHEN o.opportunity_type = 'missing_therapy' THEN o.annual_margin_gain ELSE 0 END), 0) as missing_therapy,
+        COALESCE(SUM(CASE WHEN o.opportunity_type = 'ndc_optimization' THEN o.annual_margin_gain ELSE 0 END), 0) as ndc_optimization,
+        COALESCE(SUM(CASE WHEN o.opportunity_type = 'combo_therapy' THEN o.annual_margin_gain ELSE 0 END), 0) as combo_therapy
+      FROM opportunities o
+      JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id
+      WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%'
+    `);
+    const categories = categoryStats.rows[0];
 
     // Format numbers for display
     const formatNumber = (num) => {
@@ -118,14 +139,33 @@ router.get('/public-stats', async (req, res) => {
 
     res.json({
       claims_analyzed: formatNumber(data.claims_analyzed),
-      pharmacies_live: parseInt(data.pharmacies_live) || 0,
+      pharmacies_live: pharmaciesLive,
       opportunities_found: formatNumber(data.opportunities_found),
       profit_identified: formatMoney(data.profit_identified),
       profit_captured: formatMoney(data.profit_captured),
+      // Beta capacity info
+      beta_max_capacity: BETA_MAX_CAPACITY,
+      slots_remaining: slotsRemaining,
+      is_beta_full: isBetaFull,
+      // Category breakdowns for dashboard
+      categories: {
+        therapeutic: formatMoney(categories.therapeutic),
+        brand_to_generic: formatMoney(categories.brand_to_generic),
+        missing_therapy: formatMoney(categories.missing_therapy),
+        ndc_optimization: formatMoney(categories.ndc_optimization),
+        combo_therapy: formatMoney(categories.combo_therapy),
+        raw: {
+          therapeutic: parseFloat(categories.therapeutic) || 0,
+          brand_to_generic: parseFloat(categories.brand_to_generic) || 0,
+          missing_therapy: parseFloat(categories.missing_therapy) || 0,
+          ndc_optimization: parseFloat(categories.ndc_optimization) || 0,
+          combo_therapy: parseFloat(categories.combo_therapy) || 0,
+        }
+      },
       // Raw values for custom formatting
       raw: {
         claims_analyzed: parseInt(data.claims_analyzed) || 0,
-        pharmacies_live: parseInt(data.pharmacies_live) || 0,
+        pharmacies_live: pharmaciesLive,
         opportunities_found: parseInt(data.opportunities_found) || 0,
         profit_identified: parseFloat(data.profit_identified) || 0,
         profit_captured: parseFloat(data.profit_captured) || 0
