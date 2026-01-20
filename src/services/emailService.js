@@ -16,7 +16,15 @@ async function getTransporter() {
   if (transporter) return transporter;
 
   // Try Gmail OAuth first (if configured via env variables)
-  if (process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN) {
+  const hasGmailEnv = !!(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN);
+  console.log('[Email] Gmail env check:', {
+    hasClientId: !!process.env.GMAIL_CLIENT_ID,
+    hasClientSecret: !!process.env.GMAIL_CLIENT_SECRET,
+    hasRefreshToken: !!process.env.GMAIL_REFRESH_TOKEN,
+    hasGmailEnv
+  });
+
+  if (hasGmailEnv) {
     try {
       const oauth2Client = new google.auth.OAuth2(
         process.env.GMAIL_CLIENT_ID,
@@ -43,8 +51,10 @@ async function getTransporter() {
       });
 
       logger.info('Email transporter initialized with Gmail OAuth (env config)');
+      console.log('[Email] Gmail OAuth initialized successfully from env vars');
       return transporter;
     } catch (err) {
+      console.log('[Email] Gmail OAuth from env FAILED:', err.message);
       logger.warn('Gmail OAuth from env failed, trying database tokens', { error: err.message });
     }
   }
