@@ -751,6 +751,7 @@ router.get('/prescriber-stats', authenticateToken, async (req, res) => {
         COALESCE(SUM(o.annual_margin_gain), 0) as annual_potential,
         COALESCE(AVG(o.potential_margin_gain), 0) as avg_opportunity_value,
         COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) as actioned_count,
+        COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed') AND o.actioned_at >= NOW() - INTERVAL '7 days') as actioned_last_7_days,
         CASE
           WHEN COUNT(*) > 0
           THEN ROUND(100.0 * COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) / COUNT(*), 1)
@@ -853,6 +854,7 @@ router.get('/prescriber-stats', authenticateToken, async (req, res) => {
         annual_potential: parseFloat(r.annual_potential) || 0,
         avg_opportunity_value: parseFloat(r.avg_opportunity_value) || 0,
         actioned_count: parseInt(r.actioned_count) || 0,
+        actioned_last_7_days: parseInt(r.actioned_last_7_days) || 0,
         action_rate: parseFloat(r.action_rate) || 0
       })),
       top_by_count: topByCount.rows.map(r => ({
