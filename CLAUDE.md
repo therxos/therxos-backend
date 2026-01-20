@@ -1,11 +1,24 @@
 # TheRxOS V2 - Project Documentation
 
+> **IMPORTANT FOR NEW SESSIONS:** Before starting work, check these files:
+> - **TODO.md** - Current to-do list and priorities
+> - **CHANGELOG.md** - Recent changes and what was completed
+> This helps maintain continuity between sessions and avoid redoing work.
+
 ## Overview
 
 TheRxOS is a multi-tenant SaaS platform for independent pharmacies to identify and capture clinical opportunity revenue. The system scans prescription claims data, identifies therapeutic interchange opportunities, missing therapies, and optimization opportunities, then tracks them through submission to insurance approval.
 
 **Owner:** Stan ("Pharmacy Stan") - 23 years pharmacy experience
 **Brand:** TheRxOS (The Rx Operating System)
+
+---
+
+## Project Documentation
+
+- **CLAUDE.md** - This file. Project overview, architecture, and coding guidelines
+- **TODO.md** - Running to-do list of features and fixes (updated each session)
+- **CHANGELOG.md** - Version history with dates (items tagged [CLIENT] are client-visible)
 
 ---
 

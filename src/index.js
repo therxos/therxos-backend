@@ -26,6 +26,7 @@ import pricingRoutes from './routes/pricing.js';
 import secureUploadRoutes from './routes/secure-upload.js';
 import coverageIntelligenceRoutes from './routes/coverage-intelligence.js';
 import dataQualityRoutes from './routes/data-quality.js';
+import changelogRoutes from './routes/changelog.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -113,6 +114,7 @@ app.use('/api/pricing', pricingRoutes);
 app.use('/api/secure-upload', secureUploadRoutes);
 app.use('/api/coverage', coverageIntelligenceRoutes);
 app.use('/api/data-quality', dataQualityRoutes);
+app.use('/api/changelog', changelogRoutes);
 
 // CSV Upload endpoint
 app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {

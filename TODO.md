@@ -1,0 +1,78 @@
+# TheRxOS To-Do List
+
+Running list of features, fixes, and improvements. Updated each session.
+
+---
+
+## High Priority
+
+### Demo & Marketing
+- [ ] Create demo video (options: Synthesia AI, animated HTML mockup, or screen recording)
+- [ ] Add waitlist form/modal when beta reaches 10 pharmacies
+
+### Client Features
+- [ ] `/change-password` page (currently returns 404)
+- [ ] Fix logout hydration error
+
+### Onboarding
+- [ ] Aracoma Drug RX30 data import
+- [ ] Gmail OAuth credentials for email sending (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET)
+
+---
+
+## Medium Priority
+
+### Dashboard Enhancements
+- [ ] Real-time opportunity notifications
+- [ ] Prescriber response tracking
+- [ ] Patient communication log
+
+### Triggers & Scanning
+- [ ] 340B specialty trigger variations (test in Marvel Pharmacy)
+- [ ] Compounding opportunity triggers
+- [ ] Auto-rescan on new data upload
+
+### Admin Tools
+- [ ] Bulk client email (send updates to all active clients)
+- [ ] Usage analytics per pharmacy
+- [ ] Audit log for admin actions
+
+---
+
+## Low Priority / Future
+
+### Integrations
+- [ ] Direct PMS API connections (beyond CSV upload)
+- [ ] E-prescribing integration
+- [ ] Pharmacy network benchmarking
+
+### Advanced Features
+- [ ] AI-powered opportunity prioritization
+- [ ] Prescriber relationship scoring
+- [ ] Predictive analytics (which opportunities most likely to convert)
+
+---
+
+## Completed Recently
+
+- [x] Client-facing changelog in dashboard sidebar (2026-01-19)
+- [x] Website best fit updated for smaller pharmacies (25K+ scripts) (2026-01-19)
+- [x] Test email feature for admin (2026-01-19)
+- [x] Status editing in admin panel (2026-01-19)
+- [x] Split Live/Demo pharmacy tables (2026-01-19)
+- [x] Live website stats with category breakdowns (2026-01-19)
+- [x] Beta slots remaining / waitlist mode (2026-01-19)
+- [x] Dashboard 2000 cap fix (2026-01-17)
+- [x] Login accepts email OR username (2026-01-17)
+- [x] Document generation (BAA, Service Agreement) (2026-01-17)
+- [x] Email service with attachments (2026-01-17)
+- [x] CMS Medicare formulary integration (2026-01-18)
+- [x] Coverage scanner fixes (2026-01-18)
+
+---
+
+## Notes
+
+- Marvel Pharmacy (formerly Hero) is the test/demo environment
+- Beta capacity: 10 pharmacies
+- Current live + onboarding: Check `/api/admin/public-stats`
