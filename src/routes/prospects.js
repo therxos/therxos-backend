@@ -8,6 +8,8 @@ import { parse } from 'csv-parse/sync';
 import { v4 as uuidv4 } from 'uuid';
 import Stripe from 'stripe';
 import db from '../database/index.js';
+import { generateOnboardingDocuments } from '../services/documentGenerator.js';
+import { sendWelcomeEmail } from '../services/emailService.js';
 
 const router = express.Router();
 
@@ -657,14 +659,46 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, true)
       `, [userId, clientId, pharmacyId, email, passwordHash, firstName, 'Admin', 'owner']);
 
-      // Log credentials for manual follow-up (in production, send welcome email)
       console.log(`✅ New customer onboarded: ${pharmacyName}`);
       console.log(`   Email: ${email}`);
-      console.log(`   Temp Password: ${tempPassword}`);
       console.log(`   Status: onboarding (upload only until activated)`);
       console.log(`   Client ID: ${clientId}`);
 
-      // TODO: Send welcome email with login credentials and instructions
+      // Generate BAA and Service Agreement documents
+      let documents = null;
+      try {
+        documents = await generateOnboardingDocuments({
+          pharmacyName,
+          email,
+          companyName: pharmacyName,
+        });
+        console.log(`   Documents: BAA + Service Agreement generated`);
+      } catch (docError) {
+        console.error('   Document generation failed:', docError.message);
+      }
+
+      // Send welcome email with credentials and documents
+      try {
+        const emailResult = await sendWelcomeEmail({
+          to: email,
+          pharmacyName,
+          tempPassword,
+          baaDocument: documents?.baa,
+          baaFilename: documents?.baaFilename,
+          serviceAgreement: documents?.serviceAgreement,
+          serviceAgreementFilename: documents?.serviceAgreementFilename,
+        });
+
+        if (emailResult.success) {
+          console.log(`   Welcome email sent: ${emailResult.messageId}`);
+        } else {
+          console.log(`   Welcome email failed: ${emailResult.error}`);
+          console.log(`   Temp Password: ${tempPassword}`);
+        }
+      } catch (emailError) {
+        console.error('   Email send failed:', emailError.message);
+        console.log(`   Temp Password: ${tempPassword}`);
+      }
     }
 
     res.json({ received: true });

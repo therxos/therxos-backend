@@ -69,6 +69,25 @@ const COLUMN_MAP = {
   'PCN': 'insurance_pcn',
   'BIN': 'insurance_bin',
   'Prescriber Name': 'prescriber_name',
+
+  // Aracoma/PMS Format
+  'TransactionDateKey': 'dispensed_date',
+  'RxRefill': 'rx_number',
+  'DrugName': 'drug_name',
+  'FormulationType': 'formulary_type',
+  'DrugGroup': 'therapeutic_class',
+  'DrugClass': 'drug_class',
+  'GroupNumber': 'group_number',
+  'ClaimAmountPaid': 'insurance_pay',
+  'CopayPaid': 'patient_pay',
+  'Revenue': 'total_paid',
+  'AdjustedContractCost2': 'acquisition_cost',
+  'AdjProfit3': 'gross_profit',
+  'AdjGPM': 'gross_profit_margin',
+  'PatientName': 'patient_name',
+  'PatientBirthdate': 'patient_dob',
+  'PrescriberName': 'prescriber_name',
+  'PrescriberID': 'prescriber_npi',
 };
 
 // Parse CSV (auto-detect delimiter)
