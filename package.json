@@ -28,6 +28,7 @@
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "nodemailer": "^7.0.12",
+    "openai": "^6.16.0",
     "pg": "^8.11.3",
     "pizzip": "^3.2.0",
     "stripe": "^20.1.0",
