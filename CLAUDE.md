@@ -1,5 +1,48 @@
 # TheRxOS V2 - Project Documentation
 
+---
+
+## CRITICAL: STAGING-FIRST DEPLOYMENT WORKFLOW
+
+**ALWAYS deploy to staging first, test, then deploy to production. NEVER skip staging.**
+
+### Environment URLs
+
+| Environment | Frontend | Backend |
+|-------------|----------|---------|
+| **STAGING** | https://staging.therxos.com | https://therxos-backend-staging.up.railway.app |
+| **PRODUCTION** | https://beta.therxos.com | https://therxos-backend-production.up.railway.app |
+
+### Deployment Commands
+
+**Backend (Railway auto-deploys from GitHub):**
+```bash
+# 1. STAGING FIRST - Push to staging branch
+cd therxos-backend
+git checkout staging && git merge main --no-edit && git push origin staging && git checkout main
+
+# 2. PRODUCTION - Only after staging is verified
+git push origin main
+```
+
+**Frontend (Vercel):**
+```bash
+# 1. STAGING FIRST
+cd therxos-frontend
+git checkout staging && git merge main --no-edit && git push origin staging
+vercel --prod && vercel alias staging.therxos.com
+git checkout main
+
+# 2. PRODUCTION - Only after staging is verified
+vercel --prod  # This deploys to beta.therxos.com
+```
+
+### Git Branches
+- `main` → Production (beta.therxos.com)
+- `staging` → Staging (staging.therxos.com)
+
+---
+
 > **IMPORTANT FOR NEW SESSIONS:** Before starting work, check these files:
 > - **TODO.md** - Current to-do list and priorities
 > - **CHANGELOG.md** - Recent changes and what was completed
