@@ -24,8 +24,11 @@ const upload = multer({
   }
 });
 
-// Initialize OpenAI client
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+// Initialize DeepSeek client (OpenAI-compatible API)
+const deepseek = process.env.DEEPSEEK_API_KEY ? new OpenAI({
+  apiKey: process.env.DEEPSEEK_API_KEY,
+  baseURL: 'https://api.deepseek.com'
+}) : null;
 
 /**
  * POST /api/intake/process
@@ -60,9 +63,9 @@ router.post('/process', authenticateToken, upload.single('file'), async (req, re
         error: 'PDF processing coming soon. Please upload an image (JPG/PNG) or CSV for now.'
       });
     } else {
-      // Use OpenAI Vision for images
-      if (!openai) {
-        return res.status(500).json({ error: 'OpenAI not configured. Please add OPENAI_API_KEY to environment variables.' });
+      // Use DeepSeek Vision for images
+      if (!deepseek) {
+        return res.status(500).json({ error: 'DeepSeek not configured. Please add DEEPSEEK_API_KEY to environment variables.' });
       }
 
       extractedData = await extractWithVision(req.file.buffer, req.file.mimetype);
@@ -172,14 +175,14 @@ router.post('/add-opportunity', authenticateToken, async (req, res) => {
 });
 
 /**
- * Extract patient info, insurance, and medications using OpenAI Vision
+ * Extract patient info, insurance, and medications using DeepSeek Vision
  */
 async function extractWithVision(fileBuffer, mimetype) {
   const base64Image = fileBuffer.toString('base64');
   const imageUrl = `data:${mimetype};base64,${base64Image}`;
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+  const response = await deepseek.chat.completions.create({
+    model: 'deepseek-chat',
     messages: [
       {
         role: 'system',
