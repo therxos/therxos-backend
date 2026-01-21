@@ -2951,7 +2951,8 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
       adminEmail,
       adminFirstName,
       adminLastName,
-      pmsSystem
+      pmsSystem,
+      status
     } = req.body;
 
     // Validate required fields
@@ -3021,7 +3022,7 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
       await txClient.query(`
         INSERT INTO clients (client_id, client_name, dashboard_subdomain, submitter_email, status, created_at)
         VALUES ($1, $2, $3, $4, $5, NOW())
-      `, [clientId, clientName, finalSubdomain, adminEmail.toLowerCase(), 'active']);
+      `, [clientId, clientName, finalSubdomain, adminEmail.toLowerCase(), status || 'active']);
 
       // Create pharmacy (trim state to 2 chars, NPI to 10)
       await txClient.query(`
@@ -3797,7 +3798,9 @@ router.patch('/clients/:clientId', authenticateToken, requireSuperAdmin, async (
     // Update user email if provided
     if (email) {
       await db.query(
-        `UPDATE users SET email = $1 WHERE pharmacy_id = $2 AND role IN ('owner', 'admin') LIMIT 1`,
+        `UPDATE users SET email = $1 WHERE user_id = (
+          SELECT user_id FROM users WHERE pharmacy_id = $2 AND role IN ('owner', 'admin') LIMIT 1
+        )`,
         [email, pharmacyId]
       );
     }
