@@ -51,7 +51,9 @@
       "Bash(git -C \"C:/Users/Stan/Desktop/therxos-frontend\" status)",
       "Bash(vercel:*)",
       "Bash(GIT_BRANCH=staging npx vercel:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(git remote:*)",
+      "Bash(railway:*)"
     ]
   }
 }

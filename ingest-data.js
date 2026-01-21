@@ -25,6 +25,9 @@ const COLUMN_MAP = {
   'Date Filled': 'dispensed_date',
   'Primary Third Party PCN': 'insurance_pcn',
   'Patient Full Name Last then First': 'patient_name',
+  'Patient Full Name': 'patient_name',
+  'Patient First Name': 'patient_first_name',
+  'Patient Last Name': 'patient_last_name',
   'Patient Date of Birth': 'patient_dob',
   'Patient Age': 'patient_age',
   'Date Written': 'date_written',
@@ -46,6 +49,8 @@ const COLUMN_MAP = {
   'Primary Group Number': 'group_number',
   'Primary Network Reimbursement': 'insurance_pay',
   'Prescriber Full Name': 'prescriber_name',
+  'Prescriber First Name': 'prescriber_first_name',
+  'Prescriber Last Name': 'prescriber_last_name',
   'Prescriber Fax Number': 'prescriber_fax',
 
   // RX30 Format
@@ -298,17 +303,22 @@ async function ingestData(clientEmail, csvFilePath) {
   let skipped = 0;
 
   for (const row of rows) {
-    // Require drug info, but patient_name is optional if rx_number exists
-    if (!row.ndc || !row.drug_name) {
+    // Require drug name (NDC optional), patient_name is optional if rx_number exists
+    if (!row.drug_name) {
       skipped++;
       continue;
     }
-    if (!row.patient_name && !row.rx_number) {
+    // Build patient name from separate columns if needed
+    const patientName = row.patient_name ||
+      (row.patient_last_name && row.patient_first_name ? `${row.patient_last_name}, ${row.patient_first_name}` :
+       row.patient_last_name || row.patient_first_name || null);
+
+    if (!patientName && !row.rx_number) {
       skipped++;
       continue;
     }
 
-    const patientHash = generatePatientHash(row.patient_name, row.patient_dob || '', row.rx_number);
+    const patientHash = generatePatientHash(patientName, row.patient_dob || '', row.rx_number);
 
     if (patientMap.has(patientHash)) {
       // Merge conditions
@@ -316,9 +326,19 @@ async function ingestData(clientEmail, csvFilePath) {
       const newConditions = inferConditions(row.therapeutic_class);
       existing.conditions = [...new Set([...existing.conditions, ...newConditions])];
     } else {
-      const { firstName, lastName } = row.patient_name
-        ? parsePatientName(row.patient_name)
-        : { firstName: null, lastName: null };
+      // Use separate first/last columns if available, otherwise parse combined name
+      let firstName, lastName;
+      if (row.patient_first_name || row.patient_last_name) {
+        firstName = row.patient_first_name || null;
+        lastName = row.patient_last_name || null;
+      } else if (patientName) {
+        const parsed = parsePatientName(patientName);
+        firstName = parsed.firstName;
+        lastName = parsed.lastName;
+      } else {
+        firstName = null;
+        lastName = null;
+      }
       patientMap.set(patientHash, {
         patientId: uuidv4(),
         patientHash,
@@ -385,10 +405,16 @@ async function ingestData(clientEmail, csvFilePath) {
   let rxBatch = [];
 
   for (const row of rows) {
-    if (!row.ndc || !row.drug_name) continue;
-    if (!row.patient_name && !row.rx_number) continue;
+    if (!row.drug_name) continue;
 
-    const patientHash = generatePatientHash(row.patient_name, row.patient_dob || '', row.rx_number);
+    // Build patient name from separate columns if needed
+    const patientName = row.patient_name ||
+      (row.patient_last_name && row.patient_first_name ? `${row.patient_last_name}, ${row.patient_first_name}` :
+       row.patient_last_name || row.patient_first_name || null);
+
+    if (!patientName && !row.rx_number) continue;
+
+    const patientHash = generatePatientHash(patientName, row.patient_dob || '', row.rx_number);
     const patientId = hashToId.get(patientHash);
     if (!patientId) continue;
 
@@ -409,7 +435,7 @@ async function ingestData(clientEmail, csvFilePath) {
       patient_pay: parseAmount(row.patient_pay),
       insurance_pay: parseAmount(row.insurance_pay),
       acquisition_cost: parseAmount(row.acquisition_cost) || 0,
-      prescriber_name: row.prescriber_name,
+      prescriber_name: row.prescriber_name || (row.prescriber_first_name && row.prescriber_last_name ? `${row.prescriber_last_name}, ${row.prescriber_first_name}` : row.prescriber_last_name || row.prescriber_first_name || null),
       daw_code: row.daw_code,
       raw_data: JSON.stringify({
         therapeutic_class: row.therapeutic_class,
@@ -447,11 +473,19 @@ async function ingestData(clientEmail, csvFilePath) {
 
 // Helper function for batch prescription insert
 async function insertPrescriptionBatch(batch) {
+  // De-duplicate batch by (pharmacy_id, rx_number, dispensed_date) - keep last occurrence
+  const seen = new Map();
+  for (const rx of batch) {
+    const key = `${rx.pharmacy_id}|${rx.rx_number}|${rx.dispensed_date}`;
+    seen.set(key, rx);
+  }
+  const dedupedBatch = Array.from(seen.values());
+
   const values = [];
   const params = [];
   let paramIdx = 1;
 
-  for (const rx of batch) {
+  for (const rx of dedupedBatch) {
     values.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
     params.push(
       rx.prescription_id, rx.pharmacy_id, rx.patient_id, rx.rx_number, rx.ndc, rx.drug_name,

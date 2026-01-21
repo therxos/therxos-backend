@@ -698,6 +698,24 @@ async function scanAdminTriggers(pharmacyId) {
         if (!binAllowed) continue;
       }
 
+      // Check group_exclusions - if set, skip if patient's group is in the exclusion list
+      const groupExclusions = trigger.group_exclusions || [];
+      if (groupExclusions.length > 0) {
+        const patientGroup = (rx.insurance_group || '').toUpperCase();
+        const groupExcluded = groupExclusions.some(g => g.toUpperCase() === patientGroup);
+        if (groupExcluded) continue;
+      }
+
+      // Check contract_prefix_exclusions - if set, skip if patient's contract starts with excluded prefix
+      const contractPrefixExclusions = trigger.contract_prefix_exclusions || [];
+      if (contractPrefixExclusions.length > 0 && rx.contract_id) {
+        const contractId = rx.contract_id.toUpperCase();
+        const contractExcluded = contractPrefixExclusions.some(prefix =>
+          contractId.startsWith(prefix.toUpperCase())
+        );
+        if (contractExcluded) continue;
+      }
+
       // Check if_has_keywords - patient must have at least one of these drugs
       if (ifHasKeywords.length > 0) {
         const patientDrugs = patientDrugsMap.get(rx.patient_id) || [];

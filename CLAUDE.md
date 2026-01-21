@@ -4,7 +4,9 @@
 
 ## CRITICAL: STAGING-FIRST DEPLOYMENT WORKFLOW
 
-**ALWAYS deploy to staging first, test, then deploy to production. NEVER skip staging.**
+**ALWAYS deploy to staging first, then STOP and WAIT for user approval before deploying to production.**
+
+> **IMPORTANT FOR CLAUDE:** After deploying to staging, you MUST stop and tell the user the staging URL is ready for testing. Do NOT proceed to production deployment until the user explicitly confirms staging looks good. Deploying to staging and then immediately to production defeats the entire purpose of having a staging environment.
 
 ### Environment URLs
 
@@ -551,6 +553,7 @@ Statuses from V1 are stored in `v1_status` and `v1_notes` columns. The main `sta
 2. **NEVER delete worked opportunities** - Only delete opportunities with status = 'Not Submitted'
 3. **NEVER make changes without explicit request** - Don't "fix" or "improve" things that weren't asked for
 4. **NEVER change default values** without asking first (e.g., minMargin)
+5. **NEVER deploy to production without user approval** - After deploying to staging, STOP and WAIT for the user to test and explicitly approve before deploying to production. The staging step is useless if you immediately push to production without waiting.
 
 ---
 

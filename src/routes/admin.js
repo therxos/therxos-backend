@@ -692,6 +692,8 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
     const binValues = body.binValues || body.bin_values;
     const restrictions = body.restrictions;
     const binRestrictions = body.binRestrictions || body.bin_restrictions;
+    const groupExclusions = body.groupExclusions || body.group_exclusions;
+    const contractPrefixExclusions = body.contractPrefixExclusions || body.contract_prefix_exclusions;
 
     // Auto-generate clinical justification for therapeutic interchanges if not provided
     if (!clinicalRationale && triggerType === 'therapeutic_interchange' && recommendedDrug) {
@@ -717,14 +719,16 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
         trigger_code, display_name, trigger_type, category,
         detection_keywords, exclude_keywords, if_has_keywords, if_not_has_keywords,
         recommended_drug, recommended_ndc, action_instructions, clinical_rationale,
-        priority, annual_fills, default_gp_value, is_enabled, bin_restrictions
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        priority, annual_fills, default_gp_value, is_enabled, bin_restrictions,
+        group_exclusions, contract_prefix_exclusions
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING *
     `, [
       triggerCode, displayName, triggerType, category,
       detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
       recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
-      priority, annualFills, defaultGpValue, isEnabled, binRestrictions || null
+      priority, annualFills, defaultGpValue, isEnabled, binRestrictions || null,
+      groupExclusions || null, contractPrefixExclusions || null
     ]);
 
     const triggerId = result.rows[0].trigger_id;
@@ -784,6 +788,8 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
     const binValues = body.binValues || body.bin_values;
     const restrictions = body.restrictions;
     const binRestrictions = body.binRestrictions || body.bin_restrictions;
+    const groupExclusions = body.groupExclusions || body.group_exclusions;
+    const contractPrefixExclusions = body.contractPrefixExclusions || body.contract_prefix_exclusions;
 
     // Update trigger
     const result = await db.query(`
@@ -805,14 +811,17 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
         default_gp_value = $15,
         is_enabled = COALESCE($16, is_enabled),
         bin_restrictions = $17,
+        group_exclusions = $18,
+        contract_prefix_exclusions = $19,
         updated_at = NOW()
-      WHERE trigger_id = $18
+      WHERE trigger_id = $20
       RETURNING *
     `, [
       triggerCode, displayName, triggerType, category,
       detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
       recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
-      priority, annualFills, defaultGpValue, isEnabled, binRestrictions || null, id
+      priority, annualFills, defaultGpValue, isEnabled, binRestrictions || null,
+      groupExclusions || null, contractPrefixExclusions || null, id
     ]);
 
     if (result.rows.length === 0) {

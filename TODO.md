@@ -4,6 +4,14 @@ Running list of features, fixes, and improvements. Updated each session.
 
 ---
 
+## DEPLOYMENT RULE (FOR CLAUDE)
+
+**After deploying to staging, STOP and WAIT for user approval before deploying to production.**
+
+Do NOT automatically push to production after staging. The user needs time to test the staging deployment and confirm it's working before going live. Only deploy to production when the user explicitly says to proceed.
+
+---
+
 ## High Priority
 
 ### Demo & Marketing
