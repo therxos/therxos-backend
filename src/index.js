@@ -40,7 +40,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
 
     const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) ||
-      ['http://localhost:3000', 'https://therxos.com', 'https://www.therxos.com', 'https://beta.therxos.com'];
+      ['http://localhost:3000', 'https://therxos.com', 'https://www.therxos.com', 'https://beta.therxos.com', 'https://staging.therxos.com'];
 
     // Check if origin matches allowed list (also handle www/non-www variants)
     const isAllowed = allowedOrigins.some(allowed => {
