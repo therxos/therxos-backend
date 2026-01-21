@@ -2922,7 +2922,13 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
       clientName,
       pharmacyName,
       pharmacyNpi,
+      pharmacyNcpdp,
       pharmacyState,
+      pharmacyAddress,
+      pharmacyCity,
+      pharmacyZip,
+      pharmacyPhone,
+      pharmacyFax,
       adminEmail,
       adminFirstName,
       adminLastName,
@@ -3000,14 +3006,20 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
 
       // Create pharmacy (trim state to 2 chars, NPI to 10)
       await txClient.query(`
-        INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, pharmacy_npi, state, pms_system, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, pharmacy_npi, ncpdp, state, address, city, zip, phone, fax, pms_system, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
       `, [
         pharmacyId,
         clientId,
         pharmacyName || clientName,
         pharmacyNpi ? pharmacyNpi.slice(0, 10) : null,
+        pharmacyNcpdp ? pharmacyNcpdp.slice(0, 7) : null,
         pharmacyState ? pharmacyState.slice(0, 2).toUpperCase() : null,
+        pharmacyAddress || null,
+        pharmacyCity || null,
+        pharmacyZip || null,
+        pharmacyPhone || null,
+        pharmacyFax || null,
         pmsSystem || null
       ]);
 
