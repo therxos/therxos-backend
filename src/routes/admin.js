@@ -3055,6 +3055,109 @@ router.post('/clients', authenticateToken, requireSuperAdmin, async (req, res) =
 });
 
 
+// POST /api/admin/clients/:clientId/pharmacies - Add a new pharmacy/store to an existing client
+router.post('/clients/:clientId/pharmacies', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const {
+      pharmacyName,
+      pharmacyNpi,
+      pharmacyNcpdp,
+      pharmacyState,
+      pharmacyAddress,
+      pharmacyCity,
+      pharmacyZip,
+      pharmacyPhone,
+      pharmacyFax,
+      pmsSystem,
+      adminEmail,
+      adminFirstName,
+      adminLastName
+    } = req.body;
+
+    // Verify client exists
+    const clientResult = await db.query(
+      'SELECT client_id, client_name FROM clients WHERE client_id = $1',
+      [clientId]
+    );
+    if (clientResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+    const client = clientResult.rows[0];
+
+    // Validate required fields
+    if (!pharmacyName) {
+      return res.status(400).json({ error: 'Pharmacy name is required' });
+    }
+
+    // Generate IDs
+    const pharmacyId = uuidv4();
+
+    // Create pharmacy
+    await db.query(`
+      INSERT INTO pharmacies (pharmacy_id, client_id, pharmacy_name, pharmacy_npi, ncpdp, state, address, city, zip, phone, fax, pms_system, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+    `, [
+      pharmacyId,
+      clientId,
+      pharmacyName,
+      pharmacyNpi ? pharmacyNpi.slice(0, 10) : null,
+      pharmacyNcpdp ? pharmacyNcpdp.slice(0, 7) : null,
+      pharmacyState ? pharmacyState.slice(0, 2).toUpperCase() : null,
+      pharmacyAddress || null,
+      pharmacyCity || null,
+      pharmacyZip || null,
+      pharmacyPhone || null,
+      pharmacyFax || null,
+      pmsSystem || null
+    ]);
+
+    // Optionally create admin user for this pharmacy if email provided
+    let credentials = null;
+    if (adminEmail) {
+      // Check if email already exists
+      const existingUser = await db.query(
+        'SELECT user_id FROM users WHERE email = $1',
+        [adminEmail.toLowerCase()]
+      );
+      if (existingUser.rows.length > 0) {
+        return res.status(400).json({ error: 'A user with this email already exists' });
+      }
+
+      const userId = uuidv4();
+      const tempPassword = uuidv4().slice(0, 12);
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+      await db.query(`
+        INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin', true, true, NOW())
+      `, [userId, clientId, pharmacyId, adminEmail.toLowerCase(), passwordHash, adminFirstName || 'Admin', adminLastName || '']);
+
+      credentials = {
+        email: adminEmail.toLowerCase(),
+        temporaryPassword: tempPassword
+      };
+    }
+
+    console.log('New pharmacy added to client:', { clientId, clientName: client.client_name, pharmacyId, pharmacyName });
+
+    res.status(201).json({
+      success: true,
+      pharmacy: {
+        pharmacyId,
+        pharmacyName,
+        clientId,
+        clientName: client.client_name
+      },
+      credentials
+    });
+  } catch (error) {
+    console.error('Error adding pharmacy to client:', error);
+    res.status(500).json({ error: 'Failed to add pharmacy: ' + error.message });
+  }
+});
+
+
 // POST /api/admin/triggers/verify-all-coverage - Scan coverage for ALL triggers at once
 // For NDC optimization triggers: finds BEST reimbursing product per BIN/Group
 // For other triggers: verifies recommended drug exists with good margin
