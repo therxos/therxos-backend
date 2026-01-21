@@ -10,6 +10,7 @@ import { ROLES } from '../utils/permissions.js';
 import auditScanner from '../services/audit-scanner.js';
 import { generateOnboardingDocuments } from '../services/documentGenerator.js';
 import { sendWelcomeEmail } from '../services/emailService.js';
+import { generateClinicalJustification, generateJustificationsForTriggers } from '../services/clinicalJustificationService.js';
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
@@ -683,7 +684,7 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
     const recommendedDrug = body.recommendedDrug || body.recommended_drug;
     const recommendedNdc = body.recommendedNdc || body.recommended_ndc;
     const actionInstructions = body.actionInstructions || body.action_instructions;
-    const clinicalRationale = body.clinicalRationale || body.clinical_rationale;
+    let clinicalRationale = body.clinicalRationale || body.clinical_rationale;
     const priority = body.priority || 'medium';
     const annualFills = body.annualFills || body.annual_fills || 12;
     const defaultGpValue = body.defaultGpValue || body.default_gp_value;
@@ -691,6 +692,24 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
     const binValues = body.binValues || body.bin_values;
     const restrictions = body.restrictions;
     const binRestrictions = body.binRestrictions || body.bin_restrictions;
+
+    // Auto-generate clinical justification for therapeutic interchanges if not provided
+    if (!clinicalRationale && triggerType === 'therapeutic_interchange' && recommendedDrug) {
+      try {
+        console.log(`Auto-generating clinical justification for new trigger: ${displayName}`);
+        clinicalRationale = await generateClinicalJustification({
+          display_name: displayName,
+          trigger_type: triggerType,
+          category,
+          detection_keywords: detectionKeywords,
+          recommended_drug: recommendedDrug
+        });
+        console.log(`Generated justification: ${clinicalRationale.substring(0, 100)}...`);
+      } catch (genError) {
+        console.warn('Failed to auto-generate clinical justification:', genError.message);
+        // Continue without justification - not a critical error
+      }
+    }
 
     // Insert trigger
     const result = await db.query(`
@@ -3154,6 +3173,130 @@ router.post('/clients/:clientId/pharmacies', authenticateToken, requireSuperAdmi
   } catch (error) {
     console.error('Error adding pharmacy to client:', error);
     res.status(500).json({ error: 'Failed to add pharmacy: ' + error.message });
+  }
+});
+
+
+// POST /api/admin/triggers/generate-all-justifications - Generate clinical justifications for all triggers
+router.post('/triggers/generate-all-justifications', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { overwrite = false, triggerType = 'therapeutic_interchange' } = req.body;
+
+    // Get triggers that need justifications
+    let query = `
+      SELECT trigger_id, display_name, trigger_type, category, detection_keywords, recommended_drug, clinical_rationale
+      FROM triggers
+      WHERE trigger_type = $1
+    `;
+    const params = [triggerType];
+
+    if (!overwrite) {
+      query += ` AND (clinical_rationale IS NULL OR clinical_rationale = '')`;
+    }
+
+    query += ` ORDER BY display_name`;
+
+    const triggersResult = await db.query(query, params);
+    const triggers = triggersResult.rows;
+
+    if (triggers.length === 0) {
+      return res.json({
+        success: true,
+        message: overwrite
+          ? 'No triggers found of the specified type'
+          : 'All triggers already have clinical justifications',
+        processed: 0,
+        succeeded: 0,
+        failed: 0
+      });
+    }
+
+    console.log(`Generating clinical justifications for ${triggers.length} triggers...`);
+
+    // Generate justifications
+    const results = await generateJustificationsForTriggers(triggers, (current, total, trigger) => {
+      console.log(`[${current}/${total}] Processing: ${trigger.display_name}`);
+    });
+
+    // Update successful ones in database
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const result of results) {
+      if (result.success) {
+        await db.query(
+          `UPDATE triggers SET clinical_rationale = $1, updated_at = NOW() WHERE trigger_id = $2`,
+          [result.justification, result.trigger_id]
+        );
+        succeeded++;
+        console.log(`  Updated: ${result.display_name}`);
+      } else {
+        failed++;
+        console.error(`  Failed: ${result.display_name} - ${result.error}`);
+      }
+    }
+
+    console.log(`Completed: ${succeeded} succeeded, ${failed} failed`);
+
+    res.json({
+      success: true,
+      processed: triggers.length,
+      succeeded,
+      failed,
+      results: results.map(r => ({
+        trigger_id: r.trigger_id,
+        display_name: r.display_name,
+        success: r.success,
+        error: r.error
+      }))
+    });
+  } catch (error) {
+    console.error('Generate all justifications error:', error);
+    res.status(500).json({ error: 'Failed to generate justifications: ' + error.message });
+  }
+});
+
+
+// POST /api/admin/triggers/:triggerId/generate-justification - Generate clinical justification for a single trigger
+router.post('/triggers/:triggerId/generate-justification', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { triggerId } = req.params;
+
+    // Get trigger
+    const triggerResult = await db.query(
+      `SELECT trigger_id, display_name, trigger_type, category, detection_keywords, recommended_drug
+       FROM triggers WHERE trigger_id = $1`,
+      [triggerId]
+    );
+
+    if (triggerResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    const trigger = triggerResult.rows[0];
+
+    console.log(`Generating clinical justification for: ${trigger.display_name}`);
+
+    // Generate justification
+    const justification = await generateClinicalJustification(trigger);
+
+    // Update in database
+    await db.query(
+      `UPDATE triggers SET clinical_rationale = $1, updated_at = NOW() WHERE trigger_id = $2`,
+      [justification, triggerId]
+    );
+
+    console.log(`Updated clinical rationale for: ${trigger.display_name}`);
+
+    res.json({
+      success: true,
+      trigger_id: triggerId,
+      display_name: trigger.display_name,
+      clinical_rationale: justification
+    });
+  } catch (error) {
+    console.error('Generate justification error:', error);
+    res.status(500).json({ error: 'Failed to generate justification: ' + error.message });
   }
 });
 
