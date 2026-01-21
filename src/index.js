@@ -39,8 +39,17 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
 
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) ||
-      ['http://localhost:3000', 'https://therxos.com', 'https://www.therxos.com', 'https://beta.therxos.com', 'https://staging.therxos.com'];
+    // Always allow these core domains
+    const coreOrigins = [
+      'http://localhost:3000',
+      'https://therxos.com',
+      'https://www.therxos.com',
+      'https://beta.therxos.com',
+      'https://staging.therxos.com'
+    ];
+    // Merge with any additional origins from env var
+    const envOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [];
+    const allowedOrigins = [...new Set([...coreOrigins, ...envOrigins])];
 
     // Check if origin matches allowed list (also handle www/non-www variants)
     const isAllowed = allowedOrigins.some(allowed => {
