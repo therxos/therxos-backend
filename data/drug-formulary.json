@@ -1,0 +1,2653 @@
+{
+  "version": "1.0",
+  "created": "2026-01-23",
+  "description": "Top 10 most-filled drug classes with all known variations",
+  "drug_classes": [
+    {
+      "rank": 1,
+      "class_name": "Statins (HMG-CoA Reductase Inhibitors)",
+      "therapeutic_category": "Cardiovascular - Antihyperlipidemic",
+      "common_conditions": [
+        "High Cholesterol",
+        "Hyperlipidemia",
+        "Cardiovascular Disease Prevention"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Atorvastatin",
+          "brand_names": [
+            "Lipitor"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "40mg",
+            "80mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 4,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 66,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Rosuvastatin",
+          "brand_names": [
+            "Crestor",
+            "Ezallor Sprinkle"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg",
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Sprinkle Capsule"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 69,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Simvastatin",
+          "brand_names": [
+            "Zocor",
+            "FloLipid"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg",
+            "20mg",
+            "40mg",
+            "80mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Oral Suspension"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.8,
+            "prior_auth_rate": 1,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 70,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Pravastatin",
+          "brand_names": [
+            "Pravachol"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "40mg",
+            "80mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 66,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Lovastatin",
+          "brand_names": [
+            "Mevacor",
+            "Altoprev"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "40mg",
+            "60mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Extended-Release Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Fluvastatin",
+          "brand_names": [
+            "Lescol",
+            "Lescol XL"
+          ],
+          "strengths": [
+            "20mg",
+            "40mg",
+            "80mg"
+          ],
+          "common_forms": [
+            "Capsule",
+            "Extended-Release Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Pitavastatin",
+          "brand_names": [
+            "Livalo",
+            "Zypitamag"
+          ],
+          "strengths": [
+            "1mg",
+            "2mg",
+            "4mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        }
+      ],
+      "combination_products": [
+        {
+          "generic_name": "Atorvastatin-Ezetimibe",
+          "brand_names": [
+            "Liptruzet"
+          ],
+          "strengths": [
+            "10/10mg",
+            "20/10mg",
+            "40/10mg",
+            "80/10mg"
+          ]
+        },
+        {
+          "generic_name": "Simvastatin-Ezetimibe",
+          "brand_names": [
+            "Vytorin"
+          ],
+          "strengths": [
+            "10/10mg",
+            "10/20mg",
+            "10/40mg",
+            "10/80mg"
+          ]
+        },
+        {
+          "generic_name": "Atorvastatin-Amlodipine",
+          "brand_names": [
+            "Caduet"
+          ],
+          "strengths": [
+            "10/2.5mg",
+            "10/5mg",
+            "10/10mg",
+            "20/2.5mg",
+            "20/5mg",
+            "20/10mg",
+            "40/5mg",
+            "40/10mg",
+            "80/5mg",
+            "80/10mg"
+          ]
+        },
+        {
+          "generic_name": "Rosuvastatin-Ezetimibe",
+          "brand_names": [
+            "Roszet"
+          ],
+          "strengths": [
+            "5/10mg",
+            "10/10mg",
+            "20/10mg"
+          ]
+        }
+      ],
+      "cms_summary": {
+        "drugs_with_data": 4,
+        "avg_prior_auth_rate": 0,
+        "avg_step_therapy_rate": 0,
+        "avg_quantity_limit_rate": 68,
+        "avg_tier": 1.8
+      }
+    },
+    {
+      "rank": 2,
+      "class_name": "ACE Inhibitors",
+      "therapeutic_category": "Cardiovascular - Antihypertensive",
+      "common_conditions": [
+        "Hypertension",
+        "Heart Failure",
+        "Diabetic Nephropathy",
+        "Post-MI"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Lisinopril",
+          "brand_names": [
+            "Zestril",
+            "Prinivil",
+            "Qbrelis"
+          ],
+          "strengths": [
+            "2.5mg",
+            "5mg",
+            "10mg",
+            "20mg",
+            "30mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Oral Solution"
+          ],
+          "cms_coverage": {
+            "ndc_count": 6,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 3,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Enalapril",
+          "brand_names": [
+            "Vasotec",
+            "Epaned"
+          ],
+          "strengths": [
+            "2.5mg",
+            "5mg",
+            "10mg",
+            "20mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Oral Solution"
+          ],
+          "cms_coverage": {
+            "ndc_count": 3,
+            "average_tier": 1.9,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 3,
+            "quantity_limit_rate": 7,
+            "common_quantity_limit": "1200.00/30d"
+          }
+        },
+        {
+          "generic_name": "Ramipril",
+          "brand_names": [
+            "Altace"
+          ],
+          "strengths": [
+            "1.25mg",
+            "2.5mg",
+            "5mg",
+            "10mg"
+          ],
+          "common_forms": [
+            "Capsule"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 2,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Benazepril",
+          "brand_names": [
+            "Lotensin"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg",
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 2,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Quinapril",
+          "brand_names": [
+            "Accupril"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg",
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Fosinopril",
+          "brand_names": [
+            "Monopril"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Captopril",
+          "brand_names": [
+            "Capoten"
+          ],
+          "strengths": [
+            "12.5mg",
+            "25mg",
+            "50mg",
+            "100mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Trandolapril",
+          "brand_names": [
+            "Mavik"
+          ],
+          "strengths": [
+            "1mg",
+            "2mg",
+            "4mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Perindopril",
+          "brand_names": [
+            "Aceon"
+          ],
+          "strengths": [
+            "2mg",
+            "4mg",
+            "8mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Moexipril",
+          "brand_names": [
+            "Univasc"
+          ],
+          "strengths": [
+            "7.5mg",
+            "15mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        }
+      ],
+      "combination_products": [
+        {
+          "generic_name": "Lisinopril-Hydrochlorothiazide",
+          "brand_names": [
+            "Zestoretic",
+            "Prinzide"
+          ],
+          "strengths": [
+            "10/12.5mg",
+            "20/12.5mg",
+            "20/25mg"
+          ]
+        },
+        {
+          "generic_name": "Enalapril-Hydrochlorothiazide",
+          "brand_names": [
+            "Vaseretic"
+          ],
+          "strengths": [
+            "5/12.5mg",
+            "10/25mg"
+          ]
+        },
+        {
+          "generic_name": "Benazepril-Hydrochlorothiazide",
+          "brand_names": [
+            "Lotensin HCT"
+          ],
+          "strengths": [
+            "5/6.25mg",
+            "10/12.5mg",
+            "20/12.5mg",
+            "20/25mg"
+          ]
+        },
+        {
+          "generic_name": "Benazepril-Amlodipine",
+          "brand_names": [
+            "Lotrel"
+          ],
+          "strengths": [
+            "2.5/10mg",
+            "5/10mg",
+            "5/20mg",
+            "5/40mg",
+            "10/20mg",
+            "10/40mg"
+          ]
+        }
+      ],
+      "cms_summary": {
+        "drugs_with_data": 4,
+        "avg_prior_auth_rate": 0,
+        "avg_step_therapy_rate": 1,
+        "avg_quantity_limit_rate": 4,
+        "avg_tier": 1.8
+      }
+    },
+    {
+      "rank": 3,
+      "class_name": "ARBs (Angiotensin II Receptor Blockers)",
+      "therapeutic_category": "Cardiovascular - Antihypertensive",
+      "common_conditions": [
+        "Hypertension",
+        "Heart Failure",
+        "Diabetic Nephropathy",
+        "ACE Inhibitor Intolerance"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Losartan",
+          "brand_names": [
+            "Cozaar"
+          ],
+          "strengths": [
+            "25mg",
+            "50mg",
+            "100mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 3,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 33,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Valsartan",
+          "brand_names": [
+            "Diovan"
+          ],
+          "strengths": [
+            "40mg",
+            "80mg",
+            "160mg",
+            "320mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Irbesartan",
+          "brand_names": [
+            "Avapro"
+          ],
+          "strengths": [
+            "75mg",
+            "150mg",
+            "300mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 3,
+            "average_tier": 1.9,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 50,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Olmesartan",
+          "brand_names": [
+            "Benicar"
+          ],
+          "strengths": [
+            "5mg",
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.9,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 52,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Telmisartan",
+          "brand_names": [
+            "Micardis"
+          ],
+          "strengths": [
+            "20mg",
+            "40mg",
+            "80mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 3,
+            "average_tier": 1.9,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 51,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Candesartan",
+          "brand_names": [
+            "Atacand"
+          ],
+          "strengths": [
+            "4mg",
+            "8mg",
+            "16mg",
+            "32mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 2,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 49,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Eprosartan",
+          "brand_names": [
+            "Teveten"
+          ],
+          "strengths": [
+            "400mg",
+            "600mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Azilsartan",
+          "brand_names": [
+            "Edarbi"
+          ],
+          "strengths": [
+            "40mg",
+            "80mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        }
+      ],
+      "combination_products": [
+        {
+          "generic_name": "Losartan-Hydrochlorothiazide",
+          "brand_names": [
+            "Hyzaar"
+          ],
+          "strengths": [
+            "50/12.5mg",
+            "100/12.5mg",
+            "100/25mg"
+          ]
+        },
+        {
+          "generic_name": "Valsartan-Hydrochlorothiazide",
+          "brand_names": [
+            "Diovan HCT"
+          ],
+          "strengths": [
+            "80/12.5mg",
+            "160/12.5mg",
+            "160/25mg",
+            "320/12.5mg",
+            "320/25mg"
+          ]
+        },
+        {
+          "generic_name": "Irbesartan-Hydrochlorothiazide",
+          "brand_names": [
+            "Avalide"
+          ],
+          "strengths": [
+            "150/12.5mg",
+            "300/12.5mg",
+            "300/25mg"
+          ]
+        },
+        {
+          "generic_name": "Olmesartan-Hydrochlorothiazide",
+          "brand_names": [
+            "Benicar HCT"
+          ],
+          "strengths": [
+            "20/12.5mg",
+            "40/12.5mg",
+            "40/25mg"
+          ]
+        },
+        {
+          "generic_name": "Telmisartan-Hydrochlorothiazide",
+          "brand_names": [
+            "Micardis HCT"
+          ],
+          "strengths": [
+            "40/12.5mg",
+            "80/12.5mg",
+            "80/25mg"
+          ]
+        },
+        {
+          "generic_name": "Olmesartan-Amlodipine",
+          "brand_names": [
+            "Azor"
+          ],
+          "strengths": [
+            "20/5mg",
+            "20/10mg",
+            "40/5mg",
+            "40/10mg"
+          ]
+        },
+        {
+          "generic_name": "Valsartan-Amlodipine",
+          "brand_names": [
+            "Exforge"
+          ],
+          "strengths": [
+            "5/160mg",
+            "10/160mg",
+            "5/320mg",
+            "10/320mg"
+          ]
+        },
+        {
+          "generic_name": "Olmesartan-Amlodipine-Hydrochlorothiazide",
+          "brand_names": [
+            "Tribenzor"
+          ],
+          "strengths": [
+            "20/5/12.5mg",
+            "40/5/12.5mg",
+            "40/5/25mg",
+            "40/10/12.5mg",
+            "40/10/25mg"
+          ]
+        },
+        {
+          "generic_name": "Valsartan-Amlodipine-Hydrochlorothiazide",
+          "brand_names": [
+            "Exforge HCT"
+          ],
+          "strengths": [
+            "5/160/12.5mg",
+            "10/160/12.5mg",
+            "5/160/25mg",
+            "10/160/25mg",
+            "10/320/25mg"
+          ]
+        },
+        {
+          "generic_name": "Valsartan-Sacubitril",
+          "brand_names": [
+            "Entresto"
+          ],
+          "strengths": [
+            "24/26mg",
+            "49/51mg",
+            "97/103mg"
+          ]
+        }
+      ],
+      "cms_summary": {
+        "drugs_with_data": 5,
+        "avg_prior_auth_rate": 0,
+        "avg_step_therapy_rate": 0,
+        "avg_quantity_limit_rate": 47,
+        "avg_tier": 1.9
+      }
+    },
+    {
+      "rank": 4,
+      "class_name": "Proton Pump Inhibitors (PPIs)",
+      "therapeutic_category": "Gastrointestinal - Acid Suppressant",
+      "common_conditions": [
+        "GERD",
+        "Peptic Ulcer Disease",
+        "H. pylori Eradication",
+        "Erosive Esophagitis",
+        "Zollinger-Ellison Syndrome"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Omeprazole",
+          "brand_names": [
+            "Prilosec",
+            "Prilosec OTC"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Delayed-Release Capsule",
+            "Oral Suspension",
+            "Powder for Suspension"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 1.2,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 47,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Esomeprazole",
+          "brand_names": [
+            "Nexium",
+            "Nexium 24HR"
+          ],
+          "strengths": [
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Delayed-Release Capsule",
+            "Granules",
+            "IV"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Pantoprazole",
+          "brand_names": [
+            "Protonix"
+          ],
+          "strengths": [
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Delayed-Release Tablet",
+            "Granules",
+            "IV"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.2,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 62,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Lansoprazole",
+          "brand_names": [
+            "Prevacid",
+            "Prevacid 24HR"
+          ],
+          "strengths": [
+            "15mg",
+            "30mg"
+          ],
+          "common_forms": [
+            "Delayed-Release Capsule",
+            "Orally Disintegrating Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 82,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Rabeprazole",
+          "brand_names": [
+            "Aciphex",
+            "Aciphex Sprinkle"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg",
+            "20mg"
+          ],
+          "common_forms": [
+            "Delayed-Release Tablet",
+            "Sprinkle Capsule"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 2,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 78,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Dexlansoprazole",
+          "brand_names": [
+            "Dexilant"
+          ],
+          "strengths": [
+            "30mg",
+            "60mg"
+          ],
+          "common_forms": [
+            "Delayed-Release Capsule"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 3,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 13,
+            "quantity_limit_rate": 88,
+            "common_quantity_limit": "30.00/30d"
+          }
+        }
+      ],
+      "combination_products": [
+        {
+          "generic_name": "Omeprazole-Sodium Bicarbonate",
+          "brand_names": [
+            "Zegerid",
+            "Zegerid OTC"
+          ],
+          "strengths": [
+            "20/1100mg",
+            "40/1100mg"
+          ]
+        },
+        {
+          "generic_name": "Esomeprazole-Naproxen",
+          "brand_names": [
+            "Vimovo"
+          ],
+          "strengths": [
+            "20/375mg",
+            "20/500mg"
+          ]
+        }
+      ],
+      "cms_summary": {
+        "drugs_with_data": 5,
+        "avg_prior_auth_rate": 0,
+        "avg_step_therapy_rate": 3,
+        "avg_quantity_limit_rate": 71,
+        "avg_tier": 1.8
+      }
+    },
+    {
+      "rank": 5,
+      "class_name": "Beta Blockers",
+      "therapeutic_category": "Cardiovascular - Antihypertensive/Antiarrhythmic",
+      "common_conditions": [
+        "Hypertension",
+        "Heart Failure",
+        "Angina",
+        "Arrhythmia",
+        "Post-MI",
+        "Migraine Prevention"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Metoprolol Succinate",
+          "brand_names": [
+            "Toprol-XL",
+            "Kapspargo Sprinkle"
+          ],
+          "strengths": [
+            "25mg",
+            "50mg",
+            "100mg",
+            "200mg"
+          ],
+          "common_forms": [
+            "Extended-Release Tablet",
+            "Sprinkle Capsule"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Metoprolol Tartrate",
+          "brand_names": [
+            "Lopressor"
+          ],
+          "strengths": [
+            "25mg",
+            "37.5mg",
+            "50mg",
+            "75mg",
+            "100mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "IV"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Carvedilol",
+          "brand_names": [
+            "Coreg",
+            "Coreg CR"
+          ],
+          "strengths": [
+            "3.125mg",
+            "6.25mg",
+            "12.5mg",
+            "25mg",
+            "10mg CR",
+            "20mg CR",
+            "40mg CR",
+            "80mg CR"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Extended-Release Capsule"
+          ],
+          "cms_coverage": {
+            "ndc_count": 4,
+            "average_tier": 1.1,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 0,
+            "common_quantity_limit": null
+          }
+        },
+        {
+          "generic_name": "Atenolol",
+          "brand_names": [
+            "Tenormin"
+          ],
+          "strengths": [
+            "25mg",
+            "50mg",
+            "100mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.1,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 0,
+            "common_quantity_limit": null
+          }
+        },
+        {
+          "generic_name": "Bisoprolol",
+          "brand_names": [
+            "Zebeta"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 1.6,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 0,
+            "common_quantity_limit": null
+          }
+        },
+        {
+          "generic_name": "Propranolol",
+          "brand_names": [
+            "Inderal",
+            "Inderal LA",
+            "InnoPran XL",
+            "Hemangeol"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "40mg",
+            "60mg",
+            "80mg",
+            "120mg",
+            "160mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Extended-Release Capsule",
+            "Oral Solution"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.9,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 0,
+            "common_quantity_limit": null
+          }
+        },
+        {
+          "generic_name": "Nebivolol",
+          "brand_names": [
+            "Bystolic"
+          ],
+          "strengths": [
+            "2.5mg",
+            "5mg",
+            "10mg",
+            "20mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 2.2,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 37,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Labetalol",
+          "brand_names": [
+            "Trandate"
+          ],
+          "strengths": [
+            "100mg",
+            "200mg",
+            "300mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "IV"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Nadolol",
+          "brand_names": [
+            "Corgard"
+          ],
+          "strengths": [
+            "20mg",
+            "40mg",
+            "80mg",
+            "120mg",
+            "160mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Sotalol",
+          "brand_names": [
+            "Betapace",
+            "Betapace AF",
+            "Sotylize"
+          ],
+          "strengths": [
+            "80mg",
+            "120mg",
+            "160mg",
+            "240mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Oral Solution"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 1.6,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 0,
+            "common_quantity_limit": null
+          }
+        },
+        {
+          "generic_name": "Pindolol",
+          "brand_names": [
+            "Visken"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 2.1,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 0,
+            "common_quantity_limit": null
+          }
+        },
+        {
+          "generic_name": "Acebutolol",
+          "brand_names": [
+            "Sectral"
+          ],
+          "strengths": [
+            "200mg",
+            "400mg"
+          ],
+          "common_forms": [
+            "Capsule"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Betaxolol",
+          "brand_names": [
+            "Kerlone"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 2,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 0,
+            "common_quantity_limit": null
+          }
+        }
+      ],
+      "combination_products": [
+        {
+          "generic_name": "Atenolol-Chlorthalidone",
+          "brand_names": [
+            "Tenoretic"
+          ],
+          "strengths": [
+            "50/25mg",
+            "100/25mg"
+          ]
+        },
+        {
+          "generic_name": "Bisoprolol-Hydrochlorothiazide",
+          "brand_names": [
+            "Ziac"
+          ],
+          "strengths": [
+            "2.5/6.25mg",
+            "5/6.25mg",
+            "10/6.25mg"
+          ]
+        },
+        {
+          "generic_name": "Metoprolol-Hydrochlorothiazide",
+          "brand_names": [
+            "Lopressor HCT"
+          ],
+          "strengths": [
+            "50/25mg",
+            "100/25mg",
+            "100/50mg"
+          ]
+        },
+        {
+          "generic_name": "Propranolol-Hydrochlorothiazide",
+          "brand_names": [
+            "Inderide"
+          ],
+          "strengths": [
+            "40/25mg",
+            "80/25mg"
+          ]
+        }
+      ],
+      "cms_summary": {
+        "drugs_with_data": 8,
+        "avg_prior_auth_rate": 0,
+        "avg_step_therapy_rate": 0,
+        "avg_quantity_limit_rate": 5,
+        "avg_tier": 1.7
+      }
+    },
+    {
+      "rank": 6,
+      "class_name": "SSRIs (Selective Serotonin Reuptake Inhibitors)",
+      "therapeutic_category": "Psychiatric - Antidepressant",
+      "common_conditions": [
+        "Major Depressive Disorder",
+        "Generalized Anxiety Disorder",
+        "Panic Disorder",
+        "OCD",
+        "PTSD",
+        "Social Anxiety Disorder"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Sertraline",
+          "brand_names": [
+            "Zoloft"
+          ],
+          "strengths": [
+            "25mg",
+            "50mg",
+            "100mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Oral Concentrate"
+          ],
+          "cms_coverage": {
+            "ndc_count": 4,
+            "average_tier": 1.1,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 35,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Escitalopram",
+          "brand_names": [
+            "Lexapro"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg",
+            "20mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Oral Solution"
+          ],
+          "cms_coverage": {
+            "ndc_count": 3,
+            "average_tier": 1.2,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 39,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Fluoxetine",
+          "brand_names": [
+            "Prozac",
+            "Prozac Weekly",
+            "Sarafem"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "40mg",
+            "60mg",
+            "90mg"
+          ],
+          "common_forms": [
+            "Capsule",
+            "Tablet",
+            "Delayed-Release Capsule",
+            "Oral Solution"
+          ],
+          "cms_coverage": {
+            "ndc_count": 3,
+            "average_tier": 1.1,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 36,
+            "common_quantity_limit": "120.00/30d"
+          }
+        },
+        {
+          "generic_name": "Citalopram",
+          "brand_names": [
+            "Celexa"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Oral Solution"
+          ],
+          "cms_coverage": {
+            "ndc_count": 4,
+            "average_tier": 1,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 52,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Paroxetine",
+          "brand_names": [
+            "Paxil",
+            "Paxil CR",
+            "Pexeva",
+            "Brisdelle"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "30mg",
+            "40mg",
+            "12.5mg CR",
+            "25mg CR",
+            "37.5mg CR",
+            "7.5mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Controlled-Release Tablet",
+            "Oral Suspension",
+            "Capsule"
+          ],
+          "cms_coverage": {
+            "ndc_count": 3,
+            "average_tier": 1.5,
+            "prior_auth_rate": 10,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 42,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Fluvoxamine",
+          "brand_names": [
+            "Luvox",
+            "Luvox CR"
+          ],
+          "strengths": [
+            "25mg",
+            "50mg",
+            "100mg",
+            "100mg CR",
+            "150mg CR"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Extended-Release Capsule"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 1.9,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 31,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Vilazodone",
+          "brand_names": [
+            "Viibryd"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 2.6,
+            "prior_auth_rate": 15,
+            "step_therapy_rate": 2,
+            "quantity_limit_rate": 93,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Vortioxetine",
+          "brand_names": [
+            "Trintellix"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg",
+            "20mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        }
+      ],
+      "combination_products": [
+        {
+          "generic_name": "Fluoxetine-Olanzapine",
+          "brand_names": [
+            "Symbyax"
+          ],
+          "strengths": [
+            "3/25mg",
+            "6/25mg",
+            "6/50mg",
+            "12/25mg",
+            "12/50mg"
+          ]
+        },
+        {
+          "generic_name": "Dextromethorphan-Bupropion",
+          "brand_names": [
+            "Auvelity"
+          ],
+          "strengths": [
+            "45/105mg"
+          ]
+        }
+      ],
+      "cms_summary": {
+        "drugs_with_data": 7,
+        "avg_prior_auth_rate": 4,
+        "avg_step_therapy_rate": 0,
+        "avg_quantity_limit_rate": 47,
+        "avg_tier": 1.5
+      }
+    },
+    {
+      "rank": 7,
+      "class_name": "Biguanides & Oral Antidiabetics",
+      "therapeutic_category": "Endocrine - Antidiabetic",
+      "common_conditions": [
+        "Type 2 Diabetes Mellitus",
+        "Prediabetes",
+        "PCOS"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Metformin",
+          "brand_names": [
+            "Glucophage",
+            "Glucophage XR",
+            "Fortamet",
+            "Glumetza",
+            "Riomet"
+          ],
+          "strengths": [
+            "500mg",
+            "750mg",
+            "850mg",
+            "1000mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Extended-Release Tablet",
+            "Oral Solution"
+          ],
+          "cms_coverage": {
+            "ndc_count": 4,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 76,
+            "common_quantity_limit": "150.00/30d"
+          }
+        },
+        {
+          "generic_name": "Glipizide",
+          "brand_names": [
+            "Glucotrol",
+            "Glucotrol XL"
+          ],
+          "strengths": [
+            "2.5mg",
+            "5mg",
+            "10mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Extended-Release Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 6,
+            "average_tier": 1.9,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 75,
+            "common_quantity_limit": "240.00/30d"
+          }
+        },
+        {
+          "generic_name": "Glimepiride",
+          "brand_names": [
+            "Amaryl"
+          ],
+          "strengths": [
+            "1mg",
+            "2mg",
+            "4mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 74,
+            "common_quantity_limit": "120.00/30d"
+          }
+        },
+        {
+          "generic_name": "Glyburide",
+          "brand_names": [
+            "DiaBeta",
+            "Glynase",
+            "Micronase"
+          ],
+          "strengths": [
+            "1.25mg",
+            "1.5mg",
+            "2.5mg",
+            "3mg",
+            "5mg",
+            "6mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Micronized Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Pioglitazone",
+          "brand_names": [
+            "Actos"
+          ],
+          "strengths": [
+            "15mg",
+            "30mg",
+            "45mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Sitagliptin",
+          "brand_names": [
+            "Januvia"
+          ],
+          "strengths": [
+            "25mg",
+            "50mg",
+            "100mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Linagliptin",
+          "brand_names": [
+            "Tradjenta"
+          ],
+          "strengths": [
+            "5mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Saxagliptin",
+          "brand_names": [
+            "Onglyza"
+          ],
+          "strengths": [
+            "2.5mg",
+            "5mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 2.2,
+            "prior_auth_rate": 1,
+            "step_therapy_rate": 3,
+            "quantity_limit_rate": 80,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Alogliptin",
+          "brand_names": [
+            "Nesina"
+          ],
+          "strengths": [
+            "6.25mg",
+            "12.5mg",
+            "25mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Canagliflozin",
+          "brand_names": [
+            "Invokana"
+          ],
+          "strengths": [
+            "100mg",
+            "300mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Dapagliflozin",
+          "brand_names": [
+            "Farxiga"
+          ],
+          "strengths": [
+            "5mg",
+            "10mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 2.4,
+            "prior_auth_rate": 10,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 50,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Empagliflozin",
+          "brand_names": [
+            "Jardiance"
+          ],
+          "strengths": [
+            "10mg",
+            "25mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Ertugliflozin",
+          "brand_names": [
+            "Steglatro"
+          ],
+          "strengths": [
+            "5mg",
+            "15mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Repaglinide",
+          "brand_names": [
+            "Prandin"
+          ],
+          "strengths": [
+            "0.5mg",
+            "1mg",
+            "2mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 2,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 75,
+            "common_quantity_limit": "240.00/30d"
+          }
+        },
+        {
+          "generic_name": "Nateglinide",
+          "brand_names": [
+            "Starlix"
+          ],
+          "strengths": [
+            "60mg",
+            "120mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Acarbose",
+          "brand_names": [
+            "Precose"
+          ],
+          "strengths": [
+            "25mg",
+            "50mg",
+            "100mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 1,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 45,
+            "common_quantity_limit": "360.00/30d"
+          }
+        }
+      ],
+      "combination_products": [
+        {
+          "generic_name": "Metformin-Glipizide",
+          "brand_names": [
+            "Metaglip"
+          ],
+          "strengths": [
+            "2.5/250mg",
+            "2.5/500mg",
+            "5/500mg"
+          ]
+        },
+        {
+          "generic_name": "Metformin-Glyburide",
+          "brand_names": [
+            "Glucovance"
+          ],
+          "strengths": [
+            "1.25/250mg",
+            "2.5/500mg",
+            "5/500mg"
+          ]
+        },
+        {
+          "generic_name": "Metformin-Sitagliptin",
+          "brand_names": [
+            "Janumet",
+            "Janumet XR"
+          ],
+          "strengths": [
+            "50/500mg",
+            "50/1000mg"
+          ]
+        },
+        {
+          "generic_name": "Metformin-Linagliptin",
+          "brand_names": [
+            "Jentadueto",
+            "Jentadueto XR"
+          ],
+          "strengths": [
+            "2.5/500mg",
+            "2.5/850mg",
+            "2.5/1000mg"
+          ]
+        },
+        {
+          "generic_name": "Metformin-Saxagliptin",
+          "brand_names": [
+            "Kombiglyze XR"
+          ],
+          "strengths": [
+            "5/500mg",
+            "5/1000mg",
+            "2.5/1000mg"
+          ]
+        },
+        {
+          "generic_name": "Metformin-Pioglitazone",
+          "brand_names": [
+            "Actoplus Met",
+            "Actoplus Met XR"
+          ],
+          "strengths": [
+            "15/500mg",
+            "15/850mg"
+          ]
+        },
+        {
+          "generic_name": "Metformin-Canagliflozin",
+          "brand_names": [
+            "Invokamet",
+            "Invokamet XR"
+          ],
+          "strengths": [
+            "50/500mg",
+            "50/1000mg",
+            "150/500mg",
+            "150/1000mg"
+          ]
+        },
+        {
+          "generic_name": "Metformin-Dapagliflozin",
+          "brand_names": [
+            "Xigduo XR"
+          ],
+          "strengths": [
+            "5/500mg",
+            "5/1000mg",
+            "10/500mg",
+            "10/1000mg"
+          ]
+        },
+        {
+          "generic_name": "Metformin-Empagliflozin",
+          "brand_names": [
+            "Synjardy",
+            "Synjardy XR"
+          ],
+          "strengths": [
+            "5/500mg",
+            "5/1000mg",
+            "12.5/500mg",
+            "12.5/1000mg"
+          ]
+        },
+        {
+          "generic_name": "Empagliflozin-Linagliptin",
+          "brand_names": [
+            "Glyxambi"
+          ],
+          "strengths": [
+            "10/5mg",
+            "25/5mg"
+          ]
+        },
+        {
+          "generic_name": "Pioglitazone-Glimepiride",
+          "brand_names": [
+            "Duetact"
+          ],
+          "strengths": [
+            "30/2mg",
+            "30/4mg"
+          ]
+        }
+      ],
+      "cms_summary": {
+        "drugs_with_data": 7,
+        "avg_prior_auth_rate": 2,
+        "avg_step_therapy_rate": 0,
+        "avg_quantity_limit_rate": 68,
+        "avg_tier": 2
+      }
+    },
+    {
+      "rank": 8,
+      "class_name": "Thyroid Hormones",
+      "therapeutic_category": "Endocrine - Thyroid",
+      "common_conditions": [
+        "Hypothyroidism",
+        "Hashimoto's Thyroiditis",
+        "Thyroid Cancer",
+        "Myxedema"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Levothyroxine",
+          "brand_names": [
+            "Synthroid",
+            "Levoxyl",
+            "Unithroid",
+            "Tirosint",
+            "Euthyrox",
+            "Levo-T"
+          ],
+          "strengths": [
+            "25mcg",
+            "50mcg",
+            "75mcg",
+            "88mcg",
+            "100mcg",
+            "112mcg",
+            "125mcg",
+            "137mcg",
+            "150mcg",
+            "175mcg",
+            "200mcg",
+            "300mcg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Capsule",
+            "Oral Solution",
+            "IV"
+          ],
+          "cms_coverage": {
+            "ndc_count": 4,
+            "average_tier": 1.1,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 0,
+            "common_quantity_limit": null
+          }
+        },
+        {
+          "generic_name": "Liothyronine",
+          "brand_names": [
+            "Cytomel",
+            "Triostat"
+          ],
+          "strengths": [
+            "5mcg",
+            "25mcg",
+            "50mcg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "IV"
+          ],
+          "cms_coverage": {
+            "ndc_count": 3,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 1,
+            "common_quantity_limit": "90.00/30d"
+          }
+        },
+        {
+          "generic_name": "Liotrix",
+          "brand_names": [
+            "Thyrolar"
+          ],
+          "strengths": [
+            "1/4",
+            "1/2",
+            "1",
+            "2",
+            "3"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Thyroid Desiccated (Armour/NP Thyroid)",
+          "brand_names": [
+            "Armour Thyroid",
+            "NP Thyroid",
+            "Nature-Throid",
+            "WP Thyroid"
+          ],
+          "strengths": [
+            "15mg",
+            "30mg",
+            "60mg",
+            "90mg",
+            "120mg",
+            "180mg",
+            "240mg",
+            "300mg"
+          ],
+          "common_forms": [
+            "Tablet"
+          ],
+          "cms_coverage": null
+        }
+      ],
+      "combination_products": [],
+      "cms_summary": {
+        "drugs_with_data": 2,
+        "avg_prior_auth_rate": 0,
+        "avg_step_therapy_rate": 0,
+        "avg_quantity_limit_rate": 1,
+        "avg_tier": 1.5
+      }
+    },
+    {
+      "rank": 9,
+      "class_name": "Gabapentinoids",
+      "therapeutic_category": "Neurological - Anticonvulsant/Neuropathic Pain",
+      "common_conditions": [
+        "Neuropathic Pain",
+        "Epilepsy",
+        "Postherpetic Neuralgia",
+        "Fibromyalgia",
+        "Restless Leg Syndrome"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Gabapentin",
+          "brand_names": [
+            "Neurontin",
+            "Gralise",
+            "Horizant"
+          ],
+          "strengths": [
+            "100mg",
+            "300mg",
+            "400mg",
+            "600mg",
+            "800mg"
+          ],
+          "common_forms": [
+            "Capsule",
+            "Tablet",
+            "Oral Solution",
+            "Extended-Release Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.6,
+            "prior_auth_rate": 1,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 82,
+            "common_quantity_limit": "270.00/30d"
+          }
+        },
+        {
+          "generic_name": "Pregabalin",
+          "brand_names": [
+            "Lyrica",
+            "Lyrica CR"
+          ],
+          "strengths": [
+            "25mg",
+            "50mg",
+            "75mg",
+            "100mg",
+            "150mg",
+            "200mg",
+            "225mg",
+            "300mg",
+            "82.5mg CR",
+            "165mg CR",
+            "330mg CR"
+          ],
+          "common_forms": [
+            "Capsule",
+            "Oral Solution",
+            "Extended-Release Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 3,
+            "average_tier": 2,
+            "prior_auth_rate": 20,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 83,
+            "common_quantity_limit": "90.00/30d"
+          }
+        },
+        {
+          "generic_name": "Gabapentin Enacarbil",
+          "brand_names": [
+            "Horizant"
+          ],
+          "strengths": [
+            "300mg",
+            "600mg"
+          ],
+          "common_forms": [
+            "Extended-Release Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.6,
+            "prior_auth_rate": 1,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 82,
+            "common_quantity_limit": "270.00/30d"
+          }
+        }
+      ],
+      "combination_products": [],
+      "cms_summary": {
+        "drugs_with_data": 3,
+        "avg_prior_auth_rate": 7,
+        "avg_step_therapy_rate": 0,
+        "avg_quantity_limit_rate": 82,
+        "avg_tier": 1.7
+      }
+    },
+    {
+      "rank": 10,
+      "class_name": "DHP Calcium Channel Blockers",
+      "therapeutic_category": "Cardiovascular - Antihypertensive",
+      "common_conditions": [
+        "Hypertension",
+        "Angina",
+        "Raynaud's Phenomenon"
+      ],
+      "drugs": [
+        {
+          "generic_name": "Amlodipine",
+          "brand_names": [
+            "Norvasc",
+            "Katerzia"
+          ],
+          "strengths": [
+            "2.5mg",
+            "5mg",
+            "10mg"
+          ],
+          "common_forms": [
+            "Tablet",
+            "Oral Suspension"
+          ],
+          "cms_coverage": {
+            "ndc_count": 2,
+            "average_tier": 1.1,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 1,
+            "common_quantity_limit": "30.00/30d"
+          }
+        },
+        {
+          "generic_name": "Nifedipine",
+          "brand_names": [
+            "Procardia",
+            "Procardia XL",
+            "Adalat CC",
+            "Afeditab CR"
+          ],
+          "strengths": [
+            "10mg",
+            "20mg",
+            "30mg",
+            "60mg",
+            "90mg"
+          ],
+          "common_forms": [
+            "Capsule",
+            "Extended-Release Tablet"
+          ],
+          "cms_coverage": {
+            "ndc_count": 7,
+            "average_tier": 1.8,
+            "prior_auth_rate": 0,
+            "step_therapy_rate": 0,
+            "quantity_limit_rate": 7,
+            "common_quantity_limit": "60.00/30d"
+          }
+        },
+        {
+          "generic_name": "Felodipine",
+          "brand_names": [
+            "Plendil"
+          ],
+          "strengths": [
+            "2.5mg",
+            "5mg",
+            "10mg"
+          ],
+          "common_forms": [
+            "Extended-Release Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Nisoldipine",
+          "brand_names": [
+            "Sular"
+          ],
+          "strengths": [
+            "8.5mg",
+            "17mg",
+            "20mg",
+            "25.5mg",
+            "30mg",
+            "34mg",
+            "40mg"
+          ],
+          "common_forms": [
+            "Extended-Release Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Isradipine",
+          "brand_names": [
+            "DynaCirc",
+            "DynaCirc CR"
+          ],
+          "strengths": [
+            "2.5mg",
+            "5mg"
+          ],
+          "common_forms": [
+            "Capsule",
+            "Controlled-Release Tablet"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Nicardipine",
+          "brand_names": [
+            "Cardene",
+            "Cardene SR"
+          ],
+          "strengths": [
+            "20mg",
+            "30mg",
+            "45mg"
+          ],
+          "common_forms": [
+            "Capsule",
+            "Sustained-Release Capsule",
+            "IV"
+          ],
+          "cms_coverage": null
+        },
+        {
+          "generic_name": "Clevidipine",
+          "brand_names": [
+            "Cleviprex"
+          ],
+          "strengths": [
+            "0.5mg/mL"
+          ],
+          "common_forms": [
+            "IV Emulsion"
+          ],
+          "cms_coverage": null
+        }
+      ],
+      "combination_products": [
+        {
+          "generic_name": "Amlodipine-Benazepril",
+          "brand_names": [
+            "Lotrel"
+          ],
+          "strengths": [
+            "2.5/10mg",
+            "5/10mg",
+            "5/20mg",
+            "5/40mg",
+            "10/20mg",
+            "10/40mg"
+          ]
+        },
+        {
+          "generic_name": "Amlodipine-Valsartan",
+          "brand_names": [
+            "Exforge"
+          ],
+          "strengths": [
+            "5/160mg",
+            "10/160mg",
+            "5/320mg",
+            "10/320mg"
+          ]
+        },
+        {
+          "generic_name": "Amlodipine-Olmesartan",
+          "brand_names": [
+            "Azor"
+          ],
+          "strengths": [
+            "5/20mg",
+            "10/20mg",
+            "5/40mg",
+            "10/40mg"
+          ]
+        },
+        {
+          "generic_name": "Amlodipine-Telmisartan",
+          "brand_names": [
+            "Twynsta"
+          ],
+          "strengths": [
+            "5/40mg",
+            "5/80mg",
+            "10/40mg",
+            "10/80mg"
+          ]
+        },
+        {
+          "generic_name": "Amlodipine-Atorvastatin",
+          "brand_names": [
+            "Caduet"
+          ],
+          "strengths": [
+            "2.5/10mg",
+            "2.5/20mg",
+            "2.5/40mg",
+            "5/10mg",
+            "5/20mg",
+            "5/40mg",
+            "5/80mg",
+            "10/10mg",
+            "10/20mg",
+            "10/40mg",
+            "10/80mg"
+          ]
+        },
+        {
+          "generic_name": "Amlodipine-Perindopril",
+          "brand_names": [
+            "Prestalia"
+          ],
+          "strengths": [
+            "2.5/3.5mg",
+            "5/7mg",
+            "10/14mg"
+          ]
+        },
+        {
+          "generic_name": "Amlodipine-Valsartan-Hydrochlorothiazide",
+          "brand_names": [
+            "Exforge HCT"
+          ],
+          "strengths": [
+            "5/160/12.5mg",
+            "5/160/25mg",
+            "10/160/12.5mg",
+            "10/160/25mg",
+            "10/320/25mg"
+          ]
+        },
+        {
+          "generic_name": "Amlodipine-Olmesartan-Hydrochlorothiazide",
+          "brand_names": [
+            "Tribenzor"
+          ],
+          "strengths": [
+            "5/20/12.5mg",
+            "5/40/12.5mg",
+            "5/40/25mg",
+            "10/40/12.5mg",
+            "10/40/25mg"
+          ]
+        }
+      ],
+      "cms_summary": {
+        "drugs_with_data": 2,
+        "avg_prior_auth_rate": 0,
+        "avg_step_therapy_rate": 0,
+        "avg_quantity_limit_rate": 4,
+        "avg_tier": 1.5
+      }
+    }
+  ],
+  "search_terms": {
+    "statins": [
+      "statin",
+      "atorvastatin",
+      "rosuvastatin",
+      "simvastatin",
+      "pravastatin",
+      "lovastatin",
+      "fluvastatin",
+      "pitavastatin",
+      "lipitor",
+      "crestor",
+      "zocor",
+      "pravachol",
+      "mevacor",
+      "lescol",
+      "livalo",
+      "cholesterol"
+    ],
+    "ace_inhibitors": [
+      "ace",
+      "pril",
+      "lisinopril",
+      "enalapril",
+      "ramipril",
+      "benazepril",
+      "quinapril",
+      "fosinopril",
+      "captopril",
+      "trandolapril",
+      "perindopril",
+      "moexipril",
+      "zestril",
+      "prinivil",
+      "vasotec",
+      "altace",
+      "lotensin",
+      "accupril",
+      "monopril",
+      "capoten"
+    ],
+    "arbs": [
+      "arb",
+      "sartan",
+      "losartan",
+      "valsartan",
+      "irbesartan",
+      "olmesartan",
+      "telmisartan",
+      "candesartan",
+      "eprosartan",
+      "azilsartan",
+      "cozaar",
+      "diovan",
+      "avapro",
+      "benicar",
+      "micardis",
+      "atacand",
+      "teveten",
+      "edarbi",
+      "entresto"
+    ],
+    "ppis": [
+      "ppi",
+      "prazole",
+      "omeprazole",
+      "esomeprazole",
+      "pantoprazole",
+      "lansoprazole",
+      "rabeprazole",
+      "dexlansoprazole",
+      "prilosec",
+      "nexium",
+      "protonix",
+      "prevacid",
+      "aciphex",
+      "dexilant",
+      "acid reflux",
+      "gerd"
+    ],
+    "beta_blockers": [
+      "beta blocker",
+      "lol",
+      "metoprolol",
+      "carvedilol",
+      "atenolol",
+      "bisoprolol",
+      "propranolol",
+      "nebivolol",
+      "labetalol",
+      "nadolol",
+      "sotalol",
+      "toprol",
+      "coreg",
+      "tenormin",
+      "zebeta",
+      "inderal",
+      "bystolic"
+    ],
+    "ssris": [
+      "ssri",
+      "antidepressant",
+      "sertraline",
+      "escitalopram",
+      "fluoxetine",
+      "citalopram",
+      "paroxetine",
+      "fluvoxamine",
+      "vilazodone",
+      "vortioxetine",
+      "zoloft",
+      "lexapro",
+      "prozac",
+      "celexa",
+      "paxil",
+      "luvox",
+      "viibryd",
+      "trintellix"
+    ],
+    "antidiabetics": [
+      "diabetes",
+      "metformin",
+      "glipizide",
+      "glimepiride",
+      "glyburide",
+      "pioglitazone",
+      "sitagliptin",
+      "linagliptin",
+      "saxagliptin",
+      "alogliptin",
+      "canagliflozin",
+      "dapagliflozin",
+      "empagliflozin",
+      "glucophage",
+      "januvia",
+      "tradjenta",
+      "jardiance",
+      "farxiga",
+      "invokana",
+      "sglt2",
+      "dpp4"
+    ],
+    "thyroid": [
+      "thyroid",
+      "levothyroxine",
+      "liothyronine",
+      "synthroid",
+      "levoxyl",
+      "tirosint",
+      "armour",
+      "cytomel",
+      "hypothyroid"
+    ],
+    "gabapentinoids": [
+      "gabapentin",
+      "pregabalin",
+      "neurontin",
+      "lyrica",
+      "neuropathy",
+      "nerve pain",
+      "seizure"
+    ],
+    "calcium_channel_blockers": [
+      "calcium channel",
+      "dipine",
+      "amlodipine",
+      "nifedipine",
+      "felodipine",
+      "nisoldipine",
+      "isradipine",
+      "nicardipine",
+      "norvasc",
+      "procardia",
+      "plendil"
+    ]
+  },
+  "cms_data_enriched": true,
+  "cms_enrichment_date": "2026-01-23T21:33:37.423Z"
+}

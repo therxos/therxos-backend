@@ -305,6 +305,290 @@ router.get('/workability/high', authenticateToken, async (req, res) => {
   }
 });
 
+// ===========================================
+// CMS MEDICARE PART D FORMULARY LOOKUP
+// ===========================================
+
+// GET /api/coverage/cms/ndc/:ndc - Look up CMS formulary data for a specific NDC
+router.get('/cms/ndc/:ndc', authenticateToken, async (req, res) => {
+  try {
+    const { ndc } = req.params;
+    const db = (await import('../database/index.js')).default;
+
+    // Get all formulary entries for this NDC
+    const result = await db.query(`
+      SELECT
+        cfd.formulary_id,
+        cfd.rxcui,
+        cfd.ndc,
+        cfd.tier_level,
+        cfd.prior_authorization_yn as prior_auth_required,
+        cfd.step_therapy_yn as step_therapy_required,
+        cfd.quantity_limit_yn as quantity_limit,
+        cfd.quantity_limit_amount,
+        cfd.quantity_limit_days,
+        cfd.contract_year,
+        cpf.contract_id,
+        cpf.plan_id as pbp_id,
+        cpf.plan_name
+      FROM cms_formulary_drugs cfd
+      LEFT JOIN cms_plan_formulary cpf ON cfd.formulary_id = cpf.formulary_id
+      WHERE cfd.ndc = $1
+      ORDER BY cpf.contract_id, cpf.plan_id
+    `, [ndc]);
+
+    if (result.rows.length === 0) {
+      return res.json({
+        ndc,
+        found: false,
+        message: 'No CMS formulary data found for this NDC'
+      });
+    }
+
+    // Calculate summary statistics
+    const total = result.rows.length;
+    const paRequired = result.rows.filter(r => r.prior_auth_required).length;
+    const stRequired = result.rows.filter(r => r.step_therapy_required).length;
+    const qlRequired = result.rows.filter(r => r.quantity_limit).length;
+    const avgTier = result.rows.reduce((sum, r) => sum + (r.tier_level || 0), 0) / total;
+
+    res.json({
+      ndc,
+      found: true,
+      summary: {
+        formulary_count: total,
+        average_tier: Math.round(avgTier * 10) / 10,
+        prior_auth_rate: Math.round((paRequired / total) * 100),
+        step_therapy_rate: Math.round((stRequired / total) * 100),
+        quantity_limit_rate: Math.round((qlRequired / total) * 100)
+      },
+      formularies: result.rows
+    });
+  } catch (error) {
+    logger.error('CMS NDC lookup error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/coverage/cms/batch - Look up CMS formulary data for multiple NDCs
+router.post('/cms/batch', authenticateToken, async (req, res) => {
+  try {
+    const { ndcs } = req.body;
+
+    if (!ndcs || !Array.isArray(ndcs)) {
+      return res.status(400).json({ error: 'ndcs array required' });
+    }
+
+    if (ndcs.length > 50) {
+      return res.status(400).json({ error: 'Maximum 50 NDCs per batch' });
+    }
+
+    const db = (await import('../database/index.js')).default;
+
+    // Get aggregated stats for each NDC
+    const result = await db.query(`
+      SELECT
+        ndc,
+        COUNT(DISTINCT formulary_id) as formulary_count,
+        ROUND(AVG(tier_level)::numeric, 1) as avg_tier,
+        SUM(CASE WHEN prior_authorization_yn THEN 1 ELSE 0 END)::float / COUNT(*) * 100 as pa_rate,
+        SUM(CASE WHEN step_therapy_yn THEN 1 ELSE 0 END)::float / COUNT(*) * 100 as st_rate,
+        SUM(CASE WHEN quantity_limit_yn THEN 1 ELSE 0 END)::float / COUNT(*) * 100 as ql_rate,
+        MODE() WITHIN GROUP (ORDER BY quantity_limit_amount) as common_ql_amount,
+        MODE() WITHIN GROUP (ORDER BY quantity_limit_days) as common_ql_days
+      FROM cms_formulary_drugs
+      WHERE ndc = ANY($1)
+      GROUP BY ndc
+    `, [ndcs]);
+
+    // Build lookup map
+    const lookup = new Map();
+    for (const row of result.rows) {
+      lookup.set(row.ndc, {
+        ndc: row.ndc,
+        found: true,
+        formulary_count: parseInt(row.formulary_count),
+        average_tier: parseFloat(row.avg_tier) || null,
+        prior_auth_rate: Math.round(parseFloat(row.pa_rate) || 0),
+        step_therapy_rate: Math.round(parseFloat(row.st_rate) || 0),
+        quantity_limit_rate: Math.round(parseFloat(row.ql_rate) || 0),
+        common_quantity_limit: row.common_ql_amount ? `${row.common_ql_amount}/${row.common_ql_days}d` : null
+      });
+    }
+
+    // Build response including NDCs not found
+    const results = ndcs.map(ndc => lookup.get(ndc) || { ndc, found: false });
+
+    res.json({
+      total_requested: ndcs.length,
+      total_found: result.rows.length,
+      results
+    });
+  } catch (error) {
+    logger.error('CMS batch lookup error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/coverage/cms/drug/:drugName - Look up CMS data by drug name pattern
+router.get('/cms/drug/:drugName', authenticateToken, async (req, res) => {
+  try {
+    const { drugName } = req.params;
+    const db = (await import('../database/index.js')).default;
+
+    // First find matching NDCs from prescriptions
+    const ndcResult = await db.query(`
+      SELECT DISTINCT ndc, drug_name
+      FROM prescriptions
+      WHERE LOWER(drug_name) LIKE $1
+        AND ndc IS NOT NULL
+      LIMIT 100
+    `, [`%${drugName.toLowerCase()}%`]);
+
+    if (ndcResult.rows.length === 0) {
+      return res.json({
+        drug_name: drugName,
+        found: false,
+        message: 'No matching prescriptions found for this drug name'
+      });
+    }
+
+    const ndcs = ndcResult.rows.map(r => r.ndc);
+
+    // Get CMS data for these NDCs
+    const cmsResult = await db.query(`
+      SELECT
+        ndc,
+        COUNT(DISTINCT formulary_id) as formulary_count,
+        ROUND(AVG(tier_level)::numeric, 1) as avg_tier,
+        SUM(CASE WHEN prior_authorization_yn THEN 1 ELSE 0 END)::float / COUNT(*) * 100 as pa_rate,
+        SUM(CASE WHEN step_therapy_yn THEN 1 ELSE 0 END)::float / COUNT(*) * 100 as st_rate,
+        SUM(CASE WHEN quantity_limit_yn THEN 1 ELSE 0 END)::float / COUNT(*) * 100 as ql_rate
+      FROM cms_formulary_drugs
+      WHERE ndc = ANY($1)
+      GROUP BY ndc
+    `, [ndcs]);
+
+    // Map CMS data back to drug names
+    const cmsLookup = new Map();
+    for (const row of cmsResult.rows) {
+      cmsLookup.set(row.ndc, row);
+    }
+
+    const drugs = ndcResult.rows.map(rx => {
+      const cms = cmsLookup.get(rx.ndc);
+      return {
+        drug_name: rx.drug_name,
+        ndc: rx.ndc,
+        cms_data: cms ? {
+          formulary_count: parseInt(cms.formulary_count),
+          average_tier: parseFloat(cms.avg_tier) || null,
+          prior_auth_rate: Math.round(parseFloat(cms.pa_rate) || 0),
+          step_therapy_rate: Math.round(parseFloat(cms.st_rate) || 0),
+          quantity_limit_rate: Math.round(parseFloat(cms.ql_rate) || 0)
+        } : null
+      };
+    });
+
+    // Calculate overall summary
+    const withCms = drugs.filter(d => d.cms_data);
+    const summary = withCms.length > 0 ? {
+      total_ndcs: drugs.length,
+      ndcs_with_cms: withCms.length,
+      avg_tier: Math.round(withCms.reduce((sum, d) => sum + (d.cms_data?.average_tier || 0), 0) / withCms.length * 10) / 10,
+      avg_pa_rate: Math.round(withCms.reduce((sum, d) => sum + (d.cms_data?.prior_auth_rate || 0), 0) / withCms.length),
+      avg_st_rate: Math.round(withCms.reduce((sum, d) => sum + (d.cms_data?.step_therapy_rate || 0), 0) / withCms.length),
+      avg_ql_rate: Math.round(withCms.reduce((sum, d) => sum + (d.cms_data?.quantity_limit_rate || 0), 0) / withCms.length)
+    } : null;
+
+    res.json({
+      drug_name: drugName,
+      found: true,
+      summary,
+      drugs
+    });
+  } catch (error) {
+    logger.error('CMS drug lookup error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/coverage/cms/contract/:contractId - Get formulary info for a specific contract
+router.get('/cms/contract/:contractId', authenticateToken, async (req, res) => {
+  try {
+    const { contractId } = req.params;
+    const { drugName } = req.query;
+    const db = (await import('../database/index.js')).default;
+
+    // Get plan info
+    const planResult = await db.query(`
+      SELECT DISTINCT contract_id, plan_id, plan_name, formulary_id
+      FROM cms_plan_formulary
+      WHERE contract_id = $1
+    `, [contractId]);
+
+    if (planResult.rows.length === 0) {
+      return res.json({
+        contract_id: contractId,
+        found: false,
+        message: 'No CMS plan data found for this contract'
+      });
+    }
+
+    const formularyIds = planResult.rows.map(r => r.formulary_id).filter(Boolean);
+
+    // If drug name provided, filter to that drug
+    let drugQuery = '';
+    let drugParams = [formularyIds];
+
+    if (drugName) {
+      // Find NDCs matching the drug name
+      const ndcResult = await db.query(`
+        SELECT DISTINCT ndc FROM prescriptions
+        WHERE LOWER(drug_name) LIKE $1 AND ndc IS NOT NULL
+        LIMIT 50
+      `, [`%${drugName.toLowerCase()}%`]);
+
+      if (ndcResult.rows.length > 0) {
+        drugQuery = ' AND ndc = ANY($2)';
+        drugParams.push(ndcResult.rows.map(r => r.ndc));
+      }
+    }
+
+    // Get drug coverage for this contract's formularies
+    const coverageResult = await db.query(`
+      SELECT
+        formulary_id,
+        ndc,
+        tier_level,
+        prior_authorization_yn as prior_auth,
+        step_therapy_yn as step_therapy,
+        quantity_limit_yn as quantity_limit,
+        quantity_limit_amount,
+        quantity_limit_days
+      FROM cms_formulary_drugs
+      WHERE formulary_id = ANY($1)${drugQuery}
+      LIMIT 500
+    `, drugParams);
+
+    res.json({
+      contract_id: contractId,
+      found: true,
+      plans: planResult.rows,
+      drug_filter: drugName || null,
+      coverage_entries: coverageResult.rows.length,
+      coverage: coverageResult.rows
+    });
+  } catch (error) {
+    logger.error('CMS contract lookup error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===========================================
+// WORKABILITY QUERIES
+// ===========================================
+
 // GET /api/coverage/workability/missing-coverage - Get opportunities missing coverage data
 router.get('/workability/missing-coverage', authenticateToken, async (req, res) => {
   try {
