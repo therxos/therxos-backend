@@ -53,7 +53,11 @@
       "Bash(GIT_BRANCH=staging npx vercel:*)",
       "Bash(git log:*)",
       "Bash(git remote:*)",
-      "Bash(railway:*)"
+      "Bash(railway:*)",
+      "WebFetch(domain:api.vercel.com)",
+      "WebFetch(domain:beta.therxos.com)",
+      "Bash(git rm:*)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

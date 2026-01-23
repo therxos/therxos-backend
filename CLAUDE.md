@@ -27,17 +27,16 @@ git checkout staging && git merge main --no-edit && git push origin staging && g
 git push origin main
 ```
 
-**Frontend (Vercel):**
+**Frontend (Vercel - MUST use CLI, does NOT auto-deploy from GitHub):**
 ```bash
 # 1. STAGING FIRST
 cd therxos-frontend
-git checkout staging && git merge main --no-edit && git push origin staging
-vercel --prod && vercel alias staging.therxos.com
-git checkout main
+vercel  # Preview deployment
 
 # 2. PRODUCTION - Only after staging is verified
 vercel --prod  # This deploys to beta.therxos.com
 ```
+> **IMPORTANT:** Vercel is NOT connected to GitHub for auto-deploy. You MUST run `vercel --prod` from the CLI to deploy. Pushing to GitHub alone will NOT trigger a deployment.
 
 ### Git Branches
 - `main` → Production (beta.therxos.com)

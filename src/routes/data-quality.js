@@ -26,6 +26,7 @@ router.get('/', authenticateToken, async (req, res) => {
     let query = `
       SELECT
         dqi.*,
+        ph.pharmacy_name,
         p.first_name as patient_first_name,
         p.last_name as patient_last_name,
         o.current_drug_name,
@@ -39,14 +40,21 @@ router.get('/', authenticateToken, async (req, res) => {
         u.first_name as resolved_by_first,
         u.last_name as resolved_by_last
       FROM data_quality_issues dqi
+      LEFT JOIN pharmacies ph ON ph.pharmacy_id = dqi.pharmacy_id
       LEFT JOIN patients p ON p.patient_id = dqi.patient_id
       LEFT JOIN opportunities o ON o.opportunity_id = dqi.opportunity_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = dqi.prescription_id
       LEFT JOIN users u ON u.user_id = dqi.resolved_by
-      WHERE dqi.pharmacy_id = $1
+      WHERE 1=1
     `;
-    const params = [pharmacyId];
-    let paramIndex = 2;
+    const params = [];
+    let paramIndex = 1;
+
+    // Super admins see all pharmacies unless they specify one
+    if (pharmacyId) {
+      query += ` AND dqi.pharmacy_id = $${paramIndex++}`;
+      params.push(pharmacyId);
+    }
 
     if (status && status !== 'all') {
       query += ` AND dqi.status = $${paramIndex++}`;
@@ -300,16 +308,21 @@ router.post('/bulk-update', authenticateToken, async (req, res) => {
 // Get data quality summary statistics
 router.get('/stats/summary', authenticateToken, async (req, res) => {
   try {
-    // Super admins can specify a pharmacyId
+    // Super admins can specify a pharmacyId, or see all if not specified
     let pharmacyId = req.user.pharmacyId;
     if (req.user.role === 'super_admin' && req.query.pharmacyId) {
       pharmacyId = req.query.pharmacyId;
+    } else if (req.user.role === 'super_admin') {
+      pharmacyId = null; // Show all pharmacies
     }
 
     // Only admins can view
     if (!['super_admin', 'admin', 'owner'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
+
+    const pharmacyFilter = pharmacyId ? 'WHERE pharmacy_id = $1' : 'WHERE 1=1';
+    const params = pharmacyId ? [pharmacyId] : [];
 
     // Overall counts
     const overallStats = await db.query(`
@@ -320,8 +333,8 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'ignored') as ignored_issues,
         COUNT(*) FILTER (WHERE status = 'auto_fixed') as auto_fixed_issues
       FROM data_quality_issues
-      WHERE pharmacy_id = $1
-    `, [pharmacyId]);
+      ${pharmacyFilter}
+    `, params);
 
     // Impact on opportunities (how much margin is blocked)
     const impactStats = await db.query(`
@@ -330,8 +343,8 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
         COALESCE(SUM(o.annual_margin_gain), 0) as blocked_annual_margin
       FROM data_quality_issues dqi
       JOIN opportunities o ON o.opportunity_id = dqi.opportunity_id
-      WHERE dqi.pharmacy_id = $1 AND dqi.status = 'pending'
-    `, [pharmacyId]);
+      WHERE ${pharmacyId ? 'dqi.pharmacy_id = $1 AND' : ''} dqi.status = 'pending'
+    `, params);
 
     // By issue type
     const byType = await db.query(`
@@ -340,10 +353,10 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
         COUNT(*) as count,
         COUNT(*) FILTER (WHERE status = 'pending') as pending
       FROM data_quality_issues
-      WHERE pharmacy_id = $1
+      ${pharmacyFilter}
       GROUP BY issue_type
       ORDER BY pending DESC
-    `, [pharmacyId]);
+    `, params);
 
     // Recent activity
     const recentResolutions = await db.query(`
@@ -351,11 +364,10 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
         DATE(resolved_at) as date,
         COUNT(*) as resolved_count
       FROM data_quality_issues
-      WHERE pharmacy_id = $1
-        AND resolved_at >= NOW() - INTERVAL '7 days'
+      WHERE ${pharmacyId ? 'pharmacy_id = $1 AND' : ''} resolved_at >= NOW() - INTERVAL '7 days'
       GROUP BY DATE(resolved_at)
       ORDER BY date DESC
-    `, [pharmacyId]);
+    `, params);
 
     res.json({
       overall: overallStats.rows[0],

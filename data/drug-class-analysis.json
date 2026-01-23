@@ -1,0 +1,3006 @@
+{
+  "generated_at": "2026-01-23T21:20:43.650Z",
+  "ranked_by": "average_gross_profit",
+  "drug_classes": [
+    {
+      "class_name": "ARBs",
+      "stats": {
+        "total_claims": 1761,
+        "avg_reimbursement": 81.8,
+        "avg_gross_profit": 52.87,
+        "total_reimbursement": 144046.05,
+        "min_reimbursement": 0.63,
+        "max_reimbursement": 3600.07
+      },
+      "bin_groups": [
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 164,
+          "avg_paid": 20.1,
+          "avg_gp": 2.68
+        },
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 164,
+          "avg_paid": 65.17,
+          "avg_gp": 9.61
+        },
+        {
+          "bin": "014798",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 112,
+          "avg_paid": 41.4,
+          "avg_gp": 41.4
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 82,
+          "avg_paid": 113.94,
+          "avg_gp": 89.96
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 78,
+          "avg_paid": 6.63,
+          "avg_gp": 5.35
+        },
+        {
+          "bin": "004336",
+          "group": "RX1110",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 73,
+          "avg_paid": 332.1,
+          "avg_gp": 332.1
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 73,
+          "avg_paid": 9.67,
+          "avg_gp": 9.1
+        },
+        {
+          "bin": "004740",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 63,
+          "avg_paid": 275.74,
+          "avg_gp": 275.74
+        },
+        {
+          "bin": "020099",
+          "group": "WL3A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 60,
+          "avg_paid": 13.05,
+          "avg_gp": 11.37
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 59,
+          "avg_paid": 173.78,
+          "avg_gp": 12.53
+        },
+        {
+          "bin": "003858",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 50,
+          "avg_paid": 12.79,
+          "avg_gp": 11.12
+        },
+        {
+          "bin": "610502",
+          "group": "RXAETD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 50,
+          "avg_paid": 244.68,
+          "avg_gp": 166.39
+        },
+        {
+          "bin": "610097",
+          "group": "COS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 42,
+          "avg_paid": 259.42,
+          "avg_gp": 158.67
+        },
+        {
+          "bin": "610014",
+          "group": "SPBLUE1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 39,
+          "avg_paid": 10.58,
+          "avg_gp": 8.72
+        },
+        {
+          "bin": "004336",
+          "group": "RX1400",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 37,
+          "avg_paid": 32.25,
+          "avg_gp": 11.29
+        },
+        {
+          "bin": "610097",
+          "group": "PDPIND",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 34,
+          "avg_paid": 15.58,
+          "avg_gp": 15.03
+        },
+        {
+          "bin": "003585",
+          "group": "ARE01",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 11.75,
+          "avg_gp": 10.89
+        },
+        {
+          "bin": "610279",
+          "group": "UHEALTH",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 15.69,
+          "avg_gp": 15.69
+        },
+        {
+          "bin": "003858",
+          "group": "WVPEIA1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 19,
+          "avg_paid": 156.91,
+          "avg_gp": 7.57
+        },
+        {
+          "bin": "004336",
+          "group": "RX7117",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 19,
+          "avg_paid": 5.56,
+          "avg_gp": 4.65
+        },
+        {
+          "bin": "610014",
+          "group": "PEIAPLANAS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 18,
+          "avg_paid": 165.1,
+          "avg_gp": 7.37
+        },
+        {
+          "bin": "020099",
+          "group": "WLBA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 16,
+          "avg_paid": 4.55,
+          "avg_gp": 4.55
+        },
+        {
+          "bin": "610014",
+          "group": "PITCMDRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 5.06,
+          "avg_gp": 1.84
+        },
+        {
+          "bin": "015574",
+          "group": "MVS10",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 3.05,
+          "avg_gp": 1.96
+        },
+        {
+          "bin": "610279",
+          "group": "UNITEDRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 2.06,
+          "avg_gp": 2.06
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "LOSARTAN POT TAB 100MG",
+          "claims": 392,
+          "avg_paid": 8.13,
+          "avg_gp": 6.61
+        },
+        {
+          "drug_name": "LOSARTAN POT TAB 50MG",
+          "claims": 310,
+          "avg_paid": 7.83,
+          "avg_gp": 6.91
+        },
+        {
+          "drug_name": "LOSARTAN POT TAB 25MG",
+          "claims": 189,
+          "avg_paid": 9.03,
+          "avg_gp": 8.06
+        },
+        {
+          "drug_name": "Losartan Potassium 50 Mg Tab",
+          "claims": 61,
+          "avg_paid": 7.72,
+          "avg_gp": 7.72
+        },
+        {
+          "drug_name": "LOSARTAN/HCT TAB 50-12.5",
+          "claims": 54,
+          "avg_paid": 10.43,
+          "avg_gp": 8.49
+        },
+        {
+          "drug_name": "LOSARTAN/HCT TAB 100-25",
+          "claims": 52,
+          "avg_paid": 10,
+          "avg_gp": 7.44
+        },
+        {
+          "drug_name": "LOSARTAN POTASSIUM* 50MG TAB",
+          "claims": 49,
+          "avg_paid": 5.46,
+          "avg_gp": 5.46
+        },
+        {
+          "drug_name": "LOSARTAN POTASSIUM* 100MG TAB",
+          "claims": 33,
+          "avg_paid": 9.15,
+          "avg_gp": 9.15
+        },
+        {
+          "drug_name": "ENTRESTO     TAB 24-26MG",
+          "claims": 31,
+          "avg_paid": 821.86,
+          "avg_gp": -11.43
+        },
+        {
+          "drug_name": "Olmesartan Medoxomil 20 Mg Tab",
+          "claims": 28,
+          "avg_paid": 17.37,
+          "avg_gp": 17.37
+        }
+      ]
+    },
+    {
+      "class_name": "PPIs",
+      "stats": {
+        "total_claims": 3523,
+        "avg_reimbursement": 17.25,
+        "avg_gross_profit": 15.69,
+        "total_reimbursement": 60773.95,
+        "min_reimbursement": 0.13,
+        "max_reimbursement": 2830.67
+      },
+      "bin_groups": [
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 846,
+          "avg_paid": 13.37,
+          "avg_gp": 10.75
+        },
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 302,
+          "avg_paid": 3.42,
+          "avg_gp": 2.11
+        },
+        {
+          "bin": "610097",
+          "group": "COS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 186,
+          "avg_paid": 5.27,
+          "avg_gp": 4.18
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 185,
+          "avg_paid": 8.96,
+          "avg_gp": 7.42
+        },
+        {
+          "bin": "610502",
+          "group": "RXAETD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 103,
+          "avg_paid": 6.41,
+          "avg_gp": 5.32
+        },
+        {
+          "bin": "610014",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 96,
+          "avg_paid": 12.41,
+          "avg_gp": 11.22
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 93,
+          "avg_paid": 5.82,
+          "avg_gp": 5.2
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 89,
+          "avg_paid": 11.06,
+          "avg_gp": 9.97
+        },
+        {
+          "bin": "004336",
+          "group": "RX1400",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 87,
+          "avg_paid": 12.62,
+          "avg_gp": 11.16
+        },
+        {
+          "bin": "004740",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 80,
+          "avg_paid": 73.82,
+          "avg_gp": 73.82
+        },
+        {
+          "bin": "003858",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 77,
+          "avg_paid": 12.6,
+          "avg_gp": 11.58
+        },
+        {
+          "bin": "014798",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 70,
+          "avg_paid": 10.04,
+          "avg_gp": 10.04
+        },
+        {
+          "bin": "020099",
+          "group": "WL3A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 67,
+          "avg_paid": 13.31,
+          "avg_gp": 11.87
+        },
+        {
+          "bin": "004336",
+          "group": "RX1110",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 65,
+          "avg_paid": 17.56,
+          "avg_gp": 17.56
+        },
+        {
+          "bin": "610014",
+          "group": "SPBLUE1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 60,
+          "avg_paid": 8,
+          "avg_gp": 6.75
+        },
+        {
+          "bin": "610097",
+          "group": "PDPIND",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 56,
+          "avg_paid": 16.05,
+          "avg_gp": 14.41
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 42,
+          "avg_paid": 13.52,
+          "avg_gp": 11.77
+        },
+        {
+          "bin": "004336",
+          "group": "RX7117",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 36,
+          "avg_paid": 3.85,
+          "avg_gp": 2.93
+        },
+        {
+          "bin": "015574",
+          "group": "VNS01",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 36,
+          "avg_paid": 168.11,
+          "avg_gp": 168.11
+        },
+        {
+          "bin": "015581",
+          "group": "P5453",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 35,
+          "avg_paid": 6.68,
+          "avg_gp": 5.4
+        },
+        {
+          "bin": "610279",
+          "group": "UHEALTH",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 34,
+          "avg_paid": 9.87,
+          "avg_gp": 9.46
+        },
+        {
+          "bin": "017010",
+          "group": "CIGPDPRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 33,
+          "avg_paid": 4.35,
+          "avg_gp": 3.03
+        },
+        {
+          "bin": "610014",
+          "group": "PEIAPLANAS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 32,
+          "avg_paid": 14.67,
+          "avg_gp": 11.72
+        },
+        {
+          "bin": "610097",
+          "group": "MPDCSP",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 29,
+          "avg_paid": 68.63,
+          "avg_gp": 68.63
+        },
+        {
+          "bin": "003858",
+          "group": "WVPEIA1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 29,
+          "avg_paid": 14.72,
+          "avg_gp": 12.21
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "OMEPRAZOLE   CAP 40MG",
+          "claims": 1343,
+          "avg_paid": 10.06,
+          "avg_gp": 8.99
+        },
+        {
+          "drug_name": "PANTOPRAZOLE TAB 40MG",
+          "claims": 1237,
+          "avg_paid": 8.68,
+          "avg_gp": 7.13
+        },
+        {
+          "drug_name": "OMEPRAZOLE   CAP 20MG",
+          "claims": 232,
+          "avg_paid": 9.21,
+          "avg_gp": 8.44
+        },
+        {
+          "drug_name": "OMEPRAZOLE 40MG CAP",
+          "claims": 103,
+          "avg_paid": 5.41,
+          "avg_gp": 5.41
+        },
+        {
+          "drug_name": "LANSOPRAZOLE CAP 30MG DR",
+          "claims": 90,
+          "avg_paid": 12.09,
+          "avg_gp": 10.82
+        },
+        {
+          "drug_name": "Pantoprazole Sod Dr 40 Mg Tab",
+          "claims": 67,
+          "avg_paid": 9.2,
+          "avg_gp": 9.2
+        },
+        {
+          "drug_name": "OMEPRAZOLE 20MG CAP",
+          "claims": 60,
+          "avg_paid": 6.5,
+          "avg_gp": 6.5
+        },
+        {
+          "drug_name": "PANTOPRAZOLE SODIUM 40MG TAB",
+          "claims": 54,
+          "avg_paid": 7.48,
+          "avg_gp": 7.48
+        },
+        {
+          "drug_name": "Omeprazole   Cap 20mg",
+          "claims": 48,
+          "avg_paid": 4.31,
+          "avg_gp": 4.31
+        },
+        {
+          "drug_name": "Omeprazole Dr 20 Mg Capsule",
+          "claims": 34,
+          "avg_paid": 7.1,
+          "avg_gp": 7.1
+        }
+      ]
+    },
+    {
+      "class_name": "Thyroid Hormones",
+      "stats": {
+        "total_claims": 645,
+        "avg_reimbursement": 42.03,
+        "avg_gross_profit": 15.23,
+        "total_reimbursement": 27108.88,
+        "min_reimbursement": 0.92,
+        "max_reimbursement": 662.31
+      },
+      "bin_groups": [
+        {
+          "bin": "014798",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 111,
+          "avg_paid": 56.81,
+          "avg_gp": 56.81
+        },
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 82,
+          "avg_paid": 57.1,
+          "avg_gp": 6.5
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 52,
+          "avg_paid": 12.12,
+          "avg_gp": 12.12
+        },
+        {
+          "bin": "004740",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 31,
+          "avg_paid": 21.03,
+          "avg_gp": 21.03
+        },
+        {
+          "bin": "020099",
+          "group": "WL3A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 31,
+          "avg_paid": 34.68,
+          "avg_gp": -11.01
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 28.4,
+          "avg_gp": 6.55
+        },
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 17,
+          "avg_paid": 69.1,
+          "avg_gp": -2.37
+        },
+        {
+          "bin": "610011",
+          "group": "EDHEALTH",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 16,
+          "avg_paid": 5.74,
+          "avg_gp": 5.74
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 15,
+          "avg_paid": 96.22,
+          "avg_gp": 8.87
+        },
+        {
+          "bin": "610724",
+          "group": "CAP1305",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 15,
+          "avg_paid": 48.32,
+          "avg_gp": -29.74
+        },
+        {
+          "bin": "004336",
+          "group": "RX1110",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 13.03,
+          "avg_gp": 13.03
+        },
+        {
+          "bin": "610494",
+          "group": "ETLHWT",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 33.18,
+          "avg_gp": 16.84
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 41.65,
+          "avg_gp": -5.46
+        },
+        {
+          "bin": "610239",
+          "group": "65006500",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 13,
+          "avg_paid": 51.34,
+          "avg_gp": 2.76
+        },
+        {
+          "bin": "610097",
+          "group": "MPDCSP",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 10,
+          "avg_paid": 4.5,
+          "avg_gp": 4.5
+        },
+        {
+          "bin": "004336",
+          "group": "RX7117",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 10,
+          "avg_paid": 69.88,
+          "avg_gp": 26.22
+        },
+        {
+          "bin": "004336",
+          "group": "RX2362",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 9,
+          "avg_paid": 2.55,
+          "avg_gp": 2.55
+        },
+        {
+          "bin": "610011",
+          "group": "SCION",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 8,
+          "avg_paid": 39.5,
+          "avg_gp": -9.07
+        },
+        {
+          "bin": "610014",
+          "group": "PITCMDRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 8,
+          "avg_paid": 47.08,
+          "avg_gp": -1.47
+        },
+        {
+          "bin": "003585",
+          "group": "ARE01",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 8,
+          "avg_paid": 39.5,
+          "avg_gp": -9.08
+        },
+        {
+          "bin": "004336",
+          "group": "RX1103",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 8,
+          "avg_paid": 4.61,
+          "avg_gp": 4.61
+        },
+        {
+          "bin": "610014",
+          "group": "WVPEIA1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 8,
+          "avg_paid": 127.52,
+          "avg_gp": 8.92
+        },
+        {
+          "bin": "012833",
+          "group": "FS99999U6G01",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 7,
+          "avg_paid": 4.48,
+          "avg_gp": 4.48
+        },
+        {
+          "bin": "015581",
+          "group": "W1579",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 7,
+          "avg_paid": 60.67,
+          "avg_gp": -1.76
+        },
+        {
+          "bin": "610011",
+          "group": "RXMEDD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 6,
+          "avg_paid": 2.97,
+          "avg_gp": 2.97
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "SYNTHROID    TAB 100MCG",
+          "claims": 54,
+          "avg_paid": 61.34,
+          "avg_gp": -1.33
+        },
+        {
+          "drug_name": "Levothyroxine 100 Mcg Tablet",
+          "claims": 49,
+          "avg_paid": 9.92,
+          "avg_gp": 9.92
+        },
+        {
+          "drug_name": "SYNTHROID    TAB 50MCG",
+          "claims": 43,
+          "avg_paid": 60.49,
+          "avg_gp": 0.6
+        },
+        {
+          "drug_name": "SYNTHROID    TAB 112MCG",
+          "claims": 40,
+          "avg_paid": 53.97,
+          "avg_gp": 5.4
+        },
+        {
+          "drug_name": "Levothyroxine 50 Mcg Tablet",
+          "claims": 33,
+          "avg_paid": 12.37,
+          "avg_gp": 12.37
+        },
+        {
+          "drug_name": "SYNTHROID    TAB 125MCG",
+          "claims": 33,
+          "avg_paid": 59.9,
+          "avg_gp": 0.53
+        },
+        {
+          "drug_name": "Levothyroxine 75 Mcg Tablet",
+          "claims": 33,
+          "avg_paid": 14.57,
+          "avg_gp": 14.57
+        },
+        {
+          "drug_name": "Levothyroxine 112 Mcg Tablet",
+          "claims": 24,
+          "avg_paid": 8.33,
+          "avg_gp": 8.33
+        },
+        {
+          "drug_name": "LEVOTHYROXINE SODIUM 75MCG TAB",
+          "claims": 23,
+          "avg_paid": 8.95,
+          "avg_gp": 8.95
+        },
+        {
+          "drug_name": "SYNTHROID    TAB 137MCG",
+          "claims": 21,
+          "avg_paid": 65.96,
+          "avg_gp": -5.75
+        }
+      ]
+    },
+    {
+      "class_name": "Oral Antidiabetics",
+      "stats": {
+        "total_claims": 2983,
+        "avg_reimbursement": 213.03,
+        "avg_gross_profit": 12.22,
+        "total_reimbursement": 635456.59,
+        "min_reimbursement": 0.35,
+        "max_reimbursement": 3470.09
+      },
+      "bin_groups": [
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 505,
+          "avg_paid": 197.65,
+          "avg_gp": 4.84
+        },
+        {
+          "bin": "610724",
+          "group": "CAP1305",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 482,
+          "avg_paid": 27.89,
+          "avg_gp": -481.21
+        },
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 241,
+          "avg_paid": 127.96,
+          "avg_gp": -3.91
+        },
+        {
+          "bin": "610097",
+          "group": "COS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 113,
+          "avg_paid": 357.94,
+          "avg_gp": 97.45
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 105,
+          "avg_paid": 454.23,
+          "avg_gp": 336.76
+        },
+        {
+          "bin": "004336",
+          "group": "RX1110",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 104,
+          "avg_paid": 900.88,
+          "avg_gp": 900.88
+        },
+        {
+          "bin": "004336",
+          "group": "RX1400",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 86,
+          "avg_paid": 250.32,
+          "avg_gp": 4.5
+        },
+        {
+          "bin": "610502",
+          "group": "RXAETD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 80,
+          "avg_paid": 334.52,
+          "avg_gp": 129.67
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 74,
+          "avg_paid": 6.24,
+          "avg_gp": 4.9
+        },
+        {
+          "bin": "004740",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 71,
+          "avg_paid": 609.34,
+          "avg_gp": 609.34
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 65,
+          "avg_paid": 49.18,
+          "avg_gp": 1.29
+        },
+        {
+          "bin": "020099",
+          "group": "WL3A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 61,
+          "avg_paid": 229.74,
+          "avg_gp": 6.12
+        },
+        {
+          "bin": "610097",
+          "group": "PDPIND",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 52,
+          "avg_paid": 117.87,
+          "avg_gp": 25.21
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 51,
+          "avg_paid": 366.53,
+          "avg_gp": 101.73
+        },
+        {
+          "bin": "003858",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 47,
+          "avg_paid": 122.05,
+          "avg_gp": 7.5
+        },
+        {
+          "bin": "015574",
+          "group": "MVS10",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 41,
+          "avg_paid": 305.9,
+          "avg_gp": 32.43
+        },
+        {
+          "bin": "014798",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 38,
+          "avg_paid": 15.92,
+          "avg_gp": 15.92
+        },
+        {
+          "bin": "004336",
+          "group": "RX1103",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 38,
+          "avg_paid": 311.82,
+          "avg_gp": 311.82
+        },
+        {
+          "bin": "610279",
+          "group": "UNITEDRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 36,
+          "avg_paid": 142.8,
+          "avg_gp": 142.37
+        },
+        {
+          "bin": "610097",
+          "group": "MPDCSP",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 26,
+          "avg_paid": 921.74,
+          "avg_gp": 921.74
+        },
+        {
+          "bin": "004336",
+          "group": "RX7117",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 24,
+          "avg_paid": 73.19,
+          "avg_gp": -3.23
+        },
+        {
+          "bin": "610014",
+          "group": "PEIAPLANAS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 24,
+          "avg_paid": 374.79,
+          "avg_gp": 2.06
+        },
+        {
+          "bin": "610014",
+          "group": "SPBLUE1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 22,
+          "avg_paid": 88.4,
+          "avg_gp": 86.8
+        },
+        {
+          "bin": "610014",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 42.2,
+          "avg_gp": 23.76
+        },
+        {
+          "bin": "004336",
+          "group": "RX1438",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 18,
+          "avg_paid": 21.41,
+          "avg_gp": 21.41
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "JARDIANCE    TAB 25MG",
+          "claims": 404,
+          "avg_paid": 227.51,
+          "avg_gp": -372.53
+        },
+        {
+          "drug_name": "METFORMIN    TAB 500MG",
+          "claims": 371,
+          "avg_paid": 7.9,
+          "avg_gp": 6.78
+        },
+        {
+          "drug_name": "METFORMIN    TAB 1000MG",
+          "claims": 369,
+          "avg_paid": 8.23,
+          "avg_gp": 7.16
+        },
+        {
+          "drug_name": "JANUVIA      TAB 100MG",
+          "claims": 171,
+          "avg_paid": 118.18,
+          "avg_gp": -208.59
+        },
+        {
+          "drug_name": "JARDIANCE    TAB 10MG",
+          "claims": 170,
+          "avg_paid": 511.71,
+          "avg_gp": -120.51
+        },
+        {
+          "drug_name": "FARXIGA      TAB 10MG",
+          "claims": 166,
+          "avg_paid": 625.51,
+          "avg_gp": -23.25
+        },
+        {
+          "drug_name": "METFORMIN    TAB 500MG ER",
+          "claims": 153,
+          "avg_paid": 9.11,
+          "avg_gp": 7.47
+        },
+        {
+          "drug_name": "GLIMEPIRIDE  TAB 4MG",
+          "claims": 76,
+          "avg_paid": 7.81,
+          "avg_gp": 5.85
+        },
+        {
+          "drug_name": "Metformin Hcl 500 Mg Tablet",
+          "claims": 68,
+          "avg_paid": 10.89,
+          "avg_gp": 10.89
+        },
+        {
+          "drug_name": "JARDIANCE 10MG TAB",
+          "claims": 63,
+          "avg_paid": 1389.01,
+          "avg_gp": 1389.01
+        }
+      ]
+    },
+    {
+      "class_name": "SSRIs",
+      "stats": {
+        "total_claims": 2935,
+        "avg_reimbursement": 14.45,
+        "avg_gross_profit": 10.56,
+        "total_reimbursement": 42414.3,
+        "min_reimbursement": 0.34,
+        "max_reimbursement": 544.23
+      },
+      "bin_groups": [
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 597,
+          "avg_paid": 27.85,
+          "avg_gp": 12.68
+        },
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 195,
+          "avg_paid": 3.65,
+          "avg_gp": 2.2
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 165,
+          "avg_paid": 6.25,
+          "avg_gp": 4.99
+        },
+        {
+          "bin": "610097",
+          "group": "COS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 121,
+          "avg_paid": 6.33,
+          "avg_gp": 4.71
+        },
+        {
+          "bin": "014798",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 91,
+          "avg_paid": 13.27,
+          "avg_gp": 13.27
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 81,
+          "avg_paid": 78.51,
+          "avg_gp": 77.54
+        },
+        {
+          "bin": "004740",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 75,
+          "avg_paid": 12.22,
+          "avg_gp": 12.22
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 58,
+          "avg_paid": 7.89,
+          "avg_gp": 6.95
+        },
+        {
+          "bin": "004336",
+          "group": "RX1400",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 56,
+          "avg_paid": 13.46,
+          "avg_gp": 11.86
+        },
+        {
+          "bin": "610014",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 54,
+          "avg_paid": 12.24,
+          "avg_gp": 11.07
+        },
+        {
+          "bin": "610502",
+          "group": "RXAETD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 49,
+          "avg_paid": 1.46,
+          "avg_gp": 0.66
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 39,
+          "avg_paid": 12.54,
+          "avg_gp": 11.2
+        },
+        {
+          "bin": "003858",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 32,
+          "avg_paid": 12.69,
+          "avg_gp": 11.34
+        },
+        {
+          "bin": "610097",
+          "group": "PDPIND",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 31,
+          "avg_paid": 38.13,
+          "avg_gp": 37.48
+        },
+        {
+          "bin": "003858",
+          "group": "LCBA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 30,
+          "avg_paid": 11.75,
+          "avg_gp": 10.87
+        },
+        {
+          "bin": "610279",
+          "group": "UHEALTH",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 30,
+          "avg_paid": 5.38,
+          "avg_gp": 5.17
+        },
+        {
+          "bin": "003585",
+          "group": "ARE01",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 25,
+          "avg_paid": 12.21,
+          "avg_gp": 10.97
+        },
+        {
+          "bin": "610014",
+          "group": "PEIAPLANAS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 25,
+          "avg_paid": 14.79,
+          "avg_gp": 12.71
+        },
+        {
+          "bin": "003858",
+          "group": "2CUA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 24,
+          "avg_paid": 1.68,
+          "avg_gp": 1.68
+        },
+        {
+          "bin": "003858",
+          "group": "WVPEIA1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 23,
+          "avg_paid": 12.81,
+          "avg_gp": 11.07
+        },
+        {
+          "bin": "610014",
+          "group": "SPBLUE1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 23,
+          "avg_paid": 13.17,
+          "avg_gp": 12.09
+        },
+        {
+          "bin": "610011",
+          "group": "RX1652",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 22,
+          "avg_paid": 3.63,
+          "avg_gp": 3.63
+        },
+        {
+          "bin": "610014",
+          "group": "WVPEIA1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 21,
+          "avg_paid": 15.71,
+          "avg_gp": 12.45
+        },
+        {
+          "bin": "015581",
+          "group": "Y0882",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 2.55,
+          "avg_gp": 1.76
+        },
+        {
+          "bin": "610014",
+          "group": "BCP025676010010",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 13.27,
+          "avg_gp": 10.93
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "ESCITALOPRAM TAB 20MG",
+          "claims": 256,
+          "avg_paid": 9.55,
+          "avg_gp": 8.64
+        },
+        {
+          "drug_name": "FLUOXETINE   CAP 20MG",
+          "claims": 256,
+          "avg_paid": 9.17,
+          "avg_gp": 7.85
+        },
+        {
+          "drug_name": "SERTRALINE   TAB 100MG",
+          "claims": 249,
+          "avg_paid": 9.76,
+          "avg_gp": 7.64
+        },
+        {
+          "drug_name": "CITALOPRAM   TAB 40MG",
+          "claims": 194,
+          "avg_paid": 7.07,
+          "avg_gp": 5.93
+        },
+        {
+          "drug_name": "SERTRALINE   TAB 50MG",
+          "claims": 182,
+          "avg_paid": 10.1,
+          "avg_gp": 8.58
+        },
+        {
+          "drug_name": "CITALOPRAM   TAB 20MG",
+          "claims": 180,
+          "avg_paid": 7.65,
+          "avg_gp": 6.77
+        },
+        {
+          "drug_name": "ESCITALOPRAM TAB 10MG",
+          "claims": 156,
+          "avg_paid": 11.21,
+          "avg_gp": 10.35
+        },
+        {
+          "drug_name": "FLUOXETINE   CAP 40MG",
+          "claims": 142,
+          "avg_paid": 10.47,
+          "avg_gp": 8.93
+        },
+        {
+          "drug_name": "Escitalopram 10 Mg Tablet",
+          "claims": 118,
+          "avg_paid": 3.67,
+          "avg_gp": 3.67
+        },
+        {
+          "drug_name": "Sertraline Hcl 50 Mg Tablet",
+          "claims": 112,
+          "avg_paid": 4.94,
+          "avg_gp": 4.94
+        }
+      ]
+    },
+    {
+      "class_name": "ACE Inhibitors",
+      "stats": {
+        "total_claims": 1781,
+        "avg_reimbursement": 11.39,
+        "avg_gross_profit": 9.61,
+        "total_reimbursement": 20278.63,
+        "min_reimbursement": 0.33,
+        "max_reimbursement": 802.84
+      },
+      "bin_groups": [
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 424,
+          "avg_paid": 24.69,
+          "avg_gp": 20.47
+        },
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 140,
+          "avg_paid": 2.98,
+          "avg_gp": 1.51
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 118,
+          "avg_paid": 6.04,
+          "avg_gp": 4.71
+        },
+        {
+          "bin": "610097",
+          "group": "COS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 118,
+          "avg_paid": 4.68,
+          "avg_gp": 3.82
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 70,
+          "avg_paid": 4.11,
+          "avg_gp": 3.71
+        },
+        {
+          "bin": "610014",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 68,
+          "avg_paid": 11.82,
+          "avg_gp": 10.73
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 48,
+          "avg_paid": 5.26,
+          "avg_gp": 4.18
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 48,
+          "avg_paid": 11.91,
+          "avg_gp": 10.68
+        },
+        {
+          "bin": "014798",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 47,
+          "avg_paid": 14.89,
+          "avg_gp": 14.89
+        },
+        {
+          "bin": "003858",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 36,
+          "avg_paid": 12.07,
+          "avg_gp": 10.74
+        },
+        {
+          "bin": "610097",
+          "group": "PDPIND",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 32,
+          "avg_paid": 16.51,
+          "avg_gp": 16.17
+        },
+        {
+          "bin": "004336",
+          "group": "RX1400",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 26,
+          "avg_paid": 13.08,
+          "avg_gp": 10.94
+        },
+        {
+          "bin": "610014",
+          "group": "SPBLUE1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 24,
+          "avg_paid": 7.1,
+          "avg_gp": 6.34
+        },
+        {
+          "bin": "610279",
+          "group": "UNITEDRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 23,
+          "avg_paid": 6.66,
+          "avg_gp": 6.25
+        },
+        {
+          "bin": "610502",
+          "group": "RXAETD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 1.03,
+          "avg_gp": 0.12
+        },
+        {
+          "bin": "015581",
+          "group": "W1579",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 1.49,
+          "avg_gp": 0.81
+        },
+        {
+          "bin": "004336",
+          "group": "RX1110",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 1.63,
+          "avg_gp": 1.63
+        },
+        {
+          "bin": "015581",
+          "group": "Y0882",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 19,
+          "avg_paid": 2.12,
+          "avg_gp": 1.07
+        },
+        {
+          "bin": "004336",
+          "group": "RX8585",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 16,
+          "avg_paid": 7.39,
+          "avg_gp": 7.39
+        },
+        {
+          "bin": "017010",
+          "group": "CIGPDPRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 16,
+          "avg_paid": 6.95,
+          "avg_gp": 5.1
+        },
+        {
+          "bin": "020099",
+          "group": "WL3A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 15,
+          "avg_paid": 11.85,
+          "avg_gp": 10.8
+        },
+        {
+          "bin": "015581",
+          "group": "R7348",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 15,
+          "avg_paid": 3.74,
+          "avg_gp": 1.83
+        },
+        {
+          "bin": "003858",
+          "group": "WVPEIA1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 12.47,
+          "avg_gp": 10.41
+        },
+        {
+          "bin": "610014",
+          "group": "PEIAPLANAS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 14.92,
+          "avg_gp": 11.66
+        },
+        {
+          "bin": "015581",
+          "group": "P5453",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 3.45,
+          "avg_gp": 2.28
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "LISINOPRIL   TAB 20MG",
+          "claims": 504,
+          "avg_paid": 8.01,
+          "avg_gp": 6.85
+        },
+        {
+          "drug_name": "LISINOPRIL   TAB 10MG",
+          "claims": 364,
+          "avg_paid": 7.65,
+          "avg_gp": 6.99
+        },
+        {
+          "drug_name": "LISINOPRIL   TAB 40MG",
+          "claims": 253,
+          "avg_paid": 8.02,
+          "avg_gp": 6.58
+        },
+        {
+          "drug_name": "LISINOPRIL   TAB 5MG",
+          "claims": 178,
+          "avg_paid": 8.22,
+          "avg_gp": 7.56
+        },
+        {
+          "drug_name": "LISINOPRIL   TAB 2.5MG",
+          "claims": 69,
+          "avg_paid": 7.51,
+          "avg_gp": 6.87
+        },
+        {
+          "drug_name": "Lisinopril 40 Mg Tablet",
+          "claims": 63,
+          "avg_paid": 5.14,
+          "avg_gp": 5.14
+        },
+        {
+          "drug_name": "LISINOPRIL   TAB 30MG",
+          "claims": 62,
+          "avg_paid": 9.14,
+          "avg_gp": 7.68
+        },
+        {
+          "drug_name": "BENAZEPRIL   TAB 20MG",
+          "claims": 28,
+          "avg_paid": 8.23,
+          "avg_gp": 5.56
+        },
+        {
+          "drug_name": "LISINOPRIL 20MG TAB",
+          "claims": 22,
+          "avg_paid": 6.14,
+          "avg_gp": 6.14
+        },
+        {
+          "drug_name": "Lisinopril   Tab 20mg",
+          "claims": 22,
+          "avg_paid": 2.53,
+          "avg_gp": 2.53
+        }
+      ]
+    },
+    {
+      "class_name": "Statins",
+      "stats": {
+        "total_claims": 3547,
+        "avg_reimbursement": 9.34,
+        "avg_gross_profit": 8.19,
+        "total_reimbursement": 33115.62,
+        "min_reimbursement": 0.34,
+        "max_reimbursement": 821.44
+      },
+      "bin_groups": [
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 576,
+          "avg_paid": 11.78,
+          "avg_gp": 10.75
+        },
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 346,
+          "avg_paid": 4.09,
+          "avg_gp": 2.14
+        },
+        {
+          "bin": "610097",
+          "group": "COS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 207,
+          "avg_paid": 9.53,
+          "avg_gp": 8.25
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 157,
+          "avg_paid": 8.76,
+          "avg_gp": 7.24
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 150,
+          "avg_paid": 4.44,
+          "avg_gp": 3.63
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 141,
+          "avg_paid": 7.28,
+          "avg_gp": 6.58
+        },
+        {
+          "bin": "014798",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 136,
+          "avg_paid": 16.35,
+          "avg_gp": 16.35
+        },
+        {
+          "bin": "610502",
+          "group": "RXAETD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 112,
+          "avg_paid": 2.27,
+          "avg_gp": 1.31
+        },
+        {
+          "bin": "004740",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 99,
+          "avg_paid": 12.53,
+          "avg_gp": 12.53
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 94,
+          "avg_paid": 13.03,
+          "avg_gp": 11.15
+        },
+        {
+          "bin": "004336",
+          "group": "RX1400",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 91,
+          "avg_paid": 13.54,
+          "avg_gp": 11.36
+        },
+        {
+          "bin": "004336",
+          "group": "RX1110",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 90,
+          "avg_paid": 9.03,
+          "avg_gp": 9.03
+        },
+        {
+          "bin": "610097",
+          "group": "PDPIND",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 77,
+          "avg_paid": 17.66,
+          "avg_gp": 17.4
+        },
+        {
+          "bin": "003858",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 62,
+          "avg_paid": 12.01,
+          "avg_gp": 10.93
+        },
+        {
+          "bin": "610014",
+          "group": "SPBLUE1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 56,
+          "avg_paid": 8.66,
+          "avg_gp": 6.58
+        },
+        {
+          "bin": "020099",
+          "group": "WL3A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 54,
+          "avg_paid": 12.41,
+          "avg_gp": 11.08
+        },
+        {
+          "bin": "610279",
+          "group": "UHEALTH",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 42,
+          "avg_paid": 7.87,
+          "avg_gp": 7.4
+        },
+        {
+          "bin": "610014",
+          "group": "PEIAPLANAS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 40,
+          "avg_paid": 15.46,
+          "avg_gp": 11.78
+        },
+        {
+          "bin": "610014",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 31,
+          "avg_paid": 13.06,
+          "avg_gp": 11.5
+        },
+        {
+          "bin": "017010",
+          "group": "CIGPDPRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 31,
+          "avg_paid": 11.19,
+          "avg_gp": 9.69
+        },
+        {
+          "bin": "610014",
+          "group": "PITCMDRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 31,
+          "avg_paid": 3.32,
+          "avg_gp": 1.64
+        },
+        {
+          "bin": "015574",
+          "group": "MVS10",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 29,
+          "avg_paid": 2.52,
+          "avg_gp": 1.66
+        },
+        {
+          "bin": "015581",
+          "group": "W1579",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 29,
+          "avg_paid": 3.47,
+          "avg_gp": 1.71
+        },
+        {
+          "bin": "004336",
+          "group": "RX7117",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 24,
+          "avg_paid": 2.35,
+          "avg_gp": 0.49
+        },
+        {
+          "bin": "004336",
+          "group": "RX8585",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 24,
+          "avg_paid": 18.76,
+          "avg_gp": 18.76
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "ATORVASTATIN TAB 20MG",
+          "claims": 474,
+          "avg_paid": 7.33,
+          "avg_gp": 6.2
+        },
+        {
+          "drug_name": "ATORVASTATIN TAB 40MG",
+          "claims": 459,
+          "avg_paid": 7.83,
+          "avg_gp": 7.01
+        },
+        {
+          "drug_name": "ROSUVASTATIN TAB 20MG",
+          "claims": 298,
+          "avg_paid": 8.63,
+          "avg_gp": 7
+        },
+        {
+          "drug_name": "ATORVASTATIN TAB 10MG",
+          "claims": 242,
+          "avg_paid": 8.17,
+          "avg_gp": 7.17
+        },
+        {
+          "drug_name": "ROSUVASTATIN TAB 10MG",
+          "claims": 200,
+          "avg_paid": 10.9,
+          "avg_gp": 9.38
+        },
+        {
+          "drug_name": "ROSUVASTATIN TAB 40MG",
+          "claims": 188,
+          "avg_paid": 9.71,
+          "avg_gp": 6.88
+        },
+        {
+          "drug_name": "ATORVASTATIN TAB 80MG",
+          "claims": 180,
+          "avg_paid": 9.21,
+          "avg_gp": 6.98
+        },
+        {
+          "drug_name": "PRAVASTATIN  TAB 40MG",
+          "claims": 137,
+          "avg_paid": 9.65,
+          "avg_gp": 7.83
+        },
+        {
+          "drug_name": "SIMVASTATIN  TAB 20MG",
+          "claims": 122,
+          "avg_paid": 7.62,
+          "avg_gp": 6.51
+        },
+        {
+          "drug_name": "PRAVASTATIN  TAB 20MG",
+          "claims": 110,
+          "avg_paid": 12.01,
+          "avg_gp": 10.16
+        }
+      ]
+    },
+    {
+      "class_name": "Beta Blockers",
+      "stats": {
+        "total_claims": 2877,
+        "avg_reimbursement": 9.8,
+        "avg_gross_profit": 7.99,
+        "total_reimbursement": 28200.9,
+        "min_reimbursement": 0.08,
+        "max_reimbursement": 211.5
+      },
+      "bin_groups": [
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 422,
+          "avg_paid": 12.4,
+          "avg_gp": 10.79
+        },
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 308,
+          "avg_paid": 5.65,
+          "avg_gp": 3.61
+        },
+        {
+          "bin": "610097",
+          "group": "COS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 151,
+          "avg_paid": 8.91,
+          "avg_gp": 7.5
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 143,
+          "avg_paid": 4.36,
+          "avg_gp": 2.58
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 126,
+          "avg_paid": 8.06,
+          "avg_gp": 0.15
+        },
+        {
+          "bin": "610502",
+          "group": "RXAETD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 116,
+          "avg_paid": 1.93,
+          "avg_gp": 0.78
+        },
+        {
+          "bin": "014798",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 101,
+          "avg_paid": 13.91,
+          "avg_gp": 13.91
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 97,
+          "avg_paid": 10,
+          "avg_gp": 9.21
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 80,
+          "avg_paid": 14.13,
+          "avg_gp": 11.04
+        },
+        {
+          "bin": "004336",
+          "group": "RX1110",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 69,
+          "avg_paid": 4.68,
+          "avg_gp": 4.68
+        },
+        {
+          "bin": "610097",
+          "group": "PDPIND",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 65,
+          "avg_paid": 17.75,
+          "avg_gp": 17.16
+        },
+        {
+          "bin": "610014",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 58,
+          "avg_paid": 13.84,
+          "avg_gp": 12.31
+        },
+        {
+          "bin": "004336",
+          "group": "RX1400",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 58,
+          "avg_paid": 14.64,
+          "avg_gp": 12.49
+        },
+        {
+          "bin": "003858",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 54,
+          "avg_paid": 12.99,
+          "avg_gp": 10.85
+        },
+        {
+          "bin": "004740",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 46,
+          "avg_paid": 15.41,
+          "avg_gp": 15.41
+        },
+        {
+          "bin": "610014",
+          "group": "SPBLUE1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 44,
+          "avg_paid": 24.83,
+          "avg_gp": 22.81
+        },
+        {
+          "bin": "020099",
+          "group": "WL3A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 43,
+          "avg_paid": 12.58,
+          "avg_gp": 11.13
+        },
+        {
+          "bin": "004336",
+          "group": "RX8585",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 41,
+          "avg_paid": 6.15,
+          "avg_gp": 6.15
+        },
+        {
+          "bin": "015574",
+          "group": "MVS10",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 30,
+          "avg_paid": 3.06,
+          "avg_gp": 1.98
+        },
+        {
+          "bin": "004336",
+          "group": "RX7117",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 26,
+          "avg_paid": 9.26,
+          "avg_gp": 7.99
+        },
+        {
+          "bin": "015581",
+          "group": "Y0882",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 24,
+          "avg_paid": 2.38,
+          "avg_gp": 1.42
+        },
+        {
+          "bin": "610014",
+          "group": "PITCMDRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 23,
+          "avg_paid": 4.31,
+          "avg_gp": 1.87
+        },
+        {
+          "bin": "015581",
+          "group": "W1579",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 22,
+          "avg_paid": 7.49,
+          "avg_gp": 5.15
+        },
+        {
+          "bin": "610014",
+          "group": "WVPEIA1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 21.49,
+          "avg_gp": 13.33
+        },
+        {
+          "bin": "610014",
+          "group": "PEIAPLANAS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 15.14,
+          "avg_gp": 12.85
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "METOPROL SUC TAB 25MG ER",
+          "claims": 500,
+          "avg_paid": 10.22,
+          "avg_gp": 8.85
+        },
+        {
+          "drug_name": "METOPROL SUC TAB 50MG ER",
+          "claims": 489,
+          "avg_paid": 9.51,
+          "avg_gp": 7.93
+        },
+        {
+          "drug_name": "METOPROL TAR TAB 25MG",
+          "claims": 176,
+          "avg_paid": 6.85,
+          "avg_gp": 6.05
+        },
+        {
+          "drug_name": "ATENOLOL     TAB 50MG",
+          "claims": 152,
+          "avg_paid": 8.93,
+          "avg_gp": 7.82
+        },
+        {
+          "drug_name": "METOPROL SUC TAB 100MG ER",
+          "claims": 143,
+          "avg_paid": 12.21,
+          "avg_gp": 7.41
+        },
+        {
+          "drug_name": "METOPROL TAR TAB 50MG",
+          "claims": 100,
+          "avg_paid": 6.12,
+          "avg_gp": 4.77
+        },
+        {
+          "drug_name": "ATENOLOL     TAB 25MG",
+          "claims": 91,
+          "avg_paid": 6.06,
+          "avg_gp": 5.13
+        },
+        {
+          "drug_name": "CARVEDILOL   TAB 6.25MG",
+          "claims": 81,
+          "avg_paid": 6.67,
+          "avg_gp": 5.28
+        },
+        {
+          "drug_name": "Metoprolol Succ Er 50 Mg Tab",
+          "claims": 72,
+          "avg_paid": 10.39,
+          "avg_gp": 10.39
+        },
+        {
+          "drug_name": "CARVEDILOL   TAB 25MG",
+          "claims": 62,
+          "avg_paid": 8.11,
+          "avg_gp": 5.5
+        }
+      ]
+    },
+    {
+      "class_name": "Gabapentinoids",
+      "stats": {
+        "total_claims": 2638,
+        "avg_reimbursement": 15.18,
+        "avg_gross_profit": 7.89,
+        "total_reimbursement": 40042.87,
+        "min_reimbursement": 0.21,
+        "max_reimbursement": 1853.38
+      },
+      "bin_groups": [
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 677,
+          "avg_paid": 15.22,
+          "avg_gp": 9.84
+        },
+        {
+          "bin": "610097",
+          "group": "COS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 243,
+          "avg_paid": 12.46,
+          "avg_gp": 7.43
+        },
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 230,
+          "avg_paid": 5.81,
+          "avg_gp": -0.53
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 139,
+          "avg_paid": 14.75,
+          "avg_gp": 9.01
+        },
+        {
+          "bin": "610502",
+          "group": "RXAETD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 97,
+          "avg_paid": 11.08,
+          "avg_gp": 5.65
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 82,
+          "avg_paid": 10.86,
+          "avg_gp": 7.04
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 79,
+          "avg_paid": 9.34,
+          "avg_gp": 5.52
+        },
+        {
+          "bin": "610711",
+          "group": "HPGGDD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 57,
+          "avg_paid": 16.09,
+          "avg_gp": 16.09
+        },
+        {
+          "bin": "004336",
+          "group": "RX1110",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 53,
+          "avg_paid": 1.44,
+          "avg_gp": 1.44
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 44,
+          "avg_paid": 182.19,
+          "avg_gp": 7.06
+        },
+        {
+          "bin": "004336",
+          "group": "RX1400",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 44,
+          "avg_paid": 14.08,
+          "avg_gp": 9.45
+        },
+        {
+          "bin": "004740",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 42,
+          "avg_paid": 13.89,
+          "avg_gp": 13.89
+        },
+        {
+          "bin": "610097",
+          "group": "PDPIND",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 41,
+          "avg_paid": 17.05,
+          "avg_gp": 16.31
+        },
+        {
+          "bin": "610014",
+          "group": "SPBLUE1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 39,
+          "avg_paid": 18.35,
+          "avg_gp": 13.22
+        },
+        {
+          "bin": "003858",
+          "group": "WVPEIA1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 34,
+          "avg_paid": 15.63,
+          "avg_gp": 9.67
+        },
+        {
+          "bin": "610014",
+          "group": "PEIAPLANATS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 31,
+          "avg_paid": 14.32,
+          "avg_gp": 9.85
+        },
+        {
+          "bin": "003858",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 29,
+          "avg_paid": 13.77,
+          "avg_gp": 10.44
+        },
+        {
+          "bin": "017010",
+          "group": "CIGPDPRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 23,
+          "avg_paid": 11.6,
+          "avg_gp": 10.45
+        },
+        {
+          "bin": "610014",
+          "group": "PEIAPLANAS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 23,
+          "avg_paid": 15.32,
+          "avg_gp": 10.35
+        },
+        {
+          "bin": "015581",
+          "group": "R7348",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 22,
+          "avg_paid": 3.36,
+          "avg_gp": -0.01
+        },
+        {
+          "bin": "610014",
+          "group": "PITCMDRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 21,
+          "avg_paid": 9.08,
+          "avg_gp": 3.23
+        },
+        {
+          "bin": "610014",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 21,
+          "avg_paid": 17.04,
+          "avg_gp": 11.45
+        },
+        {
+          "bin": "610239",
+          "group": "65006500",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 20,
+          "avg_paid": 27.08,
+          "avg_gp": 23.98
+        },
+        {
+          "bin": "004336",
+          "group": "NONDOL",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 19,
+          "avg_paid": 14.78,
+          "avg_gp": 9.18
+        },
+        {
+          "bin": "003585",
+          "group": "ARE01",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 19,
+          "avg_paid": 12.83,
+          "avg_gp": 9.52
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "GABAPENTIN   CAP 300MG",
+          "claims": 553,
+          "avg_paid": 10.58,
+          "avg_gp": 7.99
+        },
+        {
+          "drug_name": "GABAPENTIN   TAB 800MG",
+          "claims": 486,
+          "avg_paid": 14.93,
+          "avg_gp": 6.8
+        },
+        {
+          "drug_name": "GABAPENTIN   CAP 400MG",
+          "claims": 369,
+          "avg_paid": 11.67,
+          "avg_gp": 6.14
+        },
+        {
+          "drug_name": "GABAPENTIN   TAB 600MG",
+          "claims": 300,
+          "avg_paid": 13.16,
+          "avg_gp": 6.99
+        },
+        {
+          "drug_name": "GABAPENTIN   CAP 100MG",
+          "claims": 128,
+          "avg_paid": 8.29,
+          "avg_gp": 6.03
+        },
+        {
+          "drug_name": "PREGABALIN   CAP 150MG",
+          "claims": 91,
+          "avg_paid": 17.48,
+          "avg_gp": 9.89
+        },
+        {
+          "drug_name": "Gabapentin 300 Mg Capsule",
+          "claims": 88,
+          "avg_paid": 10.84,
+          "avg_gp": 10.84
+        },
+        {
+          "drug_name": "PREGABALIN   CAP 75MG",
+          "claims": 84,
+          "avg_paid": 18.68,
+          "avg_gp": 12.4
+        },
+        {
+          "drug_name": "PREGABALIN   CAP 50MG",
+          "claims": 47,
+          "avg_paid": 11.7,
+          "avg_gp": 7.66
+        },
+        {
+          "drug_name": "Gabapentin 800 Mg Tablet",
+          "claims": 41,
+          "avg_paid": 14.2,
+          "avg_gp": 14.2
+        }
+      ]
+    },
+    {
+      "class_name": "Calcium Channel Blockers",
+      "stats": {
+        "total_claims": 1646,
+        "avg_reimbursement": 7.92,
+        "avg_gross_profit": 7.46,
+        "total_reimbursement": 13031.15,
+        "min_reimbursement": 0.17,
+        "max_reimbursement": 132.33
+      },
+      "bin_groups": [
+        {
+          "bin": "610164",
+          "group": "1650000",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 188,
+          "avg_paid": 11.05,
+          "avg_gp": 10.68
+        },
+        {
+          "bin": "015581",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 150,
+          "avg_paid": 1.2,
+          "avg_gp": 0.87
+        },
+        {
+          "bin": "000000",
+          "group": "No Group Number",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 109,
+          "avg_paid": 5.42,
+          "avg_gp": 4.98
+        },
+        {
+          "bin": "004336",
+          "group": "RXCVSD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 83,
+          "avg_paid": 3.47,
+          "avg_gp": 3.37
+        },
+        {
+          "bin": "610097",
+          "group": "COS",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 70,
+          "avg_paid": 5.58,
+          "avg_gp": 5.27
+        },
+        {
+          "bin": "014798",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 68,
+          "avg_paid": 10.41,
+          "avg_gp": 10.41
+        },
+        {
+          "bin": "610014",
+          "group": "2FGA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 67,
+          "avg_paid": 7.37,
+          "avg_gp": 7.2
+        },
+        {
+          "bin": "020099",
+          "group": "WL3A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 61,
+          "avg_paid": 11.01,
+          "avg_gp": 10.74
+        },
+        {
+          "bin": "610502",
+          "group": "RXAETD",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 51,
+          "avg_paid": 1.51,
+          "avg_gp": 1.01
+        },
+        {
+          "bin": "004336",
+          "group": "RX1110",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 50,
+          "avg_paid": 2.36,
+          "avg_gp": 2.36
+        },
+        {
+          "bin": "610097",
+          "group": "PDPIND",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 40,
+          "avg_paid": 13.13,
+          "avg_gp": 12.99
+        },
+        {
+          "bin": "004740",
+          "group": "N/A",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 35,
+          "avg_paid": 13.41,
+          "avg_gp": 13.41
+        },
+        {
+          "bin": "003858",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 34,
+          "avg_paid": 10.9,
+          "avg_gp": 10.66
+        },
+        {
+          "bin": "004336",
+          "group": "UMWA",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 33,
+          "avg_paid": 11.24,
+          "avg_gp": 10.77
+        },
+        {
+          "bin": "610014",
+          "group": "SPBLUE1",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 32,
+          "avg_paid": 13.96,
+          "avg_gp": 13.03
+        },
+        {
+          "bin": "004336",
+          "group": "RX1400",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 30,
+          "avg_paid": 12.96,
+          "avg_gp": 11.8
+        },
+        {
+          "bin": "610014",
+          "group": "HMRK001",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 29,
+          "avg_paid": 11.64,
+          "avg_gp": 10.93
+        },
+        {
+          "bin": "610279",
+          "group": "UHEALTH",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 23,
+          "avg_paid": 12.66,
+          "avg_gp": 12.66
+        },
+        {
+          "bin": "610279",
+          "group": "UNITEDRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 18,
+          "avg_paid": 5.77,
+          "avg_gp": 5.65
+        },
+        {
+          "bin": "015581",
+          "group": "Y0882",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 16,
+          "avg_paid": 1.04,
+          "avg_gp": 0.73
+        },
+        {
+          "bin": "003585",
+          "group": "ARE01",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 15,
+          "avg_paid": 10.83,
+          "avg_gp": 10.67
+        },
+        {
+          "bin": "017010",
+          "group": "CIGPDPRX",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 15,
+          "avg_paid": 9.24,
+          "avg_gp": 6.45
+        },
+        {
+          "bin": "610494",
+          "group": "ETLHWT",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 15,
+          "avg_paid": 10.82,
+          "avg_gp": 10.66
+        },
+        {
+          "bin": "015581",
+          "group": "W1579",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 14,
+          "avg_paid": 1.01,
+          "avg_gp": 0.68
+        },
+        {
+          "bin": "015574",
+          "group": "MVS10",
+          "contract_id": null,
+          "plan_name": null,
+          "claims": 13,
+          "avg_paid": 1.58,
+          "avg_gp": 1.27
+        }
+      ],
+      "top_drugs": [
+        {
+          "drug_name": "AMLODIPINE   TAB 5MG",
+          "claims": 598,
+          "avg_paid": 7.44,
+          "avg_gp": 7.21
+        },
+        {
+          "drug_name": "AMLODIPINE   TAB 10MG",
+          "claims": 448,
+          "avg_paid": 7.63,
+          "avg_gp": 7.27
+        },
+        {
+          "drug_name": "AMLODIPINE   TAB 2.5MG",
+          "claims": 129,
+          "avg_paid": 7.97,
+          "avg_gp": 7.46
+        },
+        {
+          "drug_name": "Amlodipine Besylate 5 Mg Tab",
+          "claims": 95,
+          "avg_paid": 6.63,
+          "avg_gp": 6.63
+        },
+        {
+          "drug_name": "Amlodipine Besylate 10 Mg Tab",
+          "claims": 61,
+          "avg_paid": 9.98,
+          "avg_gp": 9.98
+        },
+        {
+          "drug_name": "amLODIPine BESYLATE 5MG TAB",
+          "claims": 60,
+          "avg_paid": 6.7,
+          "avg_gp": 6.7
+        },
+        {
+          "drug_name": "amLODIPine BESYLATE 10mg TAB",
+          "claims": 33,
+          "avg_paid": 6.11,
+          "avg_gp": 6.11
+        },
+        {
+          "drug_name": "Amlodipine   Tab 10mg",
+          "claims": 26,
+          "avg_paid": 1.53,
+          "avg_gp": 1.53
+        },
+        {
+          "drug_name": "Amlodipine   Tab 5mg",
+          "claims": 20,
+          "avg_paid": 2.24,
+          "avg_gp": 2.24
+        },
+        {
+          "drug_name": "NIFEDIPINE   TAB 90MG ER",
+          "claims": 18,
+          "avg_paid": 16.69,
+          "avg_gp": 10.53
+        }
+      ]
+    }
+  ]
+}
