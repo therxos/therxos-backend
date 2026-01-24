@@ -12,10 +12,12 @@ router.get('/', authenticateToken, async (req, res) => {
   try {
     const { status = 'pending', issue_type, limit = 100, offset = 0 } = req.query;
 
-    // Super admins can specify a pharmacyId, otherwise use the user's pharmacy
+    // Super admins can specify a pharmacyId, or see all if not specified
     let pharmacyId = req.user.pharmacyId;
     if (req.user.role === 'super_admin' && req.query.pharmacyId) {
       pharmacyId = req.query.pharmacyId;
+    } else if (req.user.role === 'super_admin') {
+      pharmacyId = null; // Show all pharmacies
     }
 
     // Only admins and super_admins can view data quality issues
@@ -80,21 +82,16 @@ router.get('/', authenticateToken, async (req, res) => {
     }));
 
     // Get counts by status
-    const statusCounts = await db.query(`
-      SELECT status, COUNT(*) as count
-      FROM data_quality_issues
-      WHERE pharmacy_id = $1
-      GROUP BY status
-    `, [pharmacyId]);
+    const statusCountsQuery = pharmacyId
+      ? `SELECT status, COUNT(*) as count FROM data_quality_issues WHERE pharmacy_id = $1 GROUP BY status`
+      : `SELECT status, COUNT(*) as count FROM data_quality_issues GROUP BY status`;
+    const statusCounts = await db.query(statusCountsQuery, pharmacyId ? [pharmacyId] : []);
 
     // Get counts by issue type
-    const typeCounts = await db.query(`
-      SELECT issue_type, COUNT(*) as count
-      FROM data_quality_issues
-      WHERE pharmacy_id = $1 AND status = 'pending'
-      GROUP BY issue_type
-      ORDER BY count DESC
-    `, [pharmacyId]);
+    const typeCountsQuery = pharmacyId
+      ? `SELECT issue_type, COUNT(*) as count FROM data_quality_issues WHERE pharmacy_id = $1 AND status = 'pending' GROUP BY issue_type ORDER BY count DESC`
+      : `SELECT issue_type, COUNT(*) as count FROM data_quality_issues WHERE status = 'pending' GROUP BY issue_type ORDER BY count DESC`;
+    const typeCounts = await db.query(typeCountsQuery, pharmacyId ? [pharmacyId] : []);
 
     res.json({
       issues: formattedIssues,
