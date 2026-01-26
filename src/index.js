@@ -12,6 +12,7 @@ import db from './database/index.js';
 import { ingestCSV, resolveClientFromEmail } from './services/ingestion.js';
 import { runOpportunityScan, updatePatientProfiles } from './services/scanner.js';
 import { verifyOpportunityCoverage } from './services/medicare.js';
+import { handleMicrosoftOAuthCallback, pollForOutcomesReports } from './services/microsoftPoller.js';
 import authRoutes from './routes/auth.js';
 import clientRoutes from './routes/clients.js';
 import opportunityRoutes from './routes/opportunities.js';
@@ -126,6 +127,33 @@ app.use('/api/coverage', coverageIntelligenceRoutes);
 app.use('/api/data-quality', dataQualityRoutes);
 app.use('/api/changelog', changelogRoutes);
 app.use('/api/intake', intakeRoutes);
+
+// Microsoft OAuth callback (separate route for redirect URI)
+app.get('/api/microsoft/callback', async (req, res) => {
+  try {
+    const { code, error, error_description } = req.query;
+
+    if (error) {
+      logger.error('Microsoft OAuth error', { error, error_description });
+      const frontendUrl = process.env.FRONTEND_URL || 'https://beta.therxos.com';
+      return res.redirect(`${frontendUrl}/admin?microsoft_error=` + encodeURIComponent(error_description || error));
+    }
+
+    if (!code) {
+      return res.status(400).json({ error: 'Authorization code required' });
+    }
+
+    await handleMicrosoftOAuthCallback(code);
+
+    // Redirect to admin panel with success message
+    const frontendUrl = process.env.FRONTEND_URL || 'https://beta.therxos.com';
+    res.redirect(`${frontendUrl}/admin?microsoft_connected=true`);
+  } catch (error) {
+    logger.error('Microsoft OAuth callback error', { error: error.message });
+    const frontendUrl = process.env.FRONTEND_URL || 'https://beta.therxos.com';
+    res.redirect(`${frontendUrl}/admin?microsoft_error=` + encodeURIComponent(error.message));
+  }
+});
 
 // CSV Upload endpoint
 app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
@@ -424,6 +452,49 @@ cron.schedule('0 6 * * *', async () => {
     logger.info('Scheduled Gmail poll completed');
   } catch (error) {
     logger.error('Scheduled Gmail poll failed', { error: error.message });
+  }
+}, {
+  timezone: 'America/New_York'
+});
+
+// Schedule nightly Microsoft/Outcomes poll (6:15 AM daily - for RX30 clients like Aracoma)
+cron.schedule('15 6 * * *', async () => {
+  logger.info('Starting scheduled Microsoft/Outcomes poll');
+  try {
+    // Check if Microsoft OAuth is configured
+    const tokenCheck = await db.query(
+      "SELECT 1 FROM system_settings WHERE setting_key = 'microsoft_oauth_tokens'"
+    );
+
+    if (tokenCheck.rows.length === 0) {
+      logger.info('Microsoft OAuth not configured, skipping Outcomes poll');
+      return;
+    }
+
+    // Get Aracoma pharmacy (RX30 client that receives Outcomes reports)
+    const aracomaResult = await db.query(`
+      SELECT p.pharmacy_id FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE c.status = 'active'
+      AND p.pharmacy_name ILIKE '%aracoma%'
+    `);
+
+    if (aracomaResult.rows.length === 0) {
+      logger.info('No RX30 pharmacies found for Outcomes poll');
+      return;
+    }
+
+    for (const pharmacy of aracomaResult.rows) {
+      try {
+        logger.info('Polling Outcomes reports for pharmacy', { pharmacyId: pharmacy.pharmacy_id });
+        await pollForOutcomesReports({ pharmacyId: pharmacy.pharmacy_id, daysBack: 1 });
+      } catch (err) {
+        logger.error('Outcomes poll failed for pharmacy', { pharmacyId: pharmacy.pharmacy_id, error: err.message });
+      }
+    }
+    logger.info('Scheduled Microsoft/Outcomes poll completed');
+  } catch (error) {
+    logger.error('Scheduled Microsoft/Outcomes poll failed', { error: error.message });
   }
 }, {
   timezone: 'America/New_York'

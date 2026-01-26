@@ -1,4 +1,4 @@
-// automation.js - API routes for Gmail polling and automation features
+// automation.js - API routes for Gmail polling, Microsoft Graph polling, and automation features
 import express from 'express';
 import db from '../database/index.js';
 import { authenticateToken } from './auth.js';
@@ -9,6 +9,11 @@ import {
   getGmailAuthUrl,
   handleGmailOAuthCallback
 } from '../services/gmailPoller.js';
+import {
+  getMicrosoftAuthUrl,
+  handleMicrosoftOAuthCallback,
+  pollForOutcomesReports
+} from '../services/microsoftPoller.js';
 import { logger } from '../utils/logger.js';
 
 const router = express.Router();
@@ -190,6 +195,70 @@ router.put('/settings', authenticateToken, requireSuperAdmin, async (req, res) =
     res.json({ success: true, message: 'Settings updated' });
   } catch (error) {
     logger.error('Update settings error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// Microsoft Graph API Routes (for Outcomes/RX30 emails)
+// ============================================
+
+// GET /api/automation/microsoft/auth-url - Get Microsoft OAuth authorization URL
+router.get('/microsoft/auth-url', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const authUrl = await getMicrosoftAuthUrl();
+    res.json({ authUrl });
+  } catch (error) {
+    logger.error('Failed to generate Microsoft auth URL', { error: error.message });
+    res.status(500).json({ error: 'Failed to generate auth URL: ' + error.message });
+  }
+});
+
+// GET /api/automation/microsoft/status - Check if Microsoft is connected
+router.get('/microsoft/status', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await db.query(
+      "SELECT token_data, updated_at FROM system_settings WHERE setting_key = 'microsoft_oauth_tokens'"
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ connected: false, lastUpdated: null });
+    }
+
+    const tokenData = result.rows[0].token_data;
+    const tokens = typeof tokenData === 'string' ? JSON.parse(tokenData) : tokenData;
+
+    res.json({
+      connected: true,
+      lastUpdated: result.rows[0].updated_at,
+      account: tokens.account?.username || null
+    });
+  } catch (error) {
+    logger.error('Microsoft status check error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/automation/poll-outcomes - Manually trigger Outcomes email polling
+router.post('/poll-outcomes', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId, daysBack = 1 } = req.body;
+
+    if (!pharmacyId) {
+      return res.status(400).json({ error: 'pharmacyId is required' });
+    }
+
+    logger.info('Manual Outcomes poll triggered', { pharmacyId, daysBack, userId: req.user.userId });
+
+    const result = await pollForOutcomesReports({ pharmacyId, daysBack });
+
+    res.json({
+      success: true,
+      message: 'Outcomes poll completed',
+      ...result
+    });
+  } catch (error) {
+    logger.error('Manual Outcomes poll error', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });
