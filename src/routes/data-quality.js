@@ -184,11 +184,19 @@ router.patch('/:issueId', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
-    // Verify the issue exists and belongs to this pharmacy
-    const existing = await db.query(
-      'SELECT * FROM data_quality_issues WHERE issue_id = $1 AND pharmacy_id = $2',
-      [issueId, pharmacyId]
-    );
+    // Verify the issue exists (super admins can update any, others only their pharmacy)
+    let existing;
+    if (req.user.role === 'super_admin') {
+      existing = await db.query(
+        'SELECT * FROM data_quality_issues WHERE issue_id = $1',
+        [issueId]
+      );
+    } else {
+      existing = await db.query(
+        'SELECT * FROM data_quality_issues WHERE issue_id = $1 AND pharmacy_id = $2',
+        [issueId, pharmacyId]
+      );
+    }
 
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Data quality issue not found' });
@@ -266,24 +274,45 @@ router.post('/bulk-update', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'issueIds must be a non-empty array' });
     }
 
-    const result = await db.query(`
-      UPDATE data_quality_issues
-      SET status = $1,
-          resolved_by = $2,
-          resolved_at = $3,
-          resolution_notes = COALESCE($4, resolution_notes),
-          updated_at = NOW()
-      WHERE issue_id = ANY($5)
-        AND pharmacy_id = $6
-      RETURNING issue_id
-    `, [
-      status,
-      req.user.userId,
-      new Date(),
-      resolution_notes,
-      issueIds,
-      pharmacyId
-    ]);
+    // Super admins can update any pharmacy's issues
+    let result;
+    if (req.user.role === 'super_admin') {
+      result = await db.query(`
+        UPDATE data_quality_issues
+        SET status = $1,
+            resolved_by = $2,
+            resolved_at = $3,
+            resolution_notes = COALESCE($4, resolution_notes),
+            updated_at = NOW()
+        WHERE issue_id = ANY($5)
+        RETURNING issue_id
+      `, [
+        status,
+        req.user.userId,
+        new Date(),
+        resolution_notes,
+        issueIds
+      ]);
+    } else {
+      result = await db.query(`
+        UPDATE data_quality_issues
+        SET status = $1,
+            resolved_by = $2,
+            resolved_at = $3,
+            resolution_notes = COALESCE($4, resolution_notes),
+            updated_at = NOW()
+        WHERE issue_id = ANY($5)
+          AND pharmacy_id = $6
+        RETURNING issue_id
+      `, [
+        status,
+        req.user.userId,
+        new Date(),
+        resolution_notes,
+        issueIds,
+        pharmacyId
+      ]);
+    }
 
     logger.info('Bulk data quality update', {
       count: result.rows.length,
