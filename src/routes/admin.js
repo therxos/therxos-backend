@@ -55,6 +55,64 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
   }
 });
 
+// PUT /api/admin/pharmacies/:id - Update pharmacy details
+router.put('/pharmacies/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      pharmacyName, pharmacyNpi, ncpdp, state, address, city, zip, phone, fax,
+      pmsSystem, status, submitterEmail
+    } = req.body;
+
+    // Update pharmacy
+    const pharmacyResult = await db.query(`
+      UPDATE pharmacies SET
+        pharmacy_name = COALESCE($1, pharmacy_name),
+        pharmacy_npi = COALESCE($2, pharmacy_npi),
+        ncpdp = COALESCE($3, ncpdp),
+        state = COALESCE($4, state),
+        address = COALESCE($5, address),
+        city = COALESCE($6, city),
+        zip = COALESCE($7, zip),
+        phone = COALESCE($8, phone),
+        fax = COALESCE($9, fax),
+        pms_system = COALESCE($10, pms_system),
+        updated_at = NOW()
+      WHERE pharmacy_id = $11
+      RETURNING *
+    `, [pharmacyName, pharmacyNpi, ncpdp, state, address, city, zip, phone, fax, pmsSystem, id]);
+
+    if (pharmacyResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    // Update client status if provided
+    if (status || submitterEmail) {
+      const pharmacy = pharmacyResult.rows[0];
+      await db.query(`
+        UPDATE clients SET
+          status = COALESCE($1, status),
+          submitter_email = COALESCE($2, submitter_email),
+          updated_at = NOW()
+        WHERE client_id = $3
+      `, [status, submitterEmail, pharmacy.client_id]);
+    }
+
+    // Fetch updated pharmacy with client info
+    const result = await db.query(`
+      SELECT p.*, c.client_name, c.status, c.submitter_email
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE p.pharmacy_id = $1
+    `, [id]);
+
+    res.json({ pharmacy: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating pharmacy:', error);
+    res.status(500).json({ error: 'Failed to update pharmacy' });
+  }
+});
+
 // GET /api/admin/stats - Get platform-wide stats (authenticated)
 router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
