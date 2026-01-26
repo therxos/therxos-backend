@@ -160,25 +160,25 @@ export async function handleMicrosoftOAuthCallback(code) {
 async function searchForOutcomesEmails(graphClient, options = {}) {
   const { afterDate, maxResults = 25, processedIds = [] } = options;
 
-  // Build search filter for Outcomes emails
-  // Looking for emails from rxinsights_noreply@outcomes.com with "Dispensing Report" in subject
-  let filter = "from/emailAddress/address eq 'rxinsights_noreply@outcomes.com'";
-
-  if (afterDate) {
-    const dateStr = afterDate.toISOString();
-    filter += ` and receivedDateTime ge ${dateStr}`;
-  }
-
   try {
-    const response = await graphClient
-      .api('/me/messages')
-      .filter(filter)
-      .select('id,subject,from,receivedDateTime,hasAttachments,body')
-      .top(maxResults)
-      .orderby('receivedDateTime desc')
-      .get();
+    // Use $search for sender (more flexible than $filter for email addresses)
+    // Search for emails from Outcomes with "Dispensing Report" in subject
+    const searchQuery = 'from:rxinsights_noreply@outcomes.com subject:"Dispensing Report"';
 
-    const messages = response.value || [];
+    let request = graphClient
+      .api('/me/messages')
+      .search(`"${searchQuery}"`)
+      .select('id,subject,from,receivedDateTime,hasAttachments')
+      .top(maxResults);
+
+    const response = await request.get();
+
+    let messages = response.value || [];
+
+    // Filter by date in code (search doesn't support date filtering well)
+    if (afterDate) {
+      messages = messages.filter(m => new Date(m.receivedDateTime) >= afterDate);
+    }
 
     // Filter out already processed emails and non-dispensing reports
     return messages.filter(m =>
