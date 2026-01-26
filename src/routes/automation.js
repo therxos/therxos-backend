@@ -12,7 +12,8 @@ import {
 import {
   getMicrosoftAuthUrl,
   handleMicrosoftOAuthCallback,
-  pollForOutcomesReports
+  pollForOutcomesReports,
+  pollOneDriveForReports
 } from '../services/microsoftPoller.js';
 import { scrapeOutcomesEmails } from '../services/outlookScraper.js';
 import { logger } from '../utils/logger.js';
@@ -215,6 +216,32 @@ router.get('/microsoft/auth-url', authenticateToken, requireSuperAdmin, async (r
   }
 });
 
+// GET /api/automation/microsoft/callback - Handle Microsoft OAuth callback
+router.get('/microsoft/callback', async (req, res) => {
+  try {
+    const { code, error, error_description } = req.query;
+
+    if (error) {
+      logger.error('Microsoft OAuth error', { error, error_description });
+      const frontendUrl = process.env.FRONTEND_URL || 'https://beta.therxos.com';
+      return res.redirect(`${frontendUrl}/admin?microsoft_error=${encodeURIComponent(error_description || error)}`);
+    }
+
+    if (!code) {
+      return res.status(400).json({ error: 'Authorization code required' });
+    }
+
+    await handleMicrosoftOAuthCallback(code);
+
+    const frontendUrl = process.env.FRONTEND_URL || 'https://beta.therxos.com';
+    res.redirect(`${frontendUrl}/admin?microsoft_connected=true`);
+  } catch (error) {
+    logger.error('Microsoft OAuth callback error', { error: error.message });
+    const frontendUrl = process.env.FRONTEND_URL || 'https://beta.therxos.com';
+    res.redirect(`${frontendUrl}/admin?microsoft_error=${encodeURIComponent(error.message)}`);
+  }
+});
+
 // GET /api/automation/microsoft/status - Check if Microsoft is connected
 router.get('/microsoft/status', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
@@ -260,6 +287,30 @@ router.post('/poll-outcomes', authenticateToken, requireSuperAdmin, async (req, 
     });
   } catch (error) {
     logger.error('Manual Outcomes poll error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/automation/poll-onedrive - Poll OneDrive for Outcomes reports (via Power Automate)
+router.post('/poll-onedrive', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId, folderPath = '/OutcomesReports', daysBack = 7 } = req.body;
+
+    if (!pharmacyId) {
+      return res.status(400).json({ error: 'pharmacyId is required' });
+    }
+
+    logger.info('Manual OneDrive poll triggered', { pharmacyId, folderPath, daysBack, userId: req.user.userId });
+
+    const result = await pollOneDriveForReports({ pharmacyId, folderPath, daysBack });
+
+    res.json({
+      success: true,
+      message: 'OneDrive poll completed',
+      ...result
+    });
+  } catch (error) {
+    logger.error('Manual OneDrive poll error', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });

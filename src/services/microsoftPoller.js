@@ -5,6 +5,7 @@
 import { ConfidentialClientApplication } from '@azure/msal-node';
 import { Client } from '@microsoft/microsoft-graph-client';
 import { v4 as uuidv4 } from 'uuid';
+import AdmZip from 'adm-zip';
 import db from '../database/index.js';
 import { logger } from '../utils/logger.js';
 import { ingestCSV } from './ingestion.js';
@@ -13,7 +14,7 @@ import { autoCompleteOpportunities } from './gmailPoller.js';
 
 // Microsoft Graph scopes
 const SCOPES = ['https://graph.microsoft.com/.default'];
-const USER_SCOPES = ['Mail.Read', 'offline_access'];
+const USER_SCOPES = ['Mail.Read', 'Files.Read', 'Files.ReadWrite', 'offline_access'];
 
 // MSAL configuration
 function getMsalConfig() {
@@ -488,8 +489,222 @@ export async function pollForOutcomesReports(options = {}) {
   }
 }
 
+/**
+ * Poll OneDrive folder for new Outcomes report files
+ * This is used when Power Automate saves email attachments to OneDrive
+ */
+export async function pollOneDriveForReports(options = {}) {
+  const { pharmacyId, folderPath = '/OutcomesReports', daysBack = 7 } = options;
+  const runId = uuidv4();
+
+  logger.info('Starting OneDrive poll for Outcomes reports', { runId, pharmacyId, folderPath });
+
+  const results = {
+    runId,
+    source: 'onedrive',
+    filesProcessed: 0,
+    recordsIngested: 0,
+    opportunitiesCompleted: 0,
+    newOpportunitiesFound: 0,
+    errors: []
+  };
+
+  try {
+    const graphClient = await getGraphClient();
+
+    // Get files from the OneDrive folder
+    // The folder path should be something like /OutcomesReports
+    const encodedPath = encodeURIComponent(folderPath.replace(/^\//, ''));
+
+    let files;
+    try {
+      const response = await graphClient
+        .api(`/me/drive/root:/${encodedPath}:/children`)
+        .select('id,name,createdDateTime,size,file')
+        .orderby('createdDateTime desc')
+        .top(50)
+        .get();
+
+      files = response.value || [];
+    } catch (folderError) {
+      // Folder might not exist yet
+      if (folderError.statusCode === 404) {
+        logger.info('OneDrive folder does not exist yet', { folderPath });
+        return { ...results, message: `Folder ${folderPath} not found. It will be created when Power Automate saves the first file.` };
+      }
+      throw folderError;
+    }
+
+    logger.info(`Found ${files.length} files in OneDrive folder`, { runId, folderPath });
+
+    // Get already processed file IDs
+    const processedResult = await db.query(
+      `SELECT file_id FROM processed_files WHERE source = 'onedrive' AND processed_at >= NOW() - INTERVAL '${daysBack} days'`
+    );
+    const processedIds = new Set(processedResult.rows.map(r => r.file_id));
+
+    // Filter to unprocessed files that look like Outcomes reports
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+
+    const filesToProcess = files.filter(f => {
+      // Skip already processed
+      if (processedIds.has(f.id)) return false;
+
+      // Must be a file (not folder)
+      if (!f.file) return false;
+
+      // Check filename pattern (Dispensing_Report*.csv or *.zip)
+      const filename = f.name?.toLowerCase() || '';
+      if (!filename.includes('dispensing') && !filename.includes('report')) return false;
+      if (!filename.endsWith('.csv') && !filename.endsWith('.zip') && !filename.endsWith('.xlsx')) return false;
+
+      // Check date
+      const fileDate = new Date(f.createdDateTime);
+      return fileDate >= cutoffDate;
+    });
+
+    logger.info(`Found ${filesToProcess.length} unprocessed report files`, { runId });
+
+    // Process each file
+    for (const file of filesToProcess) {
+      try {
+        logger.info('Processing OneDrive file', { runId, filename: file.name, size: file.size });
+
+        // Download the file content
+        const fileContent = await graphClient
+          .api(`/me/drive/items/${file.id}/content`)
+          .get();
+
+        // Convert to Buffer
+        let fileBuffer;
+        if (fileContent instanceof ArrayBuffer) {
+          fileBuffer = Buffer.from(fileContent);
+        } else if (Buffer.isBuffer(fileContent)) {
+          fileBuffer = fileContent;
+        } else {
+          // It might be a readable stream
+          const chunks = [];
+          for await (const chunk of fileContent) {
+            chunks.push(chunk);
+          }
+          fileBuffer = Buffer.concat(chunks);
+        }
+
+        logger.info('Downloaded file', { filename: file.name, bufferSize: fileBuffer.length });
+
+        // Extract CSVs (handle ZIP files)
+        let csvFiles = [];
+        const filename = file.name.toLowerCase();
+
+        if (filename.endsWith('.zip')) {
+          // Extract CSVs from ZIP
+          try {
+            const zip = new AdmZip(fileBuffer);
+            const zipEntries = zip.getEntries();
+
+            for (const entry of zipEntries) {
+              if (entry.entryName.toLowerCase().endsWith('.csv') && !entry.isDirectory) {
+                const csvData = zip.readFile(entry);
+                csvFiles.push({
+                  filename: entry.entryName,
+                  data: csvData
+                });
+                logger.info('Extracted CSV from ZIP', { zipFile: file.name, csvFile: entry.entryName, size: csvData.length });
+              }
+            }
+          } catch (zipError) {
+            logger.error('Failed to extract ZIP', { filename: file.name, error: zipError.message });
+            results.errors.push({ file: file.name, error: `ZIP extraction failed: ${zipError.message}` });
+            continue;
+          }
+        } else if (filename.endsWith('.csv')) {
+          csvFiles.push({
+            filename: file.name,
+            data: fileBuffer
+          });
+        }
+
+        // Ingest each CSV
+        for (const csv of csvFiles) {
+          try {
+            const ingestionResult = await ingestCSV(csv.data, {
+              pharmacyId,
+              sourceEmail: 'onedrive',
+              sourceFile: csv.filename,
+              pmsSystem: 'rx30'
+            });
+
+            results.recordsIngested += ingestionResult.stats?.inserted || 0;
+            logger.info('Ingested CSV', {
+              filename: csv.filename,
+              inserted: ingestionResult.stats?.inserted,
+              duplicates: ingestionResult.stats?.duplicates
+            });
+
+            // Auto-complete opportunities
+            const newRxResult = await db.query(`
+              SELECT p.*, pat.first_name as patient_first, pat.last_name as patient_last
+              FROM prescriptions p
+              LEFT JOIN patients pat ON pat.patient_id = p.patient_id
+              WHERE p.pharmacy_id = $1
+              AND p.source_file = $2
+              AND p.created_at >= NOW() - INTERVAL '1 hour'
+            `, [pharmacyId, csv.filename]);
+
+            if (newRxResult.rows.length > 0) {
+              const autoCompleteResult = await autoCompleteOpportunities(pharmacyId, newRxResult.rows);
+              results.opportunitiesCompleted += autoCompleteResult.updated || 0;
+            }
+
+            // Run opportunity scan
+            const scanResult = await runOpportunityScan({
+              pharmacyIds: [pharmacyId],
+              scanType: 'onedrive_import',
+              lookbackHours: 1
+            });
+            results.newOpportunitiesFound += scanResult.opportunitiesFound || 0;
+
+          } catch (csvError) {
+            logger.error('Failed to ingest CSV', { filename: csv.filename, error: csvError.message });
+            results.errors.push({ file: csv.filename, error: csvError.message });
+          }
+        }
+
+        results.filesProcessed++;
+
+        // Mark file as processed
+        await db.query(`
+          INSERT INTO processed_files (file_id, filename, source, processed_at, run_id)
+          VALUES ($1, $2, 'onedrive', NOW(), $3)
+          ON CONFLICT (file_id) DO UPDATE SET processed_at = NOW()
+        `, [file.id, file.name, runId]);
+
+      } catch (fileError) {
+        logger.error('Failed to process OneDrive file', { filename: file.name, error: fileError.message });
+        results.errors.push({ file: file.name, error: fileError.message });
+      }
+    }
+
+    // Log the run
+    await db.query(`
+      INSERT INTO poll_runs (run_id, run_type, pharmacy_id, started_at, completed_at, summary)
+      VALUES ($1, 'onedrive_poll', $2, NOW(), NOW(), $3)
+    `, [runId, pharmacyId, JSON.stringify(results)]);
+
+    logger.info('OneDrive poll completed', results);
+    return results;
+
+  } catch (error) {
+    logger.error('OneDrive poll failed', { runId, error: error.message });
+    results.errors.push({ general: error.message });
+    return results;
+  }
+}
+
 export default {
   getMicrosoftAuthUrl,
   handleMicrosoftOAuthCallback,
-  pollForOutcomesReports
+  pollForOutcomesReports,
+  pollOneDriveForReports
 };

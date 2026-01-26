@@ -57,7 +57,10 @@
       "WebFetch(domain:api.vercel.com)",
       "WebFetch(domain:beta.therxos.com)",
       "Bash(git rm:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(DAYS_BACK=30 node scripts/scrape-outcomes.js:*)",
+      "Bash(HEADLESS=false node:*)",
+      "Bash(set HEADLESS=false)"
     ]
   }
 }
