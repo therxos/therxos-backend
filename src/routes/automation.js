@@ -14,6 +14,7 @@ import {
   handleMicrosoftOAuthCallback,
   pollForOutcomesReports
 } from '../services/microsoftPoller.js';
+import { scrapeOutcomesEmails } from '../services/outlookScraper.js';
 import { logger } from '../utils/logger.js';
 
 const router = express.Router();
@@ -259,6 +260,37 @@ router.post('/poll-outcomes', authenticateToken, requireSuperAdmin, async (req, 
     });
   } catch (error) {
     logger.error('Manual Outcomes poll error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/automation/scrape-outcomes - Trigger Outlook browser scraper for encrypted emails
+// NOTE: This only works when running locally with Chrome installed, not on Railway
+router.post('/scrape-outcomes', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId, daysBack = 7 } = req.body;
+
+    if (!pharmacyId) {
+      return res.status(400).json({ error: 'pharmacyId is required' });
+    }
+
+    if (!process.env.MICROSOFT_PASSWORD) {
+      return res.status(400).json({
+        error: 'MICROSOFT_PASSWORD environment variable not set. This scraper requires M365 credentials.'
+      });
+    }
+
+    logger.info('Outlook scraper triggered', { pharmacyId, daysBack, userId: req.user.userId });
+
+    const result = await scrapeOutcomesEmails({ pharmacyId, daysBack });
+
+    res.json({
+      success: true,
+      message: 'Outlook scrape completed',
+      ...result
+    });
+  } catch (error) {
+    logger.error('Outlook scraper error', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });
