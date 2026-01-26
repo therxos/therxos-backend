@@ -245,7 +245,7 @@ async function extractAttachments(graphClient, messageId) {
     // Log all attachments found
     logger.info('All attachments on email', { messageId, attachments: allAttachmentInfo });
 
-    return attachments;
+    return { attachments, allAttachmentInfo };
   } catch (error) {
     logger.error('Failed to extract attachments', { messageId, error: error.message });
     throw error;
@@ -303,11 +303,14 @@ async function processOutcomesEmail(graphClient, messageId, pharmacyId) {
     });
 
     // Extract CSV attachments
-    const attachments = await extractAttachments(graphClient, messageId);
+    const { attachments, allAttachmentInfo } = await extractAttachments(graphClient, messageId);
+
+    // Include all attachment info in results for debugging
+    results.allAttachmentsFound = allAttachmentInfo;
 
     if (attachments.length === 0) {
-      logger.warn('No CSV attachments found in Outcomes email', { messageId });
-      results.errors.push({ general: 'No CSV attachments found' });
+      logger.warn('No CSV attachments found in Outcomes email', { messageId, allAttachmentInfo });
+      results.errors.push({ general: 'No CSV attachments found', attachmentsOnEmail: allAttachmentInfo });
       return results;
     }
 
