@@ -107,7 +107,7 @@ router.get('/', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('Get data quality issues error', { error: error.message, stack: error.stack });
-    res.status(500).json({ error: 'Failed to get data quality issues' });
+    res.status(500).json({ error: 'Failed to get data quality issues', details: error.message });
   }
 });
 
@@ -403,7 +403,7 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     logger.error('Get data quality stats error', { error: error.message });
-    res.status(500).json({ error: 'Failed to get data quality stats' });
+    res.status(500).json({ error: 'Failed to get data quality stats', details: error.message });
   }
 });
 
