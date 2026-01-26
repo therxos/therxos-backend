@@ -69,7 +69,9 @@ async function main() {
     process.exit(1);
   } finally {
     // Close database connection
-    await db.end();
+    if (db.pool && typeof db.pool.end === 'function') {
+      await db.pool.end();
+    }
   }
 }
 
