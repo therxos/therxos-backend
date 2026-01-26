@@ -206,14 +206,23 @@ async function extractAttachments(graphClient, messageId) {
       .get();
 
     const attachments = [];
+    const allAttachmentInfo = [];
 
     for (const attachment of attachmentsResponse.value || []) {
+      // Log all attachments for debugging
+      allAttachmentInfo.push({
+        name: attachment.name,
+        type: attachment['@odata.type'],
+        contentType: attachment.contentType,
+        size: attachment.size
+      });
+
       // Check if it's a file attachment (not inline or reference)
       if (attachment['@odata.type'] === '#microsoft.graph.fileAttachment') {
         const filename = attachment.name?.toLowerCase() || '';
 
-        // We want CSV files
-        if (filename.endsWith('.csv')) {
+        // We want CSV files (or xlsx which we might need to convert)
+        if (filename.endsWith('.csv') || filename.endsWith('.xlsx') || filename.endsWith('.xls')) {
           // contentBytes is base64 encoded
           const data = Buffer.from(attachment.contentBytes, 'base64');
 
@@ -224,13 +233,17 @@ async function extractAttachments(graphClient, messageId) {
             contentType: attachment.contentType
           });
 
-          logger.info('Found CSV attachment', {
+          logger.info('Found data attachment', {
             filename: attachment.name,
-            size: attachment.size
+            size: attachment.size,
+            contentType: attachment.contentType
           });
         }
       }
     }
+
+    // Log all attachments found
+    logger.info('All attachments on email', { messageId, attachments: allAttachmentInfo });
 
     return attachments;
   } catch (error) {
