@@ -27,25 +27,34 @@ router.get('/', authenticateToken, async (req, res) => {
 
     let query = `
       SELECT
-        dqi.*,
+        dqi.issue_id,
+        dqi.pharmacy_id,
+        dqi.opportunity_id,
+        dqi.patient_id,
+        dqi.issue_type,
+        dqi.issue_description,
+        dqi.original_value,
+        dqi.field_name,
+        dqi.status,
+        dqi.resolved_value,
+        dqi.resolved_by,
+        dqi.resolved_at,
+        dqi.resolution_notes,
+        dqi.created_at,
         ph.pharmacy_name,
         p.first_name as patient_first_name,
         p.last_name as patient_last_name,
         o.current_drug_name,
         o.recommended_drug_name,
-        o.potential_margin_gain,
         o.annual_margin_gain,
         o.opportunity_type,
         o.trigger_type,
-        pr.drug_name as prescription_drug_name,
-        pr.prescriber_name as prescription_prescriber_name,
         u.first_name as resolved_by_first,
         u.last_name as resolved_by_last
       FROM data_quality_issues dqi
       LEFT JOIN pharmacies ph ON ph.pharmacy_id = dqi.pharmacy_id
       LEFT JOIN patients p ON p.patient_id = dqi.patient_id
       LEFT JOIN opportunities o ON o.opportunity_id = dqi.opportunity_id
-      LEFT JOIN prescriptions pr ON pr.prescription_id = dqi.prescription_id
       LEFT JOIN users u ON u.user_id = dqi.resolved_by
       WHERE 1=1
     `;
@@ -77,8 +86,9 @@ router.get('/', authenticateToken, async (req, res) => {
     const formattedIssues = result.rows.map(issue => ({
       ...issue,
       patient_name: formatPatientName(issue.patient_first_name, issue.patient_last_name),
-      prescriber_name_formatted: formatPrescriberName(issue.prescription_prescriber_name),
-      resolved_by_name: issue.resolved_by_first ? formatPatientName(issue.resolved_by_first, issue.resolved_by_last) : null
+      resolved_by_name: issue.resolved_by_first ? formatPatientName(issue.resolved_by_first, issue.resolved_by_last) : null,
+      current_drug: issue.current_drug_name,
+      recommended_drug: issue.recommended_drug_name
     }));
 
     // Get counts by status
