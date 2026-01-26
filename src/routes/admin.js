@@ -145,6 +145,65 @@ router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
   }
 });
 
+// GET /api/admin/debug/data-quality - Debug endpoint to check data quality table
+router.get('/debug/data-quality', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    // Check if table exists
+    const tableCheck = await db.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_name = 'data_quality_issues'
+      ) as table_exists
+    `);
+
+    const tableExists = tableCheck.rows[0]?.table_exists;
+
+    if (!tableExists) {
+      return res.json({
+        tableExists: false,
+        message: 'data_quality_issues table does not exist. Run migration 008_data_quality_issues.sql'
+      });
+    }
+
+    // Check trigger exists
+    const triggerCheck = await db.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'trg_check_opportunity_quality'
+      ) as trigger_exists
+    `);
+
+    // Count issues
+    const counts = await db.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'pending') as pending,
+        COUNT(*) FILTER (WHERE status = 'resolved') as resolved,
+        COUNT(*) FILTER (WHERE status = 'ignored') as ignored
+      FROM data_quality_issues
+    `);
+
+    // Sample data
+    const sample = await db.query(`
+      SELECT issue_id, pharmacy_id, issue_type, status, created_at
+      FROM data_quality_issues
+      ORDER BY created_at DESC
+      LIMIT 5
+    `);
+
+    res.json({
+      tableExists: true,
+      triggerExists: triggerCheck.rows[0]?.trigger_exists,
+      counts: counts.rows[0],
+      sampleIssues: sample.rows
+    });
+  } catch (error) {
+    console.error('Debug data quality error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/admin/public-stats - Public stats for main website (no auth required)
 router.get('/public-stats', async (req, res) => {
   try {
