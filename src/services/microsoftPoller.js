@@ -158,33 +158,38 @@ export async function handleMicrosoftOAuthCallback(code) {
  * Search for Outcomes dispensing report emails
  */
 async function searchForOutcomesEmails(graphClient, options = {}) {
-  const { afterDate, maxResults = 25, processedIds = [] } = options;
+  const { afterDate, maxResults = 50, processedIds = [] } = options;
 
   try {
-    // Use $search for sender (more flexible than $filter for email addresses)
-    // Search for emails from Outcomes with "Dispensing Report" in subject
-    const searchQuery = 'from:rxinsights_noreply@outcomes.com subject:"Dispensing Report"';
-
-    let request = graphClient
+    // Simple approach: get recent messages and filter in code
+    // Graph API has complex filter/search limitations, so we fetch more and filter locally
+    const response = await graphClient
       .api('/me/messages')
-      .search(`"${searchQuery}"`)
       .select('id,subject,from,receivedDateTime,hasAttachments')
-      .top(maxResults);
-
-    const response = await request.get();
+      .top(maxResults)
+      .orderby('receivedDateTime desc')
+      .get();
 
     let messages = response.value || [];
 
-    // Filter by date in code (search doesn't support date filtering well)
+    logger.info('Fetched messages from Microsoft', { count: messages.length });
+
+    // Filter to Outcomes emails with "Dispensing Report"
+    messages = messages.filter(m => {
+      const fromAddress = m.from?.emailAddress?.address?.toLowerCase() || '';
+      const subject = m.subject?.toLowerCase() || '';
+      return fromAddress.includes('outcomes.com') && subject.includes('dispensing report');
+    });
+
+    logger.info('Filtered to Outcomes dispensing reports', { count: messages.length });
+
+    // Filter by date
     if (afterDate) {
       messages = messages.filter(m => new Date(m.receivedDateTime) >= afterDate);
     }
 
-    // Filter out already processed emails and non-dispensing reports
-    return messages.filter(m =>
-      !processedIds.includes(m.id) &&
-      m.subject?.toLowerCase().includes('dispensing report')
-    );
+    // Filter out already processed emails
+    return messages.filter(m => !processedIds.includes(m.id));
   } catch (error) {
     logger.error('Failed to search for Outcomes emails', { error: error.message });
     throw error;
