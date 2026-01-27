@@ -520,24 +520,27 @@ router.get('/monthly', authenticateToken, async (req, res) => {
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
 
     // Staff performance - who completed/actioned opportunities
+    // Look at ALL actioned opportunities for the pharmacy, not limited by date
+    // This gives a full picture of staff performance
     const staffResult = await db.query(`
       SELECT
         u.user_id,
         u.first_name,
         u.last_name,
         u.role,
-        COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed', 'Captured')) as actioned_count,
-        COUNT(*) FILTER (WHERE o.status IN ('Approved', 'Completed')) as completed_count,
+        COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) as actioned_count,
+        COUNT(*) FILTER (WHERE o.status IN ('Approved', 'Completed')) as captured_count,
+        COUNT(*) FILTER (WHERE o.status = 'Completed') as completed_count,
         COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) as captured_value,
+        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status = 'Completed'), 0) as completed_value,
         COALESCE(AVG(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) as avg_value_per_capture
       FROM opportunities o
       JOIN users u ON u.user_id = o.actioned_by
       WHERE o.pharmacy_id = $1
-        AND o.actioned_at >= $2 AND o.actioned_at <= $3
         AND o.actioned_by IS NOT NULL
       GROUP BY u.user_id, u.first_name, u.last_name, u.role
       ORDER BY completed_count DESC, captured_value DESC
-    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
+    `, [pharmacyId]);
 
     res.json({
       month: monthNum,
@@ -590,8 +593,10 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         name: `${r.first_name} ${r.last_name}`,
         role: r.role,
         actioned_count: parseInt(r.actioned_count) || 0,
+        captured_count: parseInt(r.captured_count) || 0,
         completed_count: parseInt(r.completed_count) || 0,
         captured_value: parseFloat(r.captured_value) || 0,
+        completed_value: parseFloat(r.completed_value) || 0,
         avg_value_per_capture: parseFloat(r.avg_value_per_capture) || 0,
       })),
     });
