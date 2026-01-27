@@ -238,6 +238,25 @@ router.get('/debug/opportunity-types', authenticateToken, requireSuperAdmin, asy
   }
 });
 
+// GET /api/admin/debug/recommended-drugs - Check all recommended_drug_name values by pharmacy
+router.get('/debug/recommended-drugs', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const drugs = await db.query(`
+      SELECT
+        p.pharmacy_name,
+        o.recommended_drug_name,
+        COUNT(*) as count
+      FROM opportunities o
+      JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id
+      GROUP BY p.pharmacy_name, o.recommended_drug_name
+      ORDER BY p.pharmacy_name, count DESC
+    `);
+    res.json({ drugs: drugs.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/admin/public-stats - Public stats for main website (no auth required)
 router.get('/public-stats', async (req, res) => {
   try {
