@@ -596,9 +596,11 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         role: r.role,
         actioned_count: parseInt(r.actioned_count) || 0,
         captured_count: parseInt(r.captured_count) || 0,
+        approved_count: parseInt(r.approved_count) || 0,
+        approved_value: parseFloat(r.approved_value) || 0,
         completed_count: parseInt(r.completed_count) || 0,
-        captured_value: parseFloat(r.captured_value) || 0,
         completed_value: parseFloat(r.completed_value) || 0,
+        captured_value: parseFloat(r.captured_value) || 0,
         avg_value_per_capture: parseFloat(r.avg_value_per_capture) || 0,
       })),
     });
