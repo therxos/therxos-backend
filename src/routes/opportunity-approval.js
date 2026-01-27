@@ -65,12 +65,31 @@ router.get('/', authenticateToken, requireSuperAdmin, async (req, res) => {
       });
     }
 
-    // Add resolved pharmacy names to each item
+    // Check which items already have matching triggers
+    const recommendedDrugs = result.rows.map(r => r.recommended_drug_name).filter(Boolean);
+    let existingTriggerMap = {};
+    if (recommendedDrugs.length > 0) {
+      const triggerResult = await db.query(`
+        SELECT trigger_id, trigger_name, display_name, recommended_drug
+        FROM triggers
+        WHERE LOWER(recommended_drug) = ANY($1)
+      `, [recommendedDrugs.map(d => d?.toLowerCase())]);
+      triggerResult.rows.forEach(t => {
+        existingTriggerMap[t.recommended_drug?.toLowerCase()] = {
+          trigger_id: t.trigger_id,
+          trigger_name: t.trigger_name,
+          display_name: t.display_name
+        };
+      });
+    }
+
+    // Add resolved pharmacy names and existing trigger info to each item
     const itemsWithPharmacyNames = result.rows.map(row => ({
       ...row,
       affected_pharmacy_names: row.affected_pharmacies
         ? row.affected_pharmacies.map(id => pharmacyNameMap[id] || id)
-        : []
+        : [],
+      existing_trigger: existingTriggerMap[row.recommended_drug_name?.toLowerCase()] || null
     }));
 
     // Get counts by status
