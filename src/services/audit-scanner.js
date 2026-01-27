@@ -542,9 +542,109 @@ export async function getAuditSummary(pharmacyId) {
   };
 }
 
+/**
+ * Run audit scan for a specific rule on a specific pharmacy
+ */
+export async function runRuleScan(pharmacyId, ruleId, options = {}) {
+  const { lookbackDays = 90 } = options;
+
+  const batchId = `audit_rule_${Date.now()}`;
+  const startTime = Date.now();
+
+  logger.info('Starting rule-specific audit scan', { batchId, pharmacyId, ruleId, lookbackDays });
+
+  try {
+    // Get the specific rule
+    const ruleResult = await db.query('SELECT * FROM audit_rules WHERE rule_id = $1 AND is_enabled = true', [ruleId]);
+    if (ruleResult.rows.length === 0) {
+      return { flagsCreated: 0, patientsAffected: 0, message: 'Rule not found or not enabled' };
+    }
+    const rule = ruleResult.rows[0];
+
+    // Get prescriptions
+    const rxResult = await db.query(`
+      SELECT
+        prescription_id, patient_id, drug_name, ndc,
+        quantity_dispensed, days_supply, daw_code, sig,
+        dispensed_date, prescriber_name, prescriber_npi,
+        insurance_bin, insurance_group, patient_pay, insurance_pay, acquisition_cost
+      FROM prescriptions
+      WHERE pharmacy_id = $1
+        AND dispensed_date >= CURRENT_DATE - ($2 || ' days')::INTERVAL
+      ORDER BY dispensed_date DESC
+    `, [pharmacyId, lookbackDays]);
+
+    logger.info(`Found ${rxResult.rows.length} prescriptions to check against rule ${rule.rule_code}`);
+
+    const flagsToCreate = [];
+    const patientsAffected = new Set();
+
+    // Check rule against all prescriptions
+    for (const rx of rxResult.rows) {
+      const result = checkDatabaseRule(rx, rule);
+
+      if (result.violation) {
+        patientsAffected.add(rx.patient_id);
+        flagsToCreate.push({
+          pharmacy_id: pharmacyId,
+          prescription_id: rx.prescription_id,
+          patient_id: rx.patient_id,
+          rule_id: rule.rule_id,
+          rule_code: rule.rule_code,
+          rule_type: rule.rule_type,
+          severity: rule.severity,
+          risk_score: rule.audit_risk_score,
+          drug_name: rx.drug_name,
+          ndc: rx.ndc,
+          quantity_dispensed: rx.quantity_dispensed,
+          days_supply: rx.days_supply,
+          daw_code: rx.daw_code,
+          dispensed_date: rx.dispensed_date,
+          violation_message: result.message,
+          expected_value: result.expected,
+          actual_value: result.actual,
+          gross_profit: result.gross_profit,
+          potential_audit_exposure: result.gross_profit || 0,
+          status: 'pending',
+          batch_id: batchId
+        });
+      }
+    }
+
+    // Save flags to database
+    let flagsCreated = 0;
+    for (const flag of flagsToCreate) {
+      const saved = await saveAuditFlag(flag);
+      if (saved) flagsCreated++;
+    }
+
+    const duration = Date.now() - startTime;
+    logger.info('Rule-specific audit scan complete', {
+      batchId,
+      pharmacyId,
+      ruleId,
+      flagsCreated,
+      patientsAffected: patientsAffected.size,
+      duration: `${duration}ms`
+    });
+
+    return {
+      flagsCreated,
+      patientsAffected: patientsAffected.size,
+      prescriptionsChecked: rxResult.rows.length,
+      ruleCode: rule.rule_code,
+      ruleName: rule.rule_name
+    };
+  } catch (error) {
+    logger.error('Rule-specific audit scan failed', { error: error.message, pharmacyId, ruleId });
+    throw error;
+  }
+}
+
 export default {
   runFullAuditScan,
   runAuditScanAll,
+  runRuleScan,
   getAuditSummary,
   AUDIT_RULES
 };

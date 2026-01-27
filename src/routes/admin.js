@@ -2027,7 +2027,48 @@ router.get('/audit-rules', authenticateToken, requireSuperAdmin, async (req, res
       SELECT * FROM audit_rules ORDER BY rule_type, rule_name
     `);
 
-    res.json({ rules: result.rows });
+    // Get per-pharmacy audit risk stats for all rules
+    const pharmacyStatsResult = await db.query(`
+      SELECT
+        ar.rule_id,
+        af.pharmacy_id,
+        ph.pharmacy_name,
+        COUNT(*) as risk_count,
+        COUNT(DISTINCT af.patient_id) as patient_count,
+        COALESCE(SUM(af.potential_audit_exposure), 0) as total_exposure
+      FROM audit_rules ar
+      LEFT JOIN audit_flags af ON af.rule_id = ar.rule_id AND af.status = 'pending'
+      LEFT JOIN pharmacies ph ON ph.pharmacy_id = af.pharmacy_id
+      WHERE af.audit_flag_id IS NOT NULL
+      GROUP BY ar.rule_id, af.pharmacy_id, ph.pharmacy_name
+      ORDER BY ar.rule_id, total_exposure DESC
+    `);
+
+    // Build a map of rule_id -> pharmacy stats
+    const pharmacyStatsByRule = {};
+    pharmacyStatsResult.rows.forEach(row => {
+      if (!pharmacyStatsByRule[row.rule_id]) {
+        pharmacyStatsByRule[row.rule_id] = [];
+      }
+      pharmacyStatsByRule[row.rule_id].push({
+        pharmacy_id: row.pharmacy_id,
+        pharmacy_name: row.pharmacy_name,
+        risk_count: parseInt(row.risk_count),
+        patient_count: parseInt(row.patient_count),
+        total_exposure: parseFloat(row.total_exposure) || 0
+      });
+    });
+
+    // Add pharmacy stats to each rule
+    const rulesWithStats = result.rows.map(rule => ({
+      ...rule,
+      pharmacy_stats: pharmacyStatsByRule[rule.rule_id] || [],
+      total_risks: (pharmacyStatsByRule[rule.rule_id] || []).reduce((sum, p) => sum + p.risk_count, 0),
+      total_patients: (pharmacyStatsByRule[rule.rule_id] || []).reduce((sum, p) => sum + p.patient_count, 0),
+      total_exposure: (pharmacyStatsByRule[rule.rule_id] || []).reduce((sum, p) => sum + p.total_exposure, 0)
+    }));
+
+    res.json({ rules: rulesWithStats });
   } catch (error) {
     console.error('Error fetching audit rules:', error);
     res.status(500).json({ error: 'Failed to fetch audit rules' });
@@ -3570,16 +3611,16 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
     const keywordPatterns = keywords.map(k => `%${k.toLowerCase()}%`);
     const prescriptionsResult = await db.query(`
       SELECT DISTINCT
-        p.bin,
-        p.group_number,
+        p.insurance_bin as bin,
+        p.insurance_group as group_number,
         COUNT(*) as claim_count,
         AVG(p.gross_profit) as avg_gp,
         AVG(p.quantity_dispensed) as avg_qty
       FROM prescriptions p
       WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
         AND (${keywordPatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${i + 1}`).join(' OR ')})
-        AND p.bin IS NOT NULL
-      GROUP BY p.bin, p.group_number
+        AND p.insurance_bin IS NOT NULL
+      GROUP BY p.insurance_bin, p.insurance_group
       HAVING AVG(p.gross_profit) >= $${keywordPatterns.length + 1}
       ORDER BY claim_count DESC
     `, [...keywordPatterns, minMargin]);
@@ -4033,6 +4074,42 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
 // ===========================================
 // AUDIT SCANNING ENDPOINTS
 // ===========================================
+
+// POST /api/admin/audit-rules/:ruleId/scan-pharmacy/:pharmacyId - Scan specific rule for specific pharmacy
+router.post('/audit-rules/:ruleId/scan-pharmacy/:pharmacyId', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { ruleId, pharmacyId } = req.params;
+    const { lookbackDays = 90 } = req.body;
+
+    // Verify rule exists
+    const ruleResult = await db.query('SELECT * FROM audit_rules WHERE rule_id = $1', [ruleId]);
+    if (ruleResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Audit rule not found' });
+    }
+    const rule = ruleResult.rows[0];
+
+    // Verify pharmacy exists
+    const pharmacyResult = await db.query('SELECT pharmacy_name FROM pharmacies WHERE pharmacy_id = $1', [pharmacyId]);
+    if (pharmacyResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    // Run the scan using the audit scanner for this specific rule
+    const results = await auditScanner.runRuleScan(pharmacyId, ruleId, {
+      lookbackDays: parseInt(lookbackDays)
+    });
+
+    res.json({
+      success: true,
+      pharmacyName: pharmacyResult.rows[0].pharmacy_name,
+      ruleName: rule.rule_name,
+      ...results
+    });
+  } catch (error) {
+    console.error('Audit rule scan error:', error);
+    res.status(500).json({ error: 'Audit scan failed: ' + error.message });
+  }
+});
 
 // POST /api/admin/audit/scan - Run audit scan for a pharmacy or all pharmacies
 router.post('/audit/scan', authenticateToken, requireSuperAdmin, async (req, res) => {
