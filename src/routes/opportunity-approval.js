@@ -70,14 +70,14 @@ router.get('/', authenticateToken, requireSuperAdmin, async (req, res) => {
     let existingTriggerMap = {};
     if (recommendedDrugs.length > 0) {
       const triggerResult = await db.query(`
-        SELECT trigger_id, trigger_name, display_name, recommended_drug
+        SELECT trigger_id, trigger_code, display_name, recommended_drug
         FROM triggers
         WHERE LOWER(recommended_drug) = ANY($1)
       `, [recommendedDrugs.map(d => d?.toLowerCase())]);
       triggerResult.rows.forEach(t => {
         existingTriggerMap[t.recommended_drug?.toLowerCase()] = {
           trigger_id: t.trigger_id,
-          trigger_name: t.trigger_name,
+          trigger_name: t.trigger_code,
           display_name: t.display_name
         };
       });
