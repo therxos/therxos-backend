@@ -183,11 +183,19 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
     const { opportunityId } = req.params;
     const { status, staffNotes, dismissedReason, actualMarginRealized } = req.body;
 
-    // Verify ownership
-    const existing = await db.query(
-      'SELECT * FROM opportunities WHERE opportunity_id = $1 AND pharmacy_id = $2',
-      [opportunityId, req.user.pharmacyId]
-    );
+    // Verify ownership (super_admin can update any opportunity)
+    let existing;
+    if (req.user.role === 'super_admin') {
+      existing = await db.query(
+        'SELECT * FROM opportunities WHERE opportunity_id = $1',
+        [opportunityId]
+      );
+    } else {
+      existing = await db.query(
+        'SELECT * FROM opportunities WHERE opportunity_id = $1 AND pharmacy_id = $2',
+        [opportunityId, req.user.pharmacyId]
+      );
+    }
 
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Opportunity not found' });

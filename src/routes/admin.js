@@ -551,9 +551,9 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
         o.updated_at,
         p.pharmacy_name,
         p.pharmacy_id,
-        pr.insurance_bin,
-        pr.insurance_group,
-        pr.plan_name,
+        COALESCE(pr.insurance_bin, recent_rx.insurance_bin, 'CASH') as insurance_bin,
+        COALESCE(pr.insurance_group, recent_rx.insurance_group) as insurance_group,
+        COALESCE(pr.plan_name, recent_rx.plan_name) as plan_name,
         pt.first_name as patient_first_name,
         pt.last_name as patient_last_name,
         (
@@ -561,7 +561,7 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
           FROM opportunities o2
           LEFT JOIN prescriptions pr2 ON pr2.prescription_id = o2.prescription_id
           WHERE o2.opportunity_type = o.opportunity_type
-            AND COALESCE(pr2.insurance_group, '') = COALESCE(pr.insurance_group, '')
+            AND COALESCE(pr2.insurance_group, '') = COALESCE(COALESCE(pr.insurance_group, recent_rx.insurance_group), '')
             AND o2.status NOT IN ('Denied', 'Flagged', 'Didn''t Work')
         ) as affected_count,
         (
@@ -569,13 +569,22 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
           FROM opportunities o2
           LEFT JOIN prescriptions pr2 ON pr2.prescription_id = o2.prescription_id
           WHERE o2.opportunity_type = o.opportunity_type
-            AND COALESCE(pr2.insurance_group, '') = COALESCE(pr.insurance_group, '')
+            AND COALESCE(pr2.insurance_group, '') = COALESCE(COALESCE(pr.insurance_group, recent_rx.insurance_group), '')
             AND o2.status NOT IN ('Denied', 'Flagged', 'Didn''t Work')
         ) as affected_value
       FROM opportunities o
       JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       LEFT JOIN patients pt ON pt.patient_id = o.patient_id
+      LEFT JOIN LATERAL (
+        SELECT rx.insurance_bin, rx.insurance_group, rx.plan_name
+        FROM prescriptions rx
+        WHERE rx.patient_id = o.patient_id
+          AND rx.insurance_bin IS NOT NULL
+          AND rx.insurance_bin != ''
+        ORDER BY rx.dispensed_date DESC NULLS LAST
+        LIMIT 1
+      ) recent_rx ON true
       WHERE o.status = 'Didn''t Work'
       ORDER BY o.updated_at DESC
     `);
