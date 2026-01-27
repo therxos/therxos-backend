@@ -219,6 +219,21 @@ router.get('/debug/statuses', authenticateToken, requireSuperAdmin, async (req, 
   }
 });
 
+// GET /api/admin/debug/opportunity-types - Check all opportunity_type values
+router.get('/debug/opportunity-types', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const types = await db.query(`
+      SELECT opportunity_type, COUNT(*) as count
+      FROM opportunities
+      GROUP BY opportunity_type
+      ORDER BY count DESC
+    `);
+    res.json({ types: types.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/admin/public-stats - Public stats for main website (no auth required)
 router.get('/public-stats', async (req, res) => {
   try {
