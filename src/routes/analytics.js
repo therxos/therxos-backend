@@ -530,9 +530,11 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         u.role,
         COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) as actioned_count,
         COUNT(*) FILTER (WHERE o.status IN ('Approved', 'Completed')) as captured_count,
+        COUNT(*) FILTER (WHERE o.status = 'Approved') as approved_count,
+        COALESCE(SUM(o.potential_margin_gain) FILTER (WHERE o.status = 'Approved'), 0) * 12 as approved_value,
         COUNT(*) FILTER (WHERE o.status = 'Completed') as completed_count,
-        COALESCE(SUM(o.potential_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) * 12 as captured_value,
         COALESCE(SUM(o.potential_margin_gain) FILTER (WHERE o.status = 'Completed'), 0) * 12 as completed_value,
+        COALESCE(SUM(o.potential_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) * 12 as captured_value,
         COALESCE(AVG(o.potential_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) * 12 as avg_value_per_capture
       FROM opportunities o
       JOIN users u ON u.user_id = o.actioned_by
