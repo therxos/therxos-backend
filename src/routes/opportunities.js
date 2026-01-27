@@ -84,11 +84,12 @@ router.get('/', authenticateToken, async (req, res) => {
     const result = await db.query(query, params);
 
     // Get counts by status (excluding opportunities with pending data quality issues)
+    // Use annual_margin_gain for accurate value display
     const countsResult = await db.query(`
       SELECT
         status,
         COUNT(*) as count,
-        SUM(potential_margin_gain) as total_margin
+        COALESCE(SUM(annual_margin_gain), 0) as total_margin
       FROM opportunities
       WHERE pharmacy_id = $1
         AND (status != 'Not Submitted' OR opportunity_id NOT IN (
