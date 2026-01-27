@@ -421,11 +421,15 @@ router.get('/monthly', authenticateToken, async (req, res) => {
     const stats = statsResult.rows[0];
     
     // Calculate rates
-    const submissionRate = stats.total_opportunities > 0 
-      ? stats.submitted / stats.total_opportunities 
+    // Submission rate: opportunities that were acted on / total
+    const submissionRate = stats.total_opportunities > 0
+      ? stats.submitted / stats.total_opportunities
       : 0;
-    const captureRate = stats.submitted > 0 
-      ? stats.captured / stats.submitted 
+    // Capture rate: (Approved + Completed) / all acted opportunities
+    // "Acted" = anything not in 'Not Submitted' status
+    const totalActed = parseInt(stats.submitted) + parseInt(stats.rejected);
+    const captureRate = totalActed > 0
+      ? stats.captured / totalActed
       : 0;
     
     // By status - NO data quality filter on historical reports

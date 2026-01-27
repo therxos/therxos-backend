@@ -113,14 +113,14 @@ BEGIN
 
         -- If not dry run, actually delete the duplicates
         IF NOT p_dry_run THEN
-          DELETE FROM opportunities
-          WHERE patient_id = v_patient.patient_id
-            AND status = 'Not Submitted'
-            AND opportunity_id != v_best.opportunity_id
+          DELETE FROM opportunities o
+          WHERE o.patient_id = v_patient.patient_id
+            AND o.status = 'Not Submitted'
+            AND o.opportunity_id != v_best.opportunity_id
             AND EXISTS (
               SELECT 1 FROM unnest(v_category.drug_patterns) pattern
-              WHERE LOWER(recommended_drug_name) LIKE '%' || LOWER(pattern) || '%'
-                 OR LOWER(current_drug_name) LIKE '%' || LOWER(pattern) || '%'
+              WHERE LOWER(o.recommended_drug_name) LIKE '%' || LOWER(pattern) || '%'
+                 OR LOWER(o.current_drug_name) LIKE '%' || LOWER(pattern) || '%'
             );
         END IF;
       END IF;

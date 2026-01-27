@@ -45,6 +45,34 @@ router.get('/', authenticateToken, requireSuperAdmin, async (req, res) => {
 
     const result = await db.query(query, params);
 
+    // Resolve pharmacy UUIDs to names for all items
+    const allPharmacyIds = new Set();
+    result.rows.forEach(row => {
+      if (row.affected_pharmacies && Array.isArray(row.affected_pharmacies)) {
+        row.affected_pharmacies.forEach(id => allPharmacyIds.add(id));
+      }
+    });
+
+    let pharmacyNameMap = {};
+    if (allPharmacyIds.size > 0) {
+      const pharmacyResult = await db.query(`
+        SELECT pharmacy_id, pharmacy_name
+        FROM pharmacies
+        WHERE pharmacy_id = ANY($1)
+      `, [Array.from(allPharmacyIds)]);
+      pharmacyResult.rows.forEach(p => {
+        pharmacyNameMap[p.pharmacy_id] = p.pharmacy_name;
+      });
+    }
+
+    // Add resolved pharmacy names to each item
+    const itemsWithPharmacyNames = result.rows.map(row => ({
+      ...row,
+      affected_pharmacy_names: row.affected_pharmacies
+        ? row.affected_pharmacies.map(id => pharmacyNameMap[id] || id)
+        : []
+    }));
+
     // Get counts by status
     const counts = await db.query(`
       SELECT status, COUNT(*) as count
@@ -53,7 +81,7 @@ router.get('/', authenticateToken, requireSuperAdmin, async (req, res) => {
     `);
 
     res.json({
-      items: result.rows,
+      items: itemsWithPharmacyNames,
       counts: counts.rows.reduce((acc, r) => ({ ...acc, [r.status]: parseInt(r.count) }), {}),
       pagination: { limit: parseInt(limit), offset: parseInt(offset) }
     });
@@ -83,6 +111,75 @@ router.get('/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Pending opportunity type not found' });
     }
 
+    const item = result.rows[0];
+
+    // Resolve affected pharmacy UUIDs to names
+    let affectedPharmaciesResolved = [];
+    if (item.affected_pharmacies && Array.isArray(item.affected_pharmacies)) {
+      const pharmacyResult = await db.query(`
+        SELECT pharmacy_id, pharmacy_name
+        FROM pharmacies
+        WHERE pharmacy_id = ANY($1)
+      `, [item.affected_pharmacies]);
+
+      affectedPharmaciesResolved = pharmacyResult.rows.map(p => ({
+        pharmacy_id: p.pharmacy_id,
+        pharmacy_name: p.pharmacy_name
+      }));
+    }
+
+    // Get sample opportunities with more context (current drug, insurance info)
+    const sampleOpps = await db.query(`
+      SELECT
+        o.opportunity_id,
+        o.current_drug_name,
+        o.prescriber_name,
+        o.potential_margin_gain,
+        o.annual_margin_gain,
+        p.first_name || ' ' || p.last_name as patient_name,
+        pr.insurance_bin,
+        pr.insurance_group,
+        pr.plan_name,
+        ph.pharmacy_name
+      FROM opportunities o
+      LEFT JOIN patients p ON p.patient_id = o.patient_id
+      LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+      LEFT JOIN pharmacies ph ON ph.pharmacy_id = o.pharmacy_id
+      WHERE o.recommended_drug_name = $1
+      ORDER BY o.annual_margin_gain DESC NULLS LAST
+      LIMIT 20
+    `, [item.recommended_drug_name]);
+
+    // Get BIN/Group breakdown for this opportunity type
+    const binBreakdown = await db.query(`
+      SELECT
+        COALESCE(pr.insurance_bin, 'CASH') as bin,
+        COALESCE(pr.insurance_group, '') as grp,
+        pr.plan_name,
+        COUNT(*) as count,
+        COALESCE(SUM(o.annual_margin_gain), 0) as total_margin
+      FROM opportunities o
+      LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+      WHERE o.recommended_drug_name = $1
+      GROUP BY pr.insurance_bin, pr.insurance_group, pr.plan_name
+      ORDER BY count DESC
+      LIMIT 20
+    `, [item.recommended_drug_name]);
+
+    // Get current drug breakdown (what drugs triggered these opportunities)
+    const currentDrugBreakdown = await db.query(`
+      SELECT
+        o.current_drug_name,
+        COUNT(*) as count,
+        COALESCE(SUM(o.annual_margin_gain), 0) as total_margin
+      FROM opportunities o
+      WHERE o.recommended_drug_name = $1
+        AND o.current_drug_name IS NOT NULL
+      GROUP BY o.current_drug_name
+      ORDER BY count DESC
+      LIMIT 20
+    `, [item.recommended_drug_name]);
+
     // Get approval history
     const history = await db.query(`
       SELECT
@@ -97,7 +194,11 @@ router.get('/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
     `, [id]);
 
     res.json({
-      ...result.rows[0],
+      ...item,
+      affected_pharmacies_resolved: affectedPharmaciesResolved,
+      sample_opportunities: sampleOpps.rows,
+      bin_breakdown: binBreakdown.rows,
+      current_drug_breakdown: currentDrugBreakdown.rows,
       history: history.rows
     });
   } catch (error) {
