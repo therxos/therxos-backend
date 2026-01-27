@@ -37,9 +37,12 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
         p.pharmacy_name,
         p.state,
         p.created_at,
+        p.baa_signed_at,
+        p.service_agreement_signed_at,
         c.client_name,
         c.submitter_email,
         c.status,
+        c.stripe_customer_id,
         (SELECT COUNT(*) FROM users WHERE pharmacy_id = p.pharmacy_id) as user_count,
         (SELECT COUNT(*) FROM patients WHERE pharmacy_id = p.pharmacy_id) as patient_count,
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as opportunity_count,
@@ -4661,6 +4664,290 @@ router.post('/clients/create-onboarding', authenticateToken, requireSuperAdmin, 
   } catch (error) {
     console.error('Create onboarding client error:', error);
     res.status(500).json({ error: 'Failed to create client: ' + error.message });
+  }
+});
+
+// POST /api/admin/pharmacies/:pharmacyId/mark-document-signed - Mark BAA or Service Agreement as signed
+router.post('/pharmacies/:pharmacyId/mark-document-signed', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId } = req.params;
+    const { documentType } = req.body; // 'baa' or 'service_agreement'
+
+    if (!['baa', 'service_agreement'].includes(documentType)) {
+      return res.status(400).json({ error: 'Invalid document type. Must be "baa" or "service_agreement"' });
+    }
+
+    const column = documentType === 'baa' ? 'baa_signed_at' : 'service_agreement_signed_at';
+
+    const result = await db.query(`
+      UPDATE pharmacies
+      SET ${column} = NOW(), updated_at = NOW()
+      WHERE pharmacy_id = $1
+      RETURNING pharmacy_id, ${column}
+    `, [pharmacyId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    console.log(`Marked ${documentType} as signed for pharmacy ${pharmacyId}`);
+
+    res.json({
+      success: true,
+      signedAt: result.rows[0][column],
+    });
+  } catch (error) {
+    console.error('Mark document signed error:', error);
+    res.status(500).json({ error: 'Failed to mark document as signed: ' + error.message });
+  }
+});
+
+// POST /api/admin/pharmacies/:pharmacyId/create-temp-login - Create temp login with password [firstName]1234
+router.post('/pharmacies/:pharmacyId/create-temp-login', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId } = req.params;
+
+    // Get pharmacy and client info
+    const pharmacyResult = await db.query(`
+      SELECT p.pharmacy_id, p.pharmacy_name, p.client_id, c.client_name, c.submitter_email
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE p.pharmacy_id = $1
+    `, [pharmacyId]);
+
+    if (pharmacyResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    const pharmacy = pharmacyResult.rows[0];
+
+    // Check if user already exists for this pharmacy
+    const existingUser = await db.query(`
+      SELECT user_id, email, first_name, last_name FROM users
+      WHERE pharmacy_id = $1 AND role IN ('owner', 'admin')
+      ORDER BY created_at ASC
+      LIMIT 1
+    `, [pharmacyId]);
+
+    let userId, email, firstName, lastName;
+    const clientEmail = pharmacy.submitter_email;
+
+    if (existingUser.rows.length > 0) {
+      // Reset password for existing user
+      userId = existingUser.rows[0].user_id;
+      email = existingUser.rows[0].email;
+      firstName = existingUser.rows[0].first_name || 'Admin';
+      lastName = existingUser.rows[0].last_name || '';
+    } else {
+      // Create new user
+      userId = uuidv4();
+      email = clientEmail;
+      firstName = pharmacy.pharmacy_name.split(' ')[0];
+      lastName = 'Admin';
+
+      if (!email) {
+        return res.status(400).json({ error: 'No email found for this client. Please update the contact email first.' });
+      }
+    }
+
+    // Generate password: [firstName]1234
+    const tempPassword = `${firstName}1234`;
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+    if (existingUser.rows.length > 0) {
+      // Update existing user password
+      await db.query(`
+        UPDATE users
+        SET password_hash = $1, must_change_password = true, updated_at = NOW()
+        WHERE user_id = $2
+      `, [passwordHash, userId]);
+
+      console.log(`Reset temp password for user ${email}: ${tempPassword}`);
+    } else {
+      // Create new user
+      await db.query(`
+        INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'owner', true, true, NOW())
+      `, [userId, pharmacy.client_id, pharmacyId, email.toLowerCase(), passwordHash, firstName, lastName]);
+
+      console.log(`Created temp login for ${email}: ${tempPassword}`);
+    }
+
+    res.json({
+      success: true,
+      credentials: {
+        email: email.toLowerCase(),
+        tempPassword,
+        firstName,
+        isNewUser: existingUser.rows.length === 0,
+      },
+      message: existingUser.rows.length > 0
+        ? `Password reset for ${email}`
+        : `New login created for ${email}`,
+    });
+  } catch (error) {
+    console.error('Create temp login error:', error);
+    res.status(500).json({ error: 'Failed to create temp login: ' + error.message });
+  }
+});
+
+// POST /api/admin/clients/:clientId/create-stripe-customer - Create Stripe customer for client
+router.post('/clients/:clientId/create-stripe-customer', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe not configured' });
+    }
+
+    const { clientId } = req.params;
+
+    // Get client info
+    const result = await db.query(`
+      SELECT c.client_id, c.client_name, c.submitter_email, c.stripe_customer_id, p.pharmacy_name
+      FROM clients c
+      LEFT JOIN pharmacies p ON p.client_id = c.client_id
+      WHERE c.client_id = $1
+    `, [clientId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const client = result.rows[0];
+
+    // Check if customer already exists
+    if (client.stripe_customer_id) {
+      // Verify customer exists in Stripe
+      try {
+        const existingCustomer = await stripe.customers.retrieve(client.stripe_customer_id);
+        if (!existingCustomer.deleted) {
+          return res.json({
+            success: true,
+            customerId: client.stripe_customer_id,
+            message: 'Stripe customer already exists',
+            isExisting: true,
+          });
+        }
+      } catch (stripeErr) {
+        console.log('Existing Stripe customer not found, creating new one');
+      }
+    }
+
+    // Create Stripe customer
+    const customer = await stripe.customers.create({
+      email: client.submitter_email,
+      name: client.pharmacy_name || client.client_name,
+      metadata: {
+        client_id: clientId,
+        pharmacy_name: client.pharmacy_name || '',
+      },
+    });
+
+    // Update client with Stripe customer ID
+    await db.query(`
+      UPDATE clients SET stripe_customer_id = $1, updated_at = NOW() WHERE client_id = $2
+    `, [customer.id, clientId]);
+
+    console.log(`Created Stripe customer ${customer.id} for ${client.client_name}`);
+
+    res.json({
+      success: true,
+      customerId: customer.id,
+      message: 'Stripe customer created successfully',
+      isExisting: false,
+    });
+  } catch (error) {
+    console.error('Create Stripe customer error:', error);
+    res.status(500).json({ error: 'Failed to create Stripe customer: ' + error.message });
+  }
+});
+
+// POST /api/admin/pharmacies/:pharmacyId/download-baa - Download BAA document
+router.post('/pharmacies/:pharmacyId/download-baa', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId } = req.params;
+
+    // Get pharmacy info
+    const result = await db.query(`
+      SELECT p.pharmacy_name, p.state, p.address, p.city, p.zip, p.phone, p.pharmacy_npi,
+             c.client_name, c.submitter_email
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE p.pharmacy_id = $1
+    `, [pharmacyId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    const pharmacy = result.rows[0];
+
+    // Generate BAA document
+    const { generateDocument } = await import('../services/documentGenerator.js');
+    const document = await generateDocument('BAA', {
+      pharmacyName: pharmacy.pharmacy_name,
+      companyName: pharmacy.client_name || pharmacy.pharmacy_name,
+      email: pharmacy.submitter_email,
+      address: pharmacy.address,
+      city: pharmacy.city,
+      state: pharmacy.state,
+      zip: pharmacy.zip,
+      phone: pharmacy.phone,
+      npi: pharmacy.pharmacy_npi,
+    });
+
+    const filename = `BAA_${pharmacy.pharmacy_name.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.docx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(document);
+  } catch (error) {
+    console.error('Download BAA error:', error);
+    res.status(500).json({ error: 'Failed to generate BAA: ' + error.message });
+  }
+});
+
+// POST /api/admin/pharmacies/:pharmacyId/download-service-agreement - Download Service Agreement
+router.post('/pharmacies/:pharmacyId/download-service-agreement', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId } = req.params;
+
+    // Get pharmacy info
+    const result = await db.query(`
+      SELECT p.pharmacy_name, p.state, p.address, p.city, p.zip, p.phone, p.pharmacy_npi,
+             c.client_name, c.submitter_email
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE p.pharmacy_id = $1
+    `, [pharmacyId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    const pharmacy = result.rows[0];
+
+    // Generate Service Agreement document
+    const { generateDocument } = await import('../services/documentGenerator.js');
+    const document = await generateDocument('ServiceAgreement', {
+      pharmacyName: pharmacy.pharmacy_name,
+      companyName: pharmacy.client_name || pharmacy.pharmacy_name,
+      email: pharmacy.submitter_email,
+      address: pharmacy.address,
+      city: pharmacy.city,
+      state: pharmacy.state,
+      zip: pharmacy.zip,
+      phone: pharmacy.phone,
+      npi: pharmacy.pharmacy_npi,
+    });
+
+    const filename = `ServiceAgreement_${pharmacy.pharmacy_name.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.docx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(document);
+  } catch (error) {
+    console.error('Download Service Agreement error:', error);
+    res.status(500).json({ error: 'Failed to generate Service Agreement: ' + error.message });
   }
 });
 
