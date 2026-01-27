@@ -27,6 +27,9 @@ function requireSuperAdmin(req, res, next) {
 // GET /api/admin/pharmacies - Get all pharmacies with stats
 router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
+    // Check if we should include demo pharmacies
+    const includeDemo = req.query.includeDemo === 'true';
+
     const result = await db.query(`
       SELECT
         p.pharmacy_id,
@@ -45,9 +48,10 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
         (SELECT MAX(updated_at) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as last_activity
       FROM pharmacies p
       JOIN clients c ON c.client_id = p.client_id
+      ${includeDemo ? '' : "WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%'"}
       ORDER BY p.created_at DESC
     `);
-    
+
     res.json({ pharmacies: result.rows });
   } catch (error) {
     console.error('Error fetching pharmacies:', error);
