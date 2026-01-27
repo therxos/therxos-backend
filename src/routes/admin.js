@@ -3707,14 +3707,14 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
     let paramOffset = keywordPatterns.length + 2; // +2 for pharmacyId and daysBack placeholder
 
     if (groupExclusions.length > 0) {
-      exclusionConditions += ` AND (pr.group_number IS NULL OR pr.group_number NOT IN (${groupExclusions.map((_, i) => `$${paramOffset + i}`).join(', ')}))`;
+      exclusionConditions += ` AND (pr.insurance_group IS NULL OR pr.insurance_group NOT IN (${groupExclusions.map((_, i) => `$${paramOffset + i}`).join(', ')}))`;
       exclusionParams.push(...groupExclusions);
       paramOffset += groupExclusions.length;
     }
 
     if (contractPrefixExclusions.length > 0) {
-      const prefixConditions = contractPrefixExclusions.map((_, i) => `pr.group_number NOT LIKE $${paramOffset + i} || '%'`).join(' AND ');
-      exclusionConditions += ` AND (pr.group_number IS NULL OR (${prefixConditions}))`;
+      const prefixConditions = contractPrefixExclusions.map((_, i) => `pr.insurance_group NOT LIKE $${paramOffset + i} || '%'`).join(' AND ');
+      exclusionConditions += ` AND (pr.insurance_group IS NULL OR (${prefixConditions}))`;
       exclusionParams.push(...contractPrefixExclusions);
     }
 
@@ -3726,10 +3726,10 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
         pr.drug_name as current_drug,
         pr.ndc as current_ndc,
         pr.prescriber_name,
-        pr.gross_profit,
+        COALESCE(pr.patient_pay, 0) + COALESCE(pr.insurance_pay, 0) - COALESCE(pr.acquisition_cost, 0) as gross_profit,
         pr.quantity_dispensed,
-        pr.bin,
-        pr.group_number
+        pr.insurance_bin as bin,
+        pr.insurance_group as group_number
       FROM patients p
       JOIN prescriptions pr ON pr.patient_id = p.patient_id
       WHERE p.pharmacy_id = $1
