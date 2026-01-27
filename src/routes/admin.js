@@ -3481,6 +3481,197 @@ router.post('/triggers/:triggerId/generate-justification', authenticateToken, re
 });
 
 
+// POST /api/admin/triggers/:triggerId/scan-coverage - Scan coverage for a SPECIFIC trigger
+router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { triggerId } = req.params;
+    const { minMargin = 10, daysBack = 365 } = req.body;
+
+    // Get the trigger
+    const triggerResult = await db.query(
+      `SELECT * FROM triggers WHERE trigger_id = $1`,
+      [triggerId]
+    );
+
+    if (triggerResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    const trigger = triggerResult.rows[0];
+    console.log(`Scanning coverage for trigger: ${trigger.display_name}`);
+
+    // Build search patterns from detection keywords
+    const keywords = trigger.detection_keywords || [];
+    if (keywords.length === 0) {
+      return res.status(400).json({ error: 'Trigger has no detection keywords' });
+    }
+
+    // Find matching prescriptions
+    const keywordPatterns = keywords.map(k => `%${k.toLowerCase()}%`);
+    const prescriptionsResult = await db.query(`
+      SELECT DISTINCT
+        p.bin,
+        p.group_number,
+        COUNT(*) as claim_count,
+        AVG(p.gross_profit) as avg_gp,
+        AVG(p.quantity_dispensed) as avg_qty
+      FROM prescriptions p
+      WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
+        AND (${keywordPatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${i + 1}`).join(' OR ')})
+        AND p.bin IS NOT NULL
+      GROUP BY p.bin, p.group_number
+      HAVING AVG(p.gross_profit) >= $${keywordPatterns.length + 1}
+      ORDER BY claim_count DESC
+    `, [...keywordPatterns, minMargin]);
+
+    const binValues = prescriptionsResult.rows.map(row => ({
+      bin: row.bin,
+      group: row.group_number,
+      gpValue: parseFloat(row.avg_gp) || 0,
+      avgQty: parseFloat(row.avg_qty) || 0,
+      claimCount: parseInt(row.claim_count),
+      coverageStatus: 'verified',
+      verifiedAt: new Date().toISOString()
+    }));
+
+    // Update trigger with bin values and synced_at
+    await db.query(`
+      UPDATE triggers
+      SET synced_at = NOW(),
+          updated_at = NOW()
+      WHERE trigger_id = $1
+    `, [triggerId]);
+
+    // Store bin values in trigger_bin_values table
+    for (const bv of binValues) {
+      await db.query(`
+        INSERT INTO trigger_bin_values (trigger_id, bin, group_number, gp_value, avg_qty, claim_count, coverage_status, verified_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        ON CONFLICT (trigger_id, bin, COALESCE(group_number, ''))
+        DO UPDATE SET gp_value = $4, avg_qty = $5, claim_count = $6, coverage_status = $7, verified_at = NOW()
+      `, [triggerId, bv.bin, bv.group, bv.gpValue, bv.avgQty, bv.claimCount, bv.coverageStatus]);
+    }
+
+    console.log(`Found ${binValues.length} BIN/Groups for trigger: ${trigger.display_name}`);
+
+    res.json({
+      success: true,
+      triggerId,
+      triggerName: trigger.display_name,
+      binCount: binValues.length,
+      prescriptionCount: binValues.reduce((sum, b) => sum + b.claimCount, 0),
+      binValues: binValues.slice(0, 20) // Return first 20 for preview
+    });
+  } catch (error) {
+    console.error('Scan trigger coverage error:', error);
+    res.status(500).json({ error: 'Failed to scan coverage: ' + error.message });
+  }
+});
+
+// POST /api/admin/triggers/:triggerId/scan-pharmacy/:pharmacyId - Scan a pharmacy for opportunities from a specific trigger
+router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { triggerId, pharmacyId } = req.params;
+    const { daysBack = 90 } = req.body;
+
+    // Get the trigger
+    const triggerResult = await db.query(
+      `SELECT * FROM triggers WHERE trigger_id = $1`,
+      [triggerId]
+    );
+
+    if (triggerResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    const trigger = triggerResult.rows[0];
+    console.log(`Scanning pharmacy ${pharmacyId} for trigger: ${trigger.display_name}`);
+
+    // Build search patterns from detection keywords
+    const keywords = trigger.detection_keywords || [];
+    if (keywords.length === 0) {
+      return res.status(400).json({ error: 'Trigger has no detection keywords' });
+    }
+
+    // Find matching patients in this pharmacy
+    const keywordPatterns = keywords.map(k => `%${k.toLowerCase()}%`);
+    const patientsResult = await db.query(`
+      SELECT DISTINCT
+        p.patient_id,
+        p.first_name,
+        p.last_name,
+        pr.drug_name as current_drug,
+        pr.ndc as current_ndc,
+        pr.prescriber_name,
+        pr.gross_profit,
+        pr.quantity_dispensed
+      FROM patients p
+      JOIN prescriptions pr ON pr.patient_id = p.patient_id
+      WHERE p.pharmacy_id = $1
+        AND pr.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
+        AND (${keywordPatterns.map((_, i) => `LOWER(pr.drug_name) LIKE $${i + 2}`).join(' OR ')})
+      ORDER BY pr.dispensed_date DESC
+    `, [pharmacyId, ...keywordPatterns]);
+
+    console.log(`Found ${patientsResult.rows.length} matching patients`);
+
+    // Create opportunities for each patient (if not already exists)
+    let opportunitiesCreated = 0;
+    const patientsMatched = new Set();
+
+    for (const patient of patientsResult.rows) {
+      patientsMatched.add(patient.patient_id);
+
+      // Check if opportunity already exists
+      const existing = await db.query(`
+        SELECT 1 FROM opportunities
+        WHERE patient_id = $1
+          AND recommended_drug_name = $2
+          AND status = 'Not Submitted'
+      `, [patient.patient_id, trigger.recommended_drug]);
+
+      if (existing.rows.length === 0) {
+        // Create new opportunity
+        await db.query(`
+          INSERT INTO opportunities (
+            opportunity_id, pharmacy_id, patient_id, opportunity_type,
+            current_drug_name, current_ndc, recommended_drug_name, recommended_ndc,
+            prescriber_name, annual_margin_gain, clinical_rationale, status, created_at
+          ) VALUES (
+            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Not Submitted', NOW()
+          )
+        `, [
+          pharmacyId,
+          patient.patient_id,
+          trigger.trigger_type || 'therapeutic_interchange',
+          patient.current_drug,
+          patient.current_ndc,
+          trigger.recommended_drug,
+          trigger.recommended_ndc,
+          patient.prescriber_name,
+          (trigger.default_gp_value || 0) * (trigger.annual_fills || 12),
+          trigger.clinical_rationale
+        ]);
+        opportunitiesCreated++;
+      }
+    }
+
+    console.log(`Created ${opportunitiesCreated} opportunities for pharmacy ${pharmacyId}`);
+
+    res.json({
+      success: true,
+      triggerId,
+      pharmacyId,
+      triggerName: trigger.display_name,
+      patientsMatched: patientsMatched.size,
+      opportunitiesCreated
+    });
+  } catch (error) {
+    console.error('Scan pharmacy for trigger error:', error);
+    res.status(500).json({ error: 'Failed to scan pharmacy: ' + error.message });
+  }
+});
+
 // POST /api/admin/triggers/verify-all-coverage - Scan coverage for ALL triggers at once
 // For NDC optimization triggers: finds BEST reimbursing product per BIN/Group
 // For other triggers: verifies recommended drug exists with good margin
