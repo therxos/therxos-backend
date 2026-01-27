@@ -3614,14 +3614,14 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
         p.insurance_bin as bin,
         p.insurance_group as group_number,
         COUNT(*) as claim_count,
-        AVG(p.gross_profit) as avg_gp,
+        AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) as avg_gp,
         AVG(p.quantity_dispensed) as avg_qty
       FROM prescriptions p
       WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
         AND (${keywordPatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${i + 1}`).join(' OR ')})
         AND p.insurance_bin IS NOT NULL
       GROUP BY p.insurance_bin, p.insurance_group
-      HAVING AVG(p.gross_profit) >= $${keywordPatterns.length + 1}
+      HAVING AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) >= $${keywordPatterns.length + 1}
       ORDER BY claim_count DESC
     `, [...keywordPatterns, minMargin]);
 
