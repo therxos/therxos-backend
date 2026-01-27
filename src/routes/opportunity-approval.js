@@ -106,13 +106,13 @@ router.get('/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   }
 });
 
-// Approve a pending opportunity type
+// Approve a pending opportunity type - ALWAYS creates a trigger for future scanning
 router.post('/:id/approve', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { notes, createTrigger = false, triggerConfig } = req.body;
+    const { notes, triggerConfig = {} } = req.body;
 
-    // Get the pending item
+    // Get the pending item with sample data
     const existing = await db.query(
       'SELECT * FROM pending_opportunity_types WHERE pending_type_id = $1',
       [id]
@@ -123,29 +123,96 @@ router.post('/:id/approve', authenticateToken, requireSuperAdmin, async (req, re
     }
 
     const item = existing.rows[0];
-    let createdTriggerId = null;
 
-    // Optionally create a trigger from this approval
-    if (createTrigger && triggerConfig) {
+    // Check if trigger already exists for this drug
+    const existingTrigger = await db.query(
+      'SELECT trigger_id, display_name FROM triggers WHERE LOWER(recommended_drug) = LOWER($1)',
+      [item.recommended_drug_name]
+    );
+
+    let createdTriggerId = null;
+    let triggerAction = 'none';
+
+    if (existingTrigger.rows.length > 0) {
+      // Trigger already exists, just link to it
+      createdTriggerId = existingTrigger.rows[0].trigger_id;
+      triggerAction = 'linked_existing';
+      logger.info('Linked approval to existing trigger', {
+        triggerId: createdTriggerId,
+        triggerName: existingTrigger.rows[0].display_name
+      });
+    } else {
+      // Extract detection keywords from sample data or use recommended drug name
+      let detectionKeywords = triggerConfig.detection_keywords || [];
+
+      if (detectionKeywords.length === 0) {
+        // Try to extract from sample data (current_drug values)
+        const sampleData = item.sample_data || {};
+        if (sampleData.current_drugs && Array.isArray(sampleData.current_drugs)) {
+          // Extract unique drug name patterns
+          const drugPatterns = new Set();
+          sampleData.current_drugs.forEach(drug => {
+            if (drug) {
+              // Extract the base drug name (first word or before strength)
+              const baseName = drug.split(/\s+\d|\s+\(|\s+-/)[0].trim();
+              if (baseName.length >= 3) {
+                drugPatterns.add(baseName.toLowerCase());
+              }
+            }
+          });
+          detectionKeywords = Array.from(drugPatterns).slice(0, 10); // Limit to 10 keywords
+        }
+
+        // If still no keywords, use the recommended drug name parts
+        if (detectionKeywords.length === 0) {
+          const drugWords = item.recommended_drug_name
+            .split(/[\s\-]+/)
+            .filter(w => w.length >= 3 && !/^\d+$/.test(w) && !['mg', 'ml', 'mcg'].includes(w.toLowerCase()));
+          detectionKeywords = drugWords.slice(0, 5);
+        }
+      }
+
+      // Generate trigger name from recommended drug
+      const triggerName = triggerConfig.trigger_name ||
+        item.recommended_drug_name.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 50);
+
+      // Create the trigger
       const triggerResult = await db.query(`
         INSERT INTO triggers (
           trigger_name,
           display_name,
           recommended_drug,
           detection_keywords,
+          trigger_type,
+          trigger_group,
           is_enabled,
-          priority,
+          default_gp_value,
+          annual_fills,
+          clinical_rationale,
           created_at
-        ) VALUES ($1, $2, $3, $4, true, $5, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9, NOW())
         RETURNING trigger_id
       `, [
-        triggerConfig.trigger_name || item.recommended_drug_name.toLowerCase().replace(/\s+/g, '_'),
+        triggerName,
         triggerConfig.display_name || item.recommended_drug_name,
         item.recommended_drug_name,
-        triggerConfig.detection_keywords || [],
-        triggerConfig.priority || 'medium'
+        detectionKeywords,
+        triggerConfig.trigger_type || item.opportunity_type || 'therapeutic_interchange',
+        triggerConfig.trigger_group || null,
+        triggerConfig.default_gp_value || Math.round((item.estimated_annual_margin || 0) / Math.max(item.total_patient_count || 1, 1) / 12),
+        triggerConfig.annual_fills || 12,
+        triggerConfig.clinical_rationale || `Approved opportunity type: ${item.recommended_drug_name}`
       ]);
+
       createdTriggerId = triggerResult.rows[0].trigger_id;
+      triggerAction = 'created_new';
+
+      logger.info('Created new trigger from approval', {
+        triggerId: createdTriggerId,
+        triggerName,
+        detectionKeywords,
+        recommendedDrug: item.recommended_drug_name
+      });
     }
 
     // Update status to approved
@@ -167,21 +234,32 @@ router.post('/:id/approve', authenticateToken, requireSuperAdmin, async (req, re
       ) VALUES ($1, 'approved', $2, $3, 'approved', $4)
     `, [id, req.user.userId, item.status, notes]);
 
+    // Get the created/linked trigger details
+    const triggerDetails = await db.query(
+      'SELECT trigger_id, trigger_name, display_name, detection_keywords FROM triggers WHERE trigger_id = $1',
+      [createdTriggerId]
+    );
+
     logger.info('Opportunity type approved', {
       pendingTypeId: id,
       recommendedDrug: item.recommended_drug_name,
       approvedBy: req.user.userId,
-      createdTriggerId
+      createdTriggerId,
+      triggerAction
     });
 
     res.json({
       success: true,
-      message: 'Opportunity type approved',
-      createdTriggerId
+      message: triggerAction === 'created_new'
+        ? `Opportunity type approved and trigger "${triggerDetails.rows[0]?.display_name}" created`
+        : `Opportunity type approved and linked to existing trigger "${triggerDetails.rows[0]?.display_name}"`,
+      createdTriggerId,
+      triggerAction,
+      trigger: triggerDetails.rows[0] || null
     });
   } catch (error) {
     logger.error('Approve opportunity type error', { error: error.message });
-    res.status(500).json({ error: 'Failed to approve opportunity type' });
+    res.status(500).json({ error: 'Failed to approve opportunity type: ' + error.message });
   }
 });
 

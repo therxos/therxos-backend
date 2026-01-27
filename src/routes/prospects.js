@@ -657,7 +657,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       await db.query(`
         INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, true)
-      `, [userId, clientId, pharmacyId, email, passwordHash, firstName, 'Admin', 'owner']);
+      `, [userId, clientId, pharmacyId, email, passwordHash, firstName, 'Admin', 'admin']);
 
       console.log(`✅ New customer onboarded: ${pharmacyName}`);
       console.log(`   Email: ${email}`);

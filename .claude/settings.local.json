@@ -70,7 +70,9 @@
       "Bash(SCHTASKS //Query //TN \"TheRxOS-OutcomesScraper\" //V //FO LIST)",
       "Bash(printf:*)",
       "Bash(NEXT_PUBLIC_API_URL=https://therxos-backend-staging.up.railway.app vercel:*)",
-      "Bash(set DATABASE_URL=postgresql://postgres.vjqkgkpfkpdmfajiprkp:rX%40pharmacystan@aws-0-us-west-2.pooler.supabase.com:5432/postgres:*)"
+      "Bash(set DATABASE_URL=postgresql://postgres.vjqkgkpfkpdmfajiprkp:rX%40pharmacystan@aws-0-us-west-2.pooler.supabase.com:5432/postgres:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run lint:*)"
     ]
   }
 }

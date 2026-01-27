@@ -21,7 +21,7 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     // Only admins and super_admins can view data quality issues
-    if (!['super_admin', 'admin', 'owner'].includes(req.user.role)) {
+    if (!['super_admin', 'admin'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Insufficient permissions to view data quality issues' });
     }
 
@@ -127,7 +127,7 @@ router.get('/:issueId', authenticateToken, async (req, res) => {
     const pharmacyId = req.user.pharmacyId;
 
     // Only admins can view
-    if (!['super_admin', 'admin', 'owner'].includes(req.user.role)) {
+    if (!['super_admin', 'admin'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
@@ -187,7 +187,7 @@ router.patch('/:issueId', authenticateToken, async (req, res) => {
     const pharmacyId = req.user.pharmacyId;
 
     // Only admins can update
-    if (!['super_admin', 'admin', 'owner'].includes(req.user.role)) {
+    if (!['super_admin', 'admin'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
@@ -273,7 +273,7 @@ router.post('/bulk-update', authenticateToken, async (req, res) => {
     const pharmacyId = req.user.pharmacyId;
 
     // Only admins can update
-    if (!['super_admin', 'admin', 'owner'].includes(req.user.role)) {
+    if (!['super_admin', 'admin'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
@@ -350,7 +350,7 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
     }
 
     // Only admins can view
-    if (!['super_admin', 'admin', 'owner'].includes(req.user.role)) {
+    if (!['super_admin', 'admin'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 

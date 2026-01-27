@@ -13,7 +13,7 @@ const router = express.Router();
 
 // Middleware to check admin access
 function requireAdmin(req, res, next) {
-  if (!['super_admin', 'admin', 'owner'].includes(req.user?.role)) {
+  if (!['super_admin', 'admin'].includes(req.user?.role)) {
     return res.status(403).json({ error: 'Admin access required' });
   }
   next();

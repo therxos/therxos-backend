@@ -9,7 +9,7 @@ import { authenticateToken, requireRole } from './auth.js';
 const router = express.Router();
 
 // Get all clients (super admin)
-router.get('/', authenticateToken, requireRole('owner'), async (req, res) => {
+router.get('/', authenticateToken, requireRole('super_admin'), async (req, res) => {
   try {
     const result = await db.query(`
       SELECT c.*, 
@@ -31,7 +31,7 @@ router.get('/:clientId', authenticateToken, async (req, res) => {
     const { clientId } = req.params;
     
     // Ensure user can only access their own client
-    if (req.user.clientId !== clientId && req.user.role !== 'owner') {
+    if (req.user.clientId !== clientId && req.user.role !== 'super_admin') {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -120,7 +120,7 @@ router.post('/', async (req, res) => {
       password_hash: passwordHash,
       first_name: primaryContactName?.split(' ')[0] || 'Admin',
       last_name: primaryContactName?.split(' ').slice(1).join(' ') || '',
-      role: 'owner',
+      role: 'admin',
       must_change_password: true
     });
 
@@ -154,12 +154,12 @@ router.post('/', async (req, res) => {
 });
 
 // Update client
-router.patch('/:clientId', authenticateToken, requireRole('owner', 'admin'), async (req, res) => {
+router.patch('/:clientId', authenticateToken, requireRole('admin', 'super_admin'), async (req, res) => {
   try {
     const { clientId } = req.params;
-    
+
     // Ensure user can only update their own client
-    if (req.user.clientId !== clientId && req.user.role !== 'owner') {
+    if (req.user.clientId !== clientId && req.user.role !== 'super_admin') {
       return res.status(403).json({ error: 'Access denied' });
     }
 

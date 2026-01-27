@@ -2,9 +2,54 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import { z } from 'zod';
 import db from '../database/index.js';
 import { logger } from '../utils/logger.js';
+
+// Email transporter setup
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: false,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+// Send password reset email
+async function sendResetEmail(email, resetToken, firstName) {
+  const resetUrl = `${process.env.FRONTEND_URL || 'https://beta.therxos.com'}/reset-password?token=${resetToken}`;
+
+  const mailOptions = {
+    from: `"TheRxOS" <${process.env.SMTP_USER || 'noreply@therxos.com'}>`,
+    to: email,
+    subject: 'Reset Your TheRxOS Password',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #0a1628; padding: 20px; text-align: center;">
+          <h1 style="color: #14b8a6; margin: 0;">The<span style="color: white;">RxOS</span></h1>
+        </div>
+        <div style="padding: 30px; background: #f8fafc;">
+          <h2 style="color: #1e293b;">Password Reset Request</h2>
+          <p style="color: #475569;">Hi ${firstName || 'there'},</p>
+          <p style="color: #475569;">We received a request to reset your password. Click the button below to create a new password:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${resetUrl}" style="background: #14b8a6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">Reset Password</a>
+          </div>
+          <p style="color: #475569; font-size: 14px;">This link will expire in 1 hour.</p>
+          <p style="color: #475569; font-size: 14px;">If you didn't request this, you can safely ignore this email.</p>
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+          <p style="color: #94a3b8; font-size: 12px;">TheRxOS - The Pharmacy Operating System</p>
+        </div>
+      </div>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
+}
 
 const router = express.Router();
 
@@ -20,7 +65,7 @@ const registerSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   clientId: z.string().uuid(),
-  role: z.enum(['owner', 'admin', 'pharmacist', 'technician', 'staff']).optional()
+  role: z.enum(['admin', 'pharmacist', 'technician', 'staff']).optional()
 });
 
 // Generate JWT token
@@ -133,7 +178,7 @@ router.post('/login', async (req, res) => {
 });
 
 // Register new user (admin only)
-router.post('/register', authenticateToken, requireRole('owner', 'admin'), async (req, res) => {
+router.post('/register', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
     const data = registerSchema.parse(req.body);
 

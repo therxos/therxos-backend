@@ -378,14 +378,13 @@ router.post('/impersonate', authenticateToken, requireSuperAdmin, async (req, re
 
     const pharmacy = pharmacyResult.rows[0];
 
-    // Try to find an admin or owner user for this pharmacy
+    // Try to find an admin user for this pharmacy
     const userResult = await db.query(`
       SELECT u.*, p.pharmacy_name, c.client_name
       FROM users u
       JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id
       JOIN clients c ON c.client_id = u.client_id
-      WHERE u.pharmacy_id = $1 AND u.role IN ('admin', 'owner')
-      ORDER BY CASE WHEN u.role = 'owner' THEN 1 ELSE 2 END
+      WHERE u.pharmacy_id = $1 AND u.role = 'admin'
       LIMIT 1
     `, [pharmacy_id]);
 
@@ -393,17 +392,17 @@ router.post('/impersonate', authenticateToken, requireSuperAdmin, async (req, re
     let isVirtualSession = false;
 
     if (userResult.rows.length > 0) {
-      // Use existing admin/owner
+      // Use existing admin
       targetUser = userResult.rows[0];
     } else {
-      // Create virtual owner session (no actual user exists)
+      // Create virtual admin session (no actual user exists)
       isVirtualSession = true;
       targetUser = {
         user_id: `virtual-${pharmacy_id}`,
         email: `admin@${pharmacy.pharmacy_name.toLowerCase().replace(/\s+/g, '')}.virtual`,
         first_name: 'Pharmacy',
         last_name: 'Admin',
-        role: 'owner',
+        role: 'admin',
         pharmacy_id: pharmacy.pharmacy_id,
         client_id: pharmacy.client_id,
         pharmacy_name: pharmacy.pharmacy_name,
@@ -4235,7 +4234,7 @@ router.patch('/clients/:clientId', authenticateToken, requireSuperAdmin, async (
     if (email) {
       await db.query(
         `UPDATE users SET email = $1 WHERE user_id = (
-          SELECT user_id FROM users WHERE pharmacy_id = $2 AND role IN ('owner', 'admin') LIMIT 1
+          SELECT user_id FROM users WHERE pharmacy_id = $2 AND role = 'admin' LIMIT 1
         )`,
         [email, pharmacyId]
       );
@@ -4486,7 +4485,7 @@ router.post('/clients/:clientId/send-welcome-email', authenticateToken, requireS
         u.user_id, u.email, u.first_name
       FROM clients c
       LEFT JOIN pharmacies p ON p.client_id = c.client_id
-      LEFT JOIN users u ON u.client_id = c.client_id AND u.role = 'owner'
+      LEFT JOIN users u ON u.client_id = c.client_id AND u.role = 'admin'
       WHERE c.client_id = $1
     `, [clientId]);
 
@@ -4682,7 +4681,7 @@ router.post('/clients/create-onboarding', authenticateToken, requireSuperAdmin, 
 
     await db.query(`
       INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'owner', true, true)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin', true, true)
     `, [userId, clientId, pharmacyId, email.toLowerCase(), passwordHash, firstName || pharmacyName.split(' ')[0], lastName || 'Admin']);
 
     console.log(`Created onboarding client: ${pharmacyName} (${email})`);
@@ -4787,7 +4786,7 @@ router.post('/pharmacies/:pharmacyId/create-temp-login', authenticateToken, requ
     // Check if user already exists for this pharmacy
     const existingUser = await db.query(`
       SELECT user_id, email, first_name, last_name FROM users
-      WHERE pharmacy_id = $1 AND role IN ('owner', 'admin')
+      WHERE pharmacy_id = $1 AND role = 'admin'
       ORDER BY created_at ASC
       LIMIT 1
     `, [pharmacyId]);
@@ -4830,7 +4829,7 @@ router.post('/pharmacies/:pharmacyId/create-temp-login', authenticateToken, requ
       // Create new user
       await db.query(`
         INSERT INTO users (user_id, client_id, pharmacy_id, email, password_hash, first_name, last_name, role, is_active, must_change_password, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'owner', true, true, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin', true, true, NOW())
       `, [userId, pharmacy.client_id, pharmacyId, email.toLowerCase(), passwordHash, firstName, lastName]);
 
       console.log(`Created temp login for ${email}: ${tempPassword}`);
