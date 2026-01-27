@@ -1,0 +1,423 @@
+// Opportunity Approval Queue routes
+// Admin review queue for new opportunity types before they go live
+import express from 'express';
+import db from '../database/index.js';
+import { logger } from '../utils/logger.js';
+import { authenticateToken } from './auth.js';
+
+const router = express.Router();
+
+// Middleware to require super_admin role
+const requireSuperAdmin = (req, res, next) => {
+  if (req.user.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Super admin access required' });
+  }
+  next();
+};
+
+// Get all pending opportunity types for review
+router.get('/', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { status = 'pending', limit = 50, offset = 0 } = req.query;
+
+    let query = `
+      SELECT
+        pot.*,
+        u.first_name as reviewer_first,
+        u.last_name as reviewer_last,
+        t.display_name as trigger_name
+      FROM pending_opportunity_types pot
+      LEFT JOIN users u ON u.user_id = pot.reviewed_by
+      LEFT JOIN triggers t ON t.trigger_id = pot.created_trigger_id
+    `;
+
+    const params = [];
+    let paramIndex = 1;
+
+    if (status && status !== 'all') {
+      query += ` WHERE pot.status = $${paramIndex++}`;
+      params.push(status);
+    }
+
+    query += ` ORDER BY pot.created_at DESC`;
+    query += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await db.query(query, params);
+
+    // Get counts by status
+    const counts = await db.query(`
+      SELECT status, COUNT(*) as count
+      FROM pending_opportunity_types
+      GROUP BY status
+    `);
+
+    res.json({
+      items: result.rows,
+      counts: counts.rows.reduce((acc, r) => ({ ...acc, [r.status]: parseInt(r.count) }), {}),
+      pagination: { limit: parseInt(limit), offset: parseInt(offset) }
+    });
+  } catch (error) {
+    logger.error('Get pending opportunity types error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get pending opportunity types' });
+  }
+});
+
+// Get single pending opportunity type with full details
+router.get('/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(`
+      SELECT
+        pot.*,
+        u.first_name as reviewer_first,
+        u.last_name as reviewer_last,
+        u.email as reviewer_email
+      FROM pending_opportunity_types pot
+      LEFT JOIN users u ON u.user_id = pot.reviewed_by
+      WHERE pot.pending_type_id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pending opportunity type not found' });
+    }
+
+    // Get approval history
+    const history = await db.query(`
+      SELECT
+        oal.*,
+        u.first_name,
+        u.last_name,
+        u.email
+      FROM opportunity_approval_log oal
+      LEFT JOIN users u ON u.user_id = oal.performed_by
+      WHERE oal.pending_type_id = $1
+      ORDER BY oal.created_at DESC
+    `, [id]);
+
+    res.json({
+      ...result.rows[0],
+      history: history.rows
+    });
+  } catch (error) {
+    logger.error('Get pending opportunity type error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get pending opportunity type' });
+  }
+});
+
+// Approve a pending opportunity type
+router.post('/:id/approve', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes, createTrigger = false, triggerConfig } = req.body;
+
+    // Get the pending item
+    const existing = await db.query(
+      'SELECT * FROM pending_opportunity_types WHERE pending_type_id = $1',
+      [id]
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Pending opportunity type not found' });
+    }
+
+    const item = existing.rows[0];
+    let createdTriggerId = null;
+
+    // Optionally create a trigger from this approval
+    if (createTrigger && triggerConfig) {
+      const triggerResult = await db.query(`
+        INSERT INTO triggers (
+          trigger_name,
+          display_name,
+          recommended_drug,
+          detection_keywords,
+          is_enabled,
+          priority,
+          created_at
+        ) VALUES ($1, $2, $3, $4, true, $5, NOW())
+        RETURNING trigger_id
+      `, [
+        triggerConfig.trigger_name || item.recommended_drug_name.toLowerCase().replace(/\s+/g, '_'),
+        triggerConfig.display_name || item.recommended_drug_name,
+        item.recommended_drug_name,
+        triggerConfig.detection_keywords || [],
+        triggerConfig.priority || 'medium'
+      ]);
+      createdTriggerId = triggerResult.rows[0].trigger_id;
+    }
+
+    // Update status to approved
+    await db.query(`
+      UPDATE pending_opportunity_types
+      SET status = 'approved',
+          reviewed_by = $1,
+          reviewed_at = NOW(),
+          review_notes = $2,
+          created_trigger_id = $3,
+          updated_at = NOW()
+      WHERE pending_type_id = $4
+    `, [req.user.userId, notes, createdTriggerId, id]);
+
+    // Log the approval
+    await db.query(`
+      INSERT INTO opportunity_approval_log (
+        pending_type_id, action, performed_by, previous_status, new_status, notes
+      ) VALUES ($1, 'approved', $2, $3, 'approved', $4)
+    `, [id, req.user.userId, item.status, notes]);
+
+    logger.info('Opportunity type approved', {
+      pendingTypeId: id,
+      recommendedDrug: item.recommended_drug_name,
+      approvedBy: req.user.userId,
+      createdTriggerId
+    });
+
+    res.json({
+      success: true,
+      message: 'Opportunity type approved',
+      createdTriggerId
+    });
+  } catch (error) {
+    logger.error('Approve opportunity type error', { error: error.message });
+    res.status(500).json({ error: 'Failed to approve opportunity type' });
+  }
+});
+
+// Reject a pending opportunity type
+router.post('/:id/reject', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes, deleteExistingOpportunities = false } = req.body;
+
+    // Get the pending item
+    const existing = await db.query(
+      'SELECT * FROM pending_opportunity_types WHERE pending_type_id = $1',
+      [id]
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Pending opportunity type not found' });
+    }
+
+    const item = existing.rows[0];
+
+    // Optionally delete existing opportunities with this recommended_drug_name
+    let deletedCount = 0;
+    if (deleteExistingOpportunities) {
+      const deleteResult = await db.query(`
+        DELETE FROM opportunities
+        WHERE recommended_drug_name = $1
+        RETURNING opportunity_id
+      `, [item.recommended_drug_name]);
+      deletedCount = deleteResult.rows.length;
+    }
+
+    // Update status to rejected
+    await db.query(`
+      UPDATE pending_opportunity_types
+      SET status = 'rejected',
+          reviewed_by = $1,
+          reviewed_at = NOW(),
+          review_notes = $2,
+          updated_at = NOW()
+      WHERE pending_type_id = $3
+    `, [req.user.userId, notes, id]);
+
+    // Log the rejection
+    await db.query(`
+      INSERT INTO opportunity_approval_log (
+        pending_type_id, action, performed_by, previous_status, new_status, notes
+      ) VALUES ($1, 'rejected', $2, $3, 'rejected', $4)
+    `, [id, req.user.userId, item.status, notes]);
+
+    logger.info('Opportunity type rejected', {
+      pendingTypeId: id,
+      recommendedDrug: item.recommended_drug_name,
+      rejectedBy: req.user.userId,
+      deletedOpportunities: deletedCount
+    });
+
+    res.json({
+      success: true,
+      message: 'Opportunity type rejected',
+      deletedOpportunities: deletedCount
+    });
+  } catch (error) {
+    logger.error('Reject opportunity type error', { error: error.message });
+    res.status(500).json({ error: 'Failed to reject opportunity type' });
+  }
+});
+
+// Submit new opportunity types to queue (called by scanners)
+router.post('/submit', authenticateToken, async (req, res) => {
+  try {
+    const {
+      recommended_drug_name,
+      opportunity_type,
+      source,
+      source_details,
+      sample_data,
+      affected_pharmacies,
+      total_patient_count,
+      estimated_annual_margin
+    } = req.body;
+
+    // Check if this type already exists in queue
+    const existing = await db.query(
+      'SELECT * FROM pending_opportunity_types WHERE recommended_drug_name = $1 AND status = $2',
+      [recommended_drug_name, 'pending']
+    );
+
+    if (existing.rows.length > 0) {
+      // Update existing with new counts
+      await db.query(`
+        UPDATE pending_opportunity_types
+        SET total_patient_count = total_patient_count + $1,
+            estimated_annual_margin = estimated_annual_margin + $2,
+            sample_data = $3,
+            updated_at = NOW()
+        WHERE pending_type_id = $4
+      `, [total_patient_count || 0, estimated_annual_margin || 0, sample_data, existing.rows[0].pending_type_id]);
+
+      return res.json({
+        success: true,
+        pendingTypeId: existing.rows[0].pending_type_id,
+        message: 'Updated existing pending opportunity type'
+      });
+    }
+
+    // Create new pending item
+    const result = await db.query(`
+      INSERT INTO pending_opportunity_types (
+        recommended_drug_name,
+        opportunity_type,
+        source,
+        source_details,
+        sample_data,
+        affected_pharmacies,
+        total_patient_count,
+        estimated_annual_margin
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING pending_type_id
+    `, [
+      recommended_drug_name,
+      opportunity_type || 'unknown',
+      source || 'manual',
+      source_details,
+      sample_data,
+      affected_pharmacies,
+      total_patient_count || 0,
+      estimated_annual_margin || 0
+    ]);
+
+    logger.info('New opportunity type submitted for approval', {
+      pendingTypeId: result.rows[0].pending_type_id,
+      recommendedDrug: recommended_drug_name,
+      source
+    });
+
+    res.json({
+      success: true,
+      pendingTypeId: result.rows[0].pending_type_id,
+      message: 'Opportunity type submitted for approval'
+    });
+  } catch (error) {
+    logger.error('Submit opportunity type error', { error: error.message });
+    res.status(500).json({ error: 'Failed to submit opportunity type for approval' });
+  }
+});
+
+// Bulk delete unauthorized opportunities (cleanup endpoint)
+router.post('/cleanup', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { recommended_drug_names, pharmacyId } = req.body;
+
+    if (!Array.isArray(recommended_drug_names) || recommended_drug_names.length === 0) {
+      return res.status(400).json({ error: 'recommended_drug_names must be a non-empty array' });
+    }
+
+    let query = `
+      DELETE FROM opportunities
+      WHERE recommended_drug_name = ANY($1)
+    `;
+    const params = [recommended_drug_names];
+
+    if (pharmacyId) {
+      query += ` AND pharmacy_id = $2`;
+      params.push(pharmacyId);
+    }
+
+    query += ` RETURNING opportunity_id, recommended_drug_name`;
+
+    const result = await db.query(query, params);
+
+    // Group deleted by recommended_drug_name
+    const deletedByType = {};
+    result.rows.forEach(r => {
+      deletedByType[r.recommended_drug_name] = (deletedByType[r.recommended_drug_name] || 0) + 1;
+    });
+
+    logger.info('Unauthorized opportunities cleaned up', {
+      totalDeleted: result.rows.length,
+      deletedByType,
+      performedBy: req.user.userId
+    });
+
+    res.json({
+      success: true,
+      totalDeleted: result.rows.length,
+      deletedByType
+    });
+  } catch (error) {
+    logger.error('Cleanup unauthorized opportunities error', { error: error.message });
+    res.status(500).json({ error: 'Failed to cleanup unauthorized opportunities' });
+  }
+});
+
+// Get list of all unauthorized opportunity types (not matching any trigger)
+router.get('/unauthorized/list', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    // Get all trigger recommended_drug values
+    const triggers = await db.query(`
+      SELECT DISTINCT recommended_drug FROM triggers WHERE is_enabled = true
+    `);
+    const triggerNames = triggers.rows.map(t => t.recommended_drug);
+
+    // Get all opportunity recommended_drug_name values with counts
+    const opps = await db.query(`
+      SELECT
+        o.recommended_drug_name,
+        COUNT(*) as total_count,
+        COUNT(DISTINCT o.pharmacy_id) as pharmacy_count,
+        ARRAY_AGG(DISTINCT ph.pharmacy_name) as pharmacies,
+        MIN(o.created_at) as first_created,
+        MAX(o.created_at) as last_created,
+        COALESCE(SUM(o.annual_margin_gain), 0) as total_margin
+      FROM opportunities o
+      JOIN pharmacies ph ON ph.pharmacy_id = o.pharmacy_id
+      GROUP BY o.recommended_drug_name
+      ORDER BY total_count DESC
+    `);
+
+    // Filter to only unauthorized (case-insensitive comparison)
+    const triggerNamesLower = new Set(triggerNames.map(t => t?.toLowerCase()));
+    const unauthorized = opps.rows.filter(
+      o => !triggerNamesLower.has(o.recommended_drug_name?.toLowerCase())
+    );
+
+    const totalUnauthorized = unauthorized.reduce((sum, u) => sum + parseInt(u.total_count), 0);
+
+    res.json({
+      unauthorized,
+      totalCount: totalUnauthorized,
+      triggerCount: triggerNames.length
+    });
+  } catch (error) {
+    logger.error('Get unauthorized list error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get unauthorized opportunities list' });
+  }
+});
+
+export default router;

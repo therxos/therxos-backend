@@ -60,7 +60,17 @@
       "WebFetch(domain:github.com)",
       "Bash(DAYS_BACK=30 node scripts/scrape-outcomes.js:*)",
       "Bash(HEADLESS=false node:*)",
-      "Bash(set HEADLESS=false)"
+      "Bash(set HEADLESS=false)",
+      "Bash(schtasks /query /tn:*)",
+      "Bash(tasklist:*)",
+      "Bash(schtasks /create /tn \"TheRxOS-OutcomesScraper\" /tr \"C:\\\\Users\\\\Stan\\\\Desktop\\\\therxos-backend\\\\scripts\\\\run-outcomes-scraper.bat\" /sc daily /st 02:00 /f)",
+      "Bash(cmd.exe /c 'schtasks /create /tn \"\"TheRxOS-OutcomesScraper\"\" /tr \"\"C:\\\\Users\\\\Stan\\\\Desktop\\\\therxos-backend\\\\scripts\\\\run-outcomes-scraper.bat\"\" /sc daily /st 02:00 /f')",
+      "Bash(powershell:*)",
+      "Bash(SCHTASKS //Create //TN \"TheRxOS-OutcomesScraper\" //TR \"C:\\\\Users\\\\Stan\\\\Desktop\\\\therxos-backend\\\\scripts\\\\run-outcomes-scraper.bat\" //SC DAILY //ST 02:00 //F)",
+      "Bash(SCHTASKS //Query //TN \"TheRxOS-OutcomesScraper\" //V //FO LIST)",
+      "Bash(printf:*)",
+      "Bash(NEXT_PUBLIC_API_URL=https://therxos-backend-staging.up.railway.app vercel:*)",
+      "Bash(set DATABASE_URL=postgresql://postgres.vjqkgkpfkpdmfajiprkp:rX%40pharmacystan@aws-0-us-west-2.pooler.supabase.com:5432/postgres:*)"
     ]
   }
 }

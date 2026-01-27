@@ -16,6 +16,7 @@ import {
   pollOneDriveForReports
 } from '../services/microsoftPoller.js';
 import { scrapeOutcomesEmails } from '../services/outlookScraper.js';
+import { scrapeOutcomesHybrid } from '../services/outlookHybridScraper.js';
 import { logger } from '../utils/logger.js';
 
 const router = express.Router();
@@ -342,6 +343,37 @@ router.post('/scrape-outcomes', authenticateToken, requireSuperAdmin, async (req
     });
   } catch (error) {
     logger.error('Outlook scraper error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/automation/scrape-hybrid - Hybrid scraper using Graph API + Puppeteer
+// Uses Graph API to find emails, then Puppeteer to navigate to OWA links and download
+router.post('/scrape-hybrid', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId, daysBack = 7 } = req.body;
+
+    if (!pharmacyId) {
+      return res.status(400).json({ error: 'pharmacyId is required' });
+    }
+
+    if (!process.env.MICROSOFT_PASSWORD) {
+      return res.status(400).json({
+        error: 'MICROSOFT_PASSWORD environment variable not set. This scraper requires M365 credentials.'
+      });
+    }
+
+    logger.info('Hybrid scraper triggered', { pharmacyId, daysBack, userId: req.user.userId });
+
+    const result = await scrapeOutcomesHybrid({ pharmacyId, daysBack });
+
+    res.json({
+      success: true,
+      message: 'Hybrid scrape completed',
+      ...result
+    });
+  } catch (error) {
+    logger.error('Hybrid scraper error', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });

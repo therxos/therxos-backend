@@ -178,18 +178,20 @@ export async function autoCompleteOpportunities(pharmacyId, newPrescriptions) {
   const completedCount = { matched: 0, updated: 0 };
 
   try {
-    // Get all opportunities in "Submitted", "Pending", or "Approved" status for this pharmacy
+    // Get all opportunities that could potentially be completed (any status except terminal ones)
+    // This matches dispensed items to ANY opportunity except Completed, Rejected, Declined, Denied
     const opportunities = await db.query(`
       SELECT o.*, p.first_name as pat_first, p.last_name as pat_last, p.date_of_birth as pat_dob
       FROM opportunities o
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       WHERE o.pharmacy_id = $1
-      AND o.status IN ('Submitted', 'Pending', 'Approved', 'submitted', 'pending', 'approved')
-      AND (o.recommended_drug IS NOT NULL OR o.recommended_drug_name IS NOT NULL)
+      AND o.status NOT IN ('Completed', 'Rejected', 'Declined', 'Denied', 'completed', 'rejected', 'declined', 'denied')
+      AND (o.recommended_drug_name IS NOT NULL AND o.recommended_drug_name != ''
+           OR o.recommended_drug IS NOT NULL AND o.recommended_drug != '')
     `, [pharmacyId]);
 
     if (opportunities.rows.length === 0) {
-      logger.info('No submitted/approved opportunities to match', { pharmacyId });
+      logger.info('No open opportunities with recommended drugs to match', { pharmacyId });
       return completedCount;
     }
 
@@ -201,6 +203,21 @@ export async function autoCompleteOpportunities(pharmacyId, newPrescriptions) {
     // Helper to clean drug names - remove NDC in parentheses, normalize
     const cleanDrug = (drug) => (drug || '').toLowerCase().replace(/\([^)]*\)/g, '').replace(/[^a-z0-9\s]/g, '').trim();
 
+    // Helper to check if drug name matches at word boundary
+    // "aspirin" should match "ASPIRIN LOW DOSE" but NOT "BUPRENORPHINE"
+    const wordBoundaryMatch = (haystack, needle) => {
+      if (!haystack || !needle || needle.length < 3) return false;
+      const regex = new RegExp(`(^|\\s)${needle}`, 'i');
+      return regex.test(haystack);
+    };
+
+    // Supply items that need exact/specific matching
+    const supplyItems = ['pen needle', 'test strip', 'lancet', 'alcohol pad', 'spacer', 'monitor', 'glucose'];
+    const isSupplyItem = (drug) => supplyItems.some(item => drug.includes(item));
+
+    // Drugs to exclude from calcium/vitamin matching (statins end in "calcium")
+    const calciumStatins = ['atorvastatin', 'rosuvastatin', 'pitavastatin'];
+
     // For each opportunity, check if the recommended drug was dispensed
     for (const opp of opportunities.rows) {
       // Get recommended drug from either column, clean it
@@ -209,7 +226,7 @@ export async function autoCompleteOpportunities(pharmacyId, newPrescriptions) {
       if (!recommendedDrug) continue;
 
       // Get first significant word of recommended drug for matching
-      const recommendedWords = recommendedDrug.split(/\s+/).filter(w => w.length > 2);
+      const recommendedWords = recommendedDrug.split(/\s+/).filter(w => w.length > 3);
       const recommendedFirstWord = recommendedWords[0] || '';
 
       // Find matching prescription by patient + drug
@@ -230,15 +247,64 @@ export async function autoCompleteOpportunities(pharmacyId, newPrescriptions) {
 
         // Check if dispensed drug matches recommended drug
         const dispensedDrug = cleanDrug(rx.drug_name);
-        const dispensedWords = dispensedDrug.split(/\s+/).filter(w => w.length > 2);
+        const dispensedWords = dispensedDrug.split(/\s+/).filter(w => w.length > 3);
         const dispensedFirstWord = dispensedWords[0] || '';
 
-        // Match if first significant word matches, or one contains the other
+        // Special handling for "calcium + vitamin d" - exclude statins that end in calcium
+        if (recommendedDrug.includes('calcium') && recommendedDrug.includes('vitamin')) {
+          // This is a calcium supplement recommendation
+          // Should NOT match statin drugs like "atorvastatin calcium"
+          if (calciumStatins.some(statin => dispensedDrug.includes(statin))) {
+            return false;
+          }
+          // Should match actual calcium/vitamin D products
+          return dispensedDrug.includes('calcium') || dispensedDrug.includes('vitamin d') || dispensedDrug.includes('vit d');
+        }
+
+        // Special handling for supply items - require more specific matching
+        if (isSupplyItem(recommendedDrug)) {
+          // For test strips - must contain "test" AND "strip" or be a glucose test product
+          if (recommendedDrug.includes('test strip') || recommendedDrug.includes('glucose')) {
+            // Must have both "test" and "strip", OR be a known glucose product
+            const isTestStrip = (dispensedDrug.includes('test') && dispensedDrug.includes('strip')) ||
+                               dispensedDrug.includes('glucose') ||
+                               dispensedDrug.includes('metrix') ||
+                               dispensedDrug.includes('embrace');
+            // Exclude testosterone and other non-strip items
+            if (dispensedDrug.includes('testosterone')) return false;
+            return isTestStrip;
+          }
+
+          // For pen needles
+          if (recommendedDrug.includes('pen needle')) {
+            return dispensedDrug.includes('needle') || dispensedDrug.includes('pen needle');
+          }
+
+          // For lancets
+          if (recommendedDrug.includes('lancet')) {
+            return dispensedDrug.includes('lancet');
+          }
+
+          // For alcohol pads
+          if (recommendedDrug.includes('alcohol')) {
+            return dispensedDrug.includes('alcohol');
+          }
+
+          // For monitors
+          if (recommendedDrug.includes('monitor')) {
+            return dispensedDrug.includes('monitor');
+          }
+        }
+
+        // For regular drugs, match at word boundary (start of word)
+        // "aspirin" matches "ASPIRIN LOW DOSE" but NOT "NYSTATIN"
         const drugMatches = (
-          (recommendedFirstWord && dispensedFirstWord &&
-           (dispensedFirstWord.includes(recommendedFirstWord) || recommendedFirstWord.includes(dispensedFirstWord))) ||
-          dispensedDrug.includes(recommendedFirstWord) ||
-          recommendedDrug.includes(dispensedFirstWord)
+          // Exact first word match
+          (recommendedFirstWord && dispensedFirstWord && recommendedFirstWord === dispensedFirstWord) ||
+          // Dispensed drug STARTS with the recommended first word
+          (recommendedFirstWord && dispensedFirstWord && dispensedFirstWord.startsWith(recommendedFirstWord)) ||
+          // Word boundary match - recommended word appears at start of a word in dispensed
+          wordBoundaryMatch(dispensedDrug, recommendedFirstWord)
         );
 
         return drugMatches;

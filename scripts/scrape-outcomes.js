@@ -12,9 +12,10 @@
 // Optional:
 //   MICROSOFT_EMAIL - Override email (default: StanleyWarren@therxos.onmicrosoft.com)
 //   DAYS_BACK - How many days to look back (default: 3)
+//   HEADLESS - Set to 'false' to see the browser (default: true)
 
 import 'dotenv/config';
-import { scrapeOutcomesEmails } from '../src/services/outlookScraper.js';
+import { scrapeOutcomesHybrid } from '../src/services/outlookHybridScraper.js';
 import db from '../src/database/index.js';
 
 // Aracoma pharmacy ID
@@ -41,7 +42,7 @@ async function main() {
   console.log(`Looking back ${daysBack} days for emails`);
 
   try {
-    const result = await scrapeOutcomesEmails({
+    const result = await scrapeOutcomesHybrid({
       pharmacyId: ARACOMA_PHARMACY_ID,
       daysBack
     });

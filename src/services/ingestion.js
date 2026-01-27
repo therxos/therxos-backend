@@ -80,6 +80,28 @@ const PMS_COLUMN_MAPPINGS = {
     quantity_dispensed: ['QTY_DISP', 'Quantity', 'Qty'],
     // ... add more Rx30 specific mappings
   },
+  // Outcomes dispensing report format (from rxinsights_noreply@outcomes.com)
+  outcomes: {
+    rx_number: ['Rx Number'],
+    ndc: ['NDC'],
+    drug_name: ['Drug Name'],
+    quantity_dispensed: ['Quantity Dispensed'],
+    dispensed_date: ['Fill Date'],
+    written_date: ['Written Date'],
+    patient_full_name: ['Customer Name'], // Format: "LAST, FIRST"
+    patient_dob: ['Date of Birth'],
+    patient_state: ['State'],
+    patient_zip: ['Zip Code'],
+    insurance_bin: ['BIN'],
+    insurance_pcn: ['PCN'],
+    insurance_group: ['Plan ID'],
+    patient_pay: ['Patient Pay Amount'],
+    insurance_pay: ['Plan Paid Amount - Total'],
+    acquisition_cost: ['Actual Cost'],
+    price: ['Price'],
+    prescriber_name: ['Prescriber Name'], // Format: "LAST, FIRST"
+    refill_number: ['Refill Number']
+  },
   generic: {
     // Fallback generic mappings
     rx_number: ['rx_number', 'rx', 'prescription_number'],
@@ -162,6 +184,13 @@ function detectPMSSystem(headers) {
       headerSet.has('presnpi') || headerSet.has('primary_pbm_bin') ||
       headerSet.has('refdate') || headerSet.has('recdate')) {
     return 'spp';
+  }
+
+  // Check for Outcomes dispensing report format
+  // Outcomes has unique columns like "Customer Name", "Quantity Dispensed", "Plan Paid Amount - Total"
+  if (headerSet.has('customer name') || headerSet.has('quantity dispensed') ||
+      headerSet.has('plan paid amount - total')) {
+    return 'outcomes';
   }
 
   // Check for PioneerRx-specific columns
@@ -411,13 +440,21 @@ export async function ingestCSV(buffer, options = {}) {
         if (!patientFirst && !patientLast && mappings.patient_full_name) {
           const fullName = findColumnValue(row, mappings.patient_full_name);
           if (fullName) {
-            const nameParts = fullName.trim().split(/\s+/);
-            if (nameParts.length >= 2) {
-              patientFirst = nameParts[0];
-              patientLast = nameParts.slice(1).join(' ');
+            // Check for "LAST, FIRST" format (comma-separated)
+            if (fullName.includes(',')) {
+              const [lastName, firstName] = fullName.split(',').map(s => s.trim());
+              patientFirst = firstName || '';
+              patientLast = lastName || '';
             } else {
-              patientFirst = fullName;
-              patientLast = '';
+              // Fallback: split by whitespace (assumes "FIRST LAST")
+              const nameParts = fullName.trim().split(/\s+/);
+              if (nameParts.length >= 2) {
+                patientFirst = nameParts[0];
+                patientLast = nameParts.slice(1).join(' ');
+              } else {
+                patientFirst = fullName;
+                patientLast = '';
+              }
             }
           }
         }

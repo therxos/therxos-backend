@@ -29,6 +29,7 @@ import coverageIntelligenceRoutes from './routes/coverage-intelligence.js';
 import dataQualityRoutes from './routes/data-quality.js';
 import changelogRoutes from './routes/changelog.js';
 import intakeRoutes from './routes/intake.js';
+import opportunityApprovalRoutes from './routes/opportunity-approval.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -127,6 +128,7 @@ app.use('/api/coverage', coverageIntelligenceRoutes);
 app.use('/api/data-quality', dataQualityRoutes);
 app.use('/api/changelog', changelogRoutes);
 app.use('/api/intake', intakeRoutes);
+app.use('/api/opportunity-approval', opportunityApprovalRoutes);
 
 // Microsoft OAuth callback (separate route for redirect URI)
 app.get('/api/microsoft/callback', async (req, res) => {
