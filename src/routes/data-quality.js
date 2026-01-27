@@ -48,7 +48,6 @@ router.get('/', authenticateToken, async (req, res) => {
         o.recommended_drug_name,
         o.annual_margin_gain,
         o.opportunity_type,
-        o.trigger_type,
         u.first_name as resolved_by_first,
         u.last_name as resolved_by_last
       FROM data_quality_issues dqi
@@ -142,10 +141,8 @@ router.get('/:issueId', authenticateToken, async (req, res) => {
         o.current_drug_name,
         o.recommended_drug_name,
         o.prescriber_name as opportunity_prescriber,
-        o.potential_margin_gain,
         o.annual_margin_gain,
         o.opportunity_type,
-        o.trigger_type,
         o.status as opportunity_status,
         pr.rx_number,
         pr.drug_name as prescription_drug_name,
