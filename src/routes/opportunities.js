@@ -382,7 +382,28 @@ router.get('/summary/stats', authenticateToken, async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'dismissed') as dismissed_count,
         COALESCE(SUM(potential_margin_gain) FILTER (WHERE status = 'Not Submitted'), 0) as new_margin,
         COALESCE(SUM(actual_margin_realized) FILTER (WHERE status = 'actioned'), 0) as realized_margin,
-        COUNT(DISTINCT patient_id) FILTER (WHERE status = 'Not Submitted') as patients_with_opportunities
+        COUNT(DISTINCT patient_id) FILTER (WHERE status = 'Not Submitted') as patients_with_opportunities,
+        -- Completed stats (all-time, not limited by days)
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed'
+          AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
+        ) as completed_count,
+        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed'
+          AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
+        ) as completed_value,
+        -- Approved stats (all-time, not limited by days)
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved'
+          AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
+        ) as approved_count,
+        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved'
+          AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
+        ) as approved_value,
+        -- Captured = Approved + Completed (all-time)
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')
+          AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
+        ) as captured_count,
+        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')
+          AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
+        ) as captured_value
       FROM opportunities
       WHERE pharmacy_id = $1
         AND created_at >= NOW() - INTERVAL '${parseInt(days)} days'
