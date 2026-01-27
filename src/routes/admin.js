@@ -788,6 +788,47 @@ router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) =
 
     const result = await db.query(query, params);
 
+    // Get per-pharmacy opportunity counts for all triggers
+    const pharmacyCountsResult = await db.query(`
+      SELECT
+        t.trigger_id,
+        o.pharmacy_id,
+        ph.pharmacy_name,
+        COUNT(*) as opportunity_count,
+        COUNT(DISTINCT o.patient_id) as patient_count,
+        COALESCE(SUM(o.annual_margin_gain), 0) as total_margin
+      FROM triggers t
+      LEFT JOIN opportunities o ON LOWER(o.recommended_drug_name) = LOWER(t.recommended_drug)
+      LEFT JOIN pharmacies ph ON ph.pharmacy_id = o.pharmacy_id
+      WHERE o.opportunity_id IS NOT NULL
+      GROUP BY t.trigger_id, o.pharmacy_id, ph.pharmacy_name
+      ORDER BY t.trigger_id, total_margin DESC
+    `);
+
+    // Build a map of trigger_id -> pharmacy stats
+    const pharmacyStatsByTrigger = {};
+    pharmacyCountsResult.rows.forEach(row => {
+      if (!pharmacyStatsByTrigger[row.trigger_id]) {
+        pharmacyStatsByTrigger[row.trigger_id] = [];
+      }
+      pharmacyStatsByTrigger[row.trigger_id].push({
+        pharmacy_id: row.pharmacy_id,
+        pharmacy_name: row.pharmacy_name,
+        opportunity_count: parseInt(row.opportunity_count),
+        patient_count: parseInt(row.patient_count),
+        total_margin: parseFloat(row.total_margin) || 0
+      });
+    });
+
+    // Add pharmacy stats to each trigger
+    const triggersWithStats = result.rows.map(trigger => ({
+      ...trigger,
+      pharmacy_stats: pharmacyStatsByTrigger[trigger.trigger_id] || [],
+      total_opportunities: (pharmacyStatsByTrigger[trigger.trigger_id] || []).reduce((sum, p) => sum + p.opportunity_count, 0),
+      total_patients: (pharmacyStatsByTrigger[trigger.trigger_id] || []).reduce((sum, p) => sum + p.patient_count, 0),
+      total_margin: (pharmacyStatsByTrigger[trigger.trigger_id] || []).reduce((sum, p) => sum + p.total_margin, 0)
+    }));
+
     // Get counts by type
     const typeCountsResult = await db.query(`
       SELECT trigger_type, COUNT(*) as count
@@ -798,7 +839,7 @@ router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) =
     typeCountsResult.rows.forEach(r => { byType[r.trigger_type] = parseInt(r.count); });
 
     res.json({
-      triggers: result.rows,
+      triggers: triggersWithStats,
       total: result.rows.length,
       byType
     });
