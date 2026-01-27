@@ -31,15 +31,15 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
 
         -- Completed stats (actual captured revenue)
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_count,
-        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_value,
+        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_value,
 
         -- Approved stats (pending capture)
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_count,
-        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_value,
+        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_value,
 
         -- Combined captured (Approved + Completed)
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_count,
-        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_value,
+        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_value,
 
         -- Prescription stats
         (SELECT COUNT(*) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '${days} days') as rx_count,
@@ -424,10 +424,10 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'Completed' AND updated_at >= $2 AND updated_at <= $3) as completed,
         COUNT(*) FILTER (WHERE status = 'Approved' AND updated_at >= $2 AND updated_at <= $3) as approved,
         COUNT(*) FILTER (WHERE status IN ('Rejected', 'Declined', 'Denied') AND updated_at >= $2 AND updated_at <= $3) as rejected,
-        COALESCE(SUM(annual_margin_gain), 0) as total_value,
-        COALESCE(SUM(annual_margin_gain) FILTER (WHERE status IN ('Approved', 'Completed')), 0) as captured_value,
-        COALESCE(SUM(annual_margin_gain) FILTER (WHERE status = 'Completed'), 0) as completed_value,
-        COALESCE(SUM(annual_margin_gain) FILTER (WHERE status = 'Approved'), 0) as approved_value
+        COALESCE(SUM(potential_margin_gain), 0) * 12 as total_value,
+        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status IN ('Approved', 'Completed')), 0) * 12 as captured_value,
+        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status = 'Completed'), 0) * 12 as completed_value,
+        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status = 'Approved'), 0) * 12 as approved_value
       FROM opportunities
       WHERE pharmacy_id = $1
         AND ((created_at >= $2 AND created_at <= $3) OR (updated_at >= $2 AND updated_at <= $3))
@@ -452,7 +452,7 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       SELECT
         status,
         COUNT(*) as count,
-        COALESCE(SUM(annual_margin_gain), 0) as value
+        COALESCE(SUM(potential_margin_gain), 0) * 12 as value
       FROM opportunities
       WHERE pharmacy_id = $1
         AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
@@ -465,7 +465,7 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       SELECT
         COALESCE(opportunity_type, 'Other') as type,
         COUNT(*) as count,
-        COALESCE(SUM(annual_margin_gain), 0) as value,
+        COALESCE(SUM(potential_margin_gain), 0) * 12 as value,
         COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed')) as captured
       FROM opportunities
       WHERE pharmacy_id = $1
@@ -494,9 +494,9 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       SELECT
         COALESCE(pr.insurance_bin, 'Unknown') as bin,
         COUNT(DISTINCT o.opportunity_id) as count,
-        COALESCE(SUM(o.annual_margin_gain), 0) as value,
+        COALESCE(SUM(o.potential_margin_gain), 0) * 12 as value,
         COUNT(DISTINCT o.opportunity_id) FILTER (WHERE o.status IN ('Approved', 'Completed')) as captured,
-        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) as captured_value
+        COALESCE(SUM(o.potential_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) * 12 as captured_value
       FROM opportunities o
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       WHERE o.pharmacy_id = $1
@@ -510,7 +510,7 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       SELECT
         DATE_TRUNC('week', actioned_at) as week_start,
         COUNT(*) as actioned_count,
-        COALESCE(SUM(annual_margin_gain), 0) as actioned_value
+        COALESCE(SUM(potential_margin_gain), 0) * 12 as actioned_value
       FROM opportunities
       WHERE pharmacy_id = $1
         AND actioned_at >= $2 AND actioned_at <= $3
@@ -531,9 +531,9 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed')) as actioned_count,
         COUNT(*) FILTER (WHERE o.status IN ('Approved', 'Completed')) as captured_count,
         COUNT(*) FILTER (WHERE o.status = 'Completed') as completed_count,
-        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) as captured_value,
-        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status = 'Completed'), 0) as completed_value,
-        COALESCE(AVG(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) as avg_value_per_capture
+        COALESCE(SUM(o.potential_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) * 12 as captured_value,
+        COALESCE(SUM(o.potential_margin_gain) FILTER (WHERE o.status = 'Completed'), 0) * 12 as completed_value,
+        COALESCE(AVG(o.potential_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) * 12 as avg_value_per_capture
       FROM opportunities o
       JOIN users u ON u.user_id = o.actioned_by
       WHERE o.pharmacy_id = $1
