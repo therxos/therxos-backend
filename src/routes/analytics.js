@@ -28,7 +28,18 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_opportunities,
         (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_margin,
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Submitted', 'Approved', 'Completed') AND actioned_at >= NOW() - INTERVAL '${days} days') as actioned_count,
-        (SELECT COALESCE(SUM(actual_margin_realized), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed' AND actioned_at >= NOW() - INTERVAL '${days} days') as realized_margin,
+
+        -- Completed stats (actual captured revenue)
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_count,
+        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_value,
+
+        -- Approved stats (pending capture)
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_count,
+        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_value,
+
+        -- Combined captured (Approved + Completed)
+        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_count,
+        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_value,
 
         -- Prescription stats
         (SELECT COUNT(*) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '${days} days') as rx_count,
@@ -409,10 +420,14 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         COUNT(*) as total_opportunities,
         COUNT(*) FILTER (WHERE created_at >= $2 AND created_at <= $3) as new_opportunities,
         COUNT(*) FILTER (WHERE status IN ('Submitted', 'Pending', 'Approved', 'Completed') AND updated_at >= $2 AND updated_at <= $3) as submitted,
-        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured') AND updated_at >= $2 AND updated_at <= $3) as captured,
+        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed') AND updated_at >= $2 AND updated_at <= $3) as captured,
+        COUNT(*) FILTER (WHERE status = 'Completed' AND updated_at >= $2 AND updated_at <= $3) as completed,
+        COUNT(*) FILTER (WHERE status = 'Approved' AND updated_at >= $2 AND updated_at <= $3) as approved,
         COUNT(*) FILTER (WHERE status IN ('Rejected', 'Declined', 'Denied') AND updated_at >= $2 AND updated_at <= $3) as rejected,
         COALESCE(SUM(annual_margin_gain), 0) as total_value,
-        COALESCE(SUM(annual_margin_gain) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured')), 0) as captured_value
+        COALESCE(SUM(annual_margin_gain) FILTER (WHERE status IN ('Approved', 'Completed')), 0) as captured_value,
+        COALESCE(SUM(annual_margin_gain) FILTER (WHERE status = 'Completed'), 0) as completed_value,
+        COALESCE(SUM(annual_margin_gain) FILTER (WHERE status = 'Approved'), 0) as approved_value
       FROM opportunities
       WHERE pharmacy_id = $1
         AND ((created_at >= $2 AND created_at <= $3) OR (updated_at >= $2 AND updated_at <= $3))
@@ -451,7 +466,7 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         COALESCE(opportunity_type, 'Other') as type,
         COUNT(*) as count,
         COALESCE(SUM(annual_margin_gain), 0) as value,
-        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured')) as captured
+        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed')) as captured
       FROM opportunities
       WHERE pharmacy_id = $1
         AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
@@ -464,7 +479,9 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       SELECT
         DATE(updated_at) as date,
         COUNT(*) FILTER (WHERE status IN ('Submitted', 'Pending')) as submitted,
-        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed', 'Captured')) as captured
+        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed')) as captured,
+        COUNT(*) FILTER (WHERE status = 'Completed') as completed,
+        COUNT(*) FILTER (WHERE status = 'Approved') as approved
       FROM opportunities
       WHERE pharmacy_id = $1
         AND updated_at >= $2 AND updated_at <= $3
@@ -478,8 +495,8 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         COALESCE(pr.insurance_bin, 'Unknown') as bin,
         COUNT(DISTINCT o.opportunity_id) as count,
         COALESCE(SUM(o.annual_margin_gain), 0) as value,
-        COUNT(DISTINCT o.opportunity_id) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')) as captured,
-        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')), 0) as captured_value
+        COUNT(DISTINCT o.opportunity_id) FILTER (WHERE o.status IN ('Approved', 'Completed')) as captured,
+        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) as captured_value
       FROM opportunities o
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       WHERE o.pharmacy_id = $1
@@ -497,7 +514,7 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       FROM opportunities
       WHERE pharmacy_id = $1
         AND actioned_at >= $2 AND actioned_at <= $3
-        AND status IN ('Submitted', 'Approved', 'Completed', 'Captured')
+        AND status IN ('Submitted', 'Approved', 'Completed')
       GROUP BY DATE_TRUNC('week', actioned_at)
       ORDER BY week_start
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
@@ -510,9 +527,9 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         u.last_name,
         u.role,
         COUNT(*) FILTER (WHERE o.status IN ('Submitted', 'Pending', 'Approved', 'Completed', 'Captured')) as actioned_count,
-        COUNT(*) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')) as completed_count,
-        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')), 0) as captured_value,
-        COALESCE(AVG(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed', 'Captured')), 0) as avg_value_per_capture
+        COUNT(*) FILTER (WHERE o.status IN ('Approved', 'Completed')) as completed_count,
+        COALESCE(SUM(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) as captured_value,
+        COALESCE(AVG(o.annual_margin_gain) FILTER (WHERE o.status IN ('Approved', 'Completed')), 0) as avg_value_per_capture
       FROM opportunities o
       JOIN users u ON u.user_id = o.actioned_by
       WHERE o.pharmacy_id = $1
@@ -529,9 +546,13 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       new_opportunities: parseInt(stats.new_opportunities) || 0,
       submitted: parseInt(stats.submitted) || 0,
       captured: parseInt(stats.captured) || 0,
+      completed: parseInt(stats.completed) || 0,
+      approved: parseInt(stats.approved) || 0,
       rejected: parseInt(stats.rejected) || 0,
       total_value: parseFloat(stats.total_value) || 0,
       captured_value: parseFloat(stats.captured_value) || 0,
+      completed_value: parseFloat(stats.completed_value) || 0,
+      approved_value: parseFloat(stats.approved_value) || 0,
       submission_rate: submissionRate,
       capture_rate: captureRate,
       by_status: byStatusResult.rows.map(r => ({
@@ -549,6 +570,8 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         date: r.date,
         submitted: parseInt(r.submitted) || 0,
         captured: parseInt(r.captured) || 0,
+        completed: parseInt(r.completed) || 0,
+        approved: parseInt(r.approved) || 0,
       })),
       by_bin: byBinResult.rows.map(r => ({
         bin: r.bin,
