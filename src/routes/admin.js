@@ -536,7 +536,7 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
     res.json({ opportunities: result.rows, count: result.rows.length });
   } catch (error) {
     console.error('Error fetching didnt-work queue:', error);
-    res.status(500).json({ error: 'Failed to fetch queue' });
+    res.status(500).json({ error: 'Failed to fetch queue', details: error.message });
   }
 });
 
