@@ -204,6 +204,21 @@ router.get('/debug/data-quality', authenticateToken, requireSuperAdmin, async (r
   }
 });
 
+// GET /api/admin/debug/statuses - Check opportunity status values
+router.get('/debug/statuses', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const statuses = await db.query(`
+      SELECT status, COUNT(*) as count
+      FROM opportunities
+      GROUP BY status
+      ORDER BY count DESC
+    `);
+    res.json({ statuses: statuses.rows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/admin/public-stats - Public stats for main website (no auth required)
 router.get('/public-stats', async (req, res) => {
   try {
