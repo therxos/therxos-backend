@@ -3585,7 +3585,7 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
     const { triggerId, pharmacyId } = req.params;
     const { daysBack = 90 } = req.body;
 
-    // Get the trigger
+    // Get the trigger with exclusions
     const triggerResult = await db.query(
       `SELECT * FROM triggers WHERE trigger_id = $1`,
       [triggerId]
@@ -3604,10 +3604,32 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
       return res.status(400).json({ error: 'Trigger has no detection keywords' });
     }
 
-    // Find matching patients in this pharmacy
+    // Parse exclusions
+    const groupExclusions = trigger.group_exclusions || [];
+    const contractPrefixExclusions = trigger.contract_prefix_exclusions || [];
+
+    // Find matching patients in this pharmacy (with exclusion filters)
     const keywordPatterns = keywords.map(k => `%${k.toLowerCase()}%`);
+
+    // Build exclusion conditions
+    let exclusionConditions = '';
+    const exclusionParams = [];
+    let paramOffset = keywordPatterns.length + 2; // +2 for pharmacyId and daysBack placeholder
+
+    if (groupExclusions.length > 0) {
+      exclusionConditions += ` AND (pr.group_number IS NULL OR pr.group_number NOT IN (${groupExclusions.map((_, i) => `$${paramOffset + i}`).join(', ')}))`;
+      exclusionParams.push(...groupExclusions);
+      paramOffset += groupExclusions.length;
+    }
+
+    if (contractPrefixExclusions.length > 0) {
+      const prefixConditions = contractPrefixExclusions.map((_, i) => `pr.group_number NOT LIKE $${paramOffset + i} || '%'`).join(' AND ');
+      exclusionConditions += ` AND (pr.group_number IS NULL OR (${prefixConditions}))`;
+      exclusionParams.push(...contractPrefixExclusions);
+    }
+
     const patientsResult = await db.query(`
-      SELECT DISTINCT
+      SELECT DISTINCT ON (p.patient_id)
         p.patient_id,
         p.first_name,
         p.last_name,
@@ -3615,25 +3637,30 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
         pr.ndc as current_ndc,
         pr.prescriber_name,
         pr.gross_profit,
-        pr.quantity_dispensed
+        pr.quantity_dispensed,
+        pr.bin,
+        pr.group_number
       FROM patients p
       JOIN prescriptions pr ON pr.patient_id = p.patient_id
       WHERE p.pharmacy_id = $1
         AND pr.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
         AND (${keywordPatterns.map((_, i) => `LOWER(pr.drug_name) LIKE $${i + 2}`).join(' OR ')})
-      ORDER BY pr.dispensed_date DESC
-    `, [pharmacyId, ...keywordPatterns]);
+        ${exclusionConditions}
+      ORDER BY p.patient_id, pr.dispensed_date DESC
+    `, [pharmacyId, ...keywordPatterns, ...exclusionParams]);
 
-    console.log(`Found ${patientsResult.rows.length} matching patients`);
+    console.log(`Found ${patientsResult.rows.length} matching patients (after exclusions: ${groupExclusions.length} groups, ${contractPrefixExclusions.length} prefixes)`);
 
     // Create opportunities for each patient (if not already exists)
+    // Also check for therapeutic duplicates (same drug class)
     let opportunitiesCreated = 0;
+    let skippedDuplicates = 0;
     const patientsMatched = new Set();
 
     for (const patient of patientsResult.rows) {
       patientsMatched.add(patient.patient_id);
 
-      // Check if opportunity already exists
+      // Check if opportunity already exists for this exact recommendation
       const existing = await db.query(`
         SELECT 1 FROM opportunities
         WHERE patient_id = $1
@@ -3641,33 +3668,56 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
           AND status = 'Not Submitted'
       `, [patient.patient_id, trigger.recommended_drug]);
 
-      if (existing.rows.length === 0) {
-        // Create new opportunity
-        await db.query(`
-          INSERT INTO opportunities (
-            opportunity_id, pharmacy_id, patient_id, opportunity_type,
-            current_drug_name, current_ndc, recommended_drug_name, recommended_ndc,
-            prescriber_name, annual_margin_gain, clinical_rationale, status, created_at
-          ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Not Submitted', NOW()
-          )
-        `, [
-          pharmacyId,
-          patient.patient_id,
-          trigger.trigger_type || 'therapeutic_interchange',
-          patient.current_drug,
-          patient.current_ndc,
-          trigger.recommended_drug,
-          trigger.recommended_ndc,
-          patient.prescriber_name,
-          (trigger.default_gp_value || 0) * (trigger.annual_fills || 12),
-          trigger.clinical_rationale
-        ]);
-        opportunitiesCreated++;
+      if (existing.rows.length > 0) {
+        continue;
       }
+
+      // Check for therapeutic duplicates - same trigger_group (e.g., multiple statin options)
+      // Only create if this would be the highest-value option for this therapeutic area
+      if (trigger.trigger_group) {
+        const betterExists = await db.query(`
+          SELECT o.opportunity_id, o.recommended_drug_name, o.annual_margin_gain
+          FROM opportunities o
+          JOIN triggers t ON t.recommended_drug = o.recommended_drug_name
+          WHERE o.patient_id = $1
+            AND o.status = 'Not Submitted'
+            AND t.trigger_group = $2
+            AND o.annual_margin_gain >= $3
+          LIMIT 1
+        `, [patient.patient_id, trigger.trigger_group, (trigger.default_gp_value || 0) * (trigger.annual_fills || 12)]);
+
+        if (betterExists.rows.length > 0) {
+          skippedDuplicates++;
+          continue;
+        }
+      }
+
+      // Create new opportunity
+      await db.query(`
+        INSERT INTO opportunities (
+          opportunity_id, pharmacy_id, patient_id, opportunity_type, trigger_group,
+          current_drug_name, current_ndc, recommended_drug_name, recommended_ndc,
+          prescriber_name, annual_margin_gain, clinical_rationale, status, created_at
+        ) VALUES (
+          gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'Not Submitted', NOW()
+        )
+      `, [
+        pharmacyId,
+        patient.patient_id,
+        trigger.trigger_type || 'therapeutic_interchange',
+        trigger.trigger_group || null,
+        patient.current_drug,
+        patient.current_ndc,
+        trigger.recommended_drug,
+        trigger.recommended_ndc,
+        patient.prescriber_name,
+        (trigger.default_gp_value || 0) * (trigger.annual_fills || 12),
+        trigger.clinical_rationale
+      ]);
+      opportunitiesCreated++;
     }
 
-    console.log(`Created ${opportunitiesCreated} opportunities for pharmacy ${pharmacyId}`);
+    console.log(`Created ${opportunitiesCreated} opportunities for pharmacy ${pharmacyId} (skipped ${skippedDuplicates} duplicates)`);
 
     res.json({
       success: true,
@@ -3675,7 +3725,12 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
       pharmacyId,
       triggerName: trigger.display_name,
       patientsMatched: patientsMatched.size,
-      opportunitiesCreated
+      opportunitiesCreated,
+      skippedDuplicates,
+      exclusionsApplied: {
+        groupExclusions: groupExclusions.length,
+        contractPrefixExclusions: contractPrefixExclusions.length
+      }
     });
   } catch (error) {
     console.error('Scan pharmacy for trigger error:', error);
@@ -5001,6 +5056,186 @@ router.post('/pharmacies/:pharmacyId/download-service-agreement', authenticateTo
   } catch (error) {
     console.error('Download Service Agreement error:', error);
     res.status(500).json({ error: 'Failed to generate Service Agreement: ' + error.message });
+  }
+});
+
+// GET /api/admin/opportunities/duplicates - Find duplicate opportunities
+router.get('/opportunities/duplicates', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId } = req.query;
+
+    // Find patients with multiple Not Submitted opportunities in same therapeutic category
+    const result = await db.query(`
+      WITH statin_opps AS (
+        SELECT patient_id, pharmacy_id, 'Statins' as category,
+               array_agg(opportunity_id ORDER BY annual_margin_gain DESC) as opp_ids,
+               array_agg(recommended_drug_name ORDER BY annual_margin_gain DESC) as drugs,
+               array_agg(annual_margin_gain ORDER BY annual_margin_gain DESC) as values,
+               COUNT(*) as count
+        FROM opportunities
+        WHERE status = 'Not Submitted'
+          AND (LOWER(recommended_drug_name) LIKE '%statin%'
+               OR LOWER(current_drug_name) LIKE '%statin%'
+               OR LOWER(recommended_drug_name) LIKE '%atorva%'
+               OR LOWER(recommended_drug_name) LIKE '%rosuva%'
+               OR LOWER(recommended_drug_name) LIKE '%simva%'
+               OR LOWER(recommended_drug_name) LIKE '%pitava%')
+          ${pharmacyId ? 'AND pharmacy_id = $1' : ''}
+        GROUP BY patient_id, pharmacy_id
+        HAVING COUNT(*) > 1
+      ),
+      diabetes_supplies AS (
+        SELECT patient_id, pharmacy_id, 'Diabetes Supplies' as category,
+               array_agg(opportunity_id ORDER BY annual_margin_gain DESC) as opp_ids,
+               array_agg(recommended_drug_name ORDER BY annual_margin_gain DESC) as drugs,
+               array_agg(annual_margin_gain ORDER BY annual_margin_gain DESC) as values,
+               COUNT(*) as count
+        FROM opportunities
+        WHERE status = 'Not Submitted'
+          AND (LOWER(recommended_drug_name) LIKE '%lancet%'
+               OR LOWER(recommended_drug_name) LIKE '%pen needle%'
+               OR LOWER(recommended_drug_name) LIKE '%test strip%')
+          ${pharmacyId ? 'AND pharmacy_id = $1' : ''}
+        GROUP BY patient_id, pharmacy_id
+        HAVING COUNT(*) > 1
+      ),
+      all_duplicates AS (
+        SELECT * FROM statin_opps
+        UNION ALL
+        SELECT * FROM diabetes_supplies
+      )
+      SELECT
+        ad.*,
+        p.first_name || ' ' || p.last_name as patient_name,
+        p.dob,
+        ph.pharmacy_name
+      FROM all_duplicates ad
+      JOIN patients p ON p.patient_id = ad.patient_id
+      JOIN pharmacies ph ON ph.pharmacy_id = ad.pharmacy_id
+      ORDER BY ad.count DESC, ad.category
+      LIMIT 100
+    `, pharmacyId ? [pharmacyId] : []);
+
+    // Calculate summary
+    const totalDuplicates = result.rows.reduce((sum, r) => sum + (r.count - 1), 0);
+    const inflatedMargin = result.rows.reduce((sum, r) => {
+      const values = r.values || [];
+      return sum + values.slice(1).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+    }, 0);
+
+    res.json({
+      duplicates: result.rows,
+      summary: {
+        patientsAffected: result.rows.length,
+        totalDuplicateOpportunities: totalDuplicates,
+        inflatedMargin: inflatedMargin.toFixed(2)
+      }
+    });
+  } catch (error) {
+    console.error('Find duplicates error:', error);
+    res.status(500).json({ error: 'Failed to find duplicates: ' + error.message });
+  }
+});
+
+// POST /api/admin/opportunities/deduplicate - Remove duplicate opportunities, keeping highest value
+router.post('/opportunities/deduplicate', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId, dryRun = true } = req.body;
+
+    // Define therapeutic categories for deduplication
+    const categories = [
+      {
+        name: 'Statins',
+        patterns: ['statin', 'atorva', 'rosuva', 'simva', 'pitava', 'prava', 'fluva', 'lova']
+      },
+      {
+        name: 'Diabetes Supplies - Lancets',
+        patterns: ['lancet']
+      },
+      {
+        name: 'Diabetes Supplies - Pen Needles',
+        patterns: ['pen needle', 'penneedle']
+      },
+      {
+        name: 'Diabetes Supplies - Test Strips',
+        patterns: ['test strip', 'glucose strip']
+      },
+      {
+        name: 'ACE Inhibitors',
+        patterns: ['lisinopril', 'enalapril', 'ramipril', 'benazepril', 'captopril']
+      },
+      {
+        name: 'ARBs',
+        patterns: ['losartan', 'valsartan', 'irbesartan', 'olmesartan', 'candesartan']
+      }
+    ];
+
+    const results = [];
+    let totalRemoved = 0;
+    let totalMarginReduction = 0;
+
+    for (const category of categories) {
+      const patternConditions = category.patterns
+        .map((_, i) => `LOWER(recommended_drug_name) LIKE '%' || $${i + 1} || '%' OR LOWER(current_drug_name) LIKE '%' || $${i + 1} || '%'`)
+        .join(' OR ');
+
+      // Find duplicate groups
+      const duplicatesResult = await db.query(`
+        SELECT patient_id, pharmacy_id,
+               array_agg(opportunity_id ORDER BY annual_margin_gain DESC NULLS LAST) as opp_ids,
+               array_agg(annual_margin_gain ORDER BY annual_margin_gain DESC NULLS LAST) as values
+        FROM opportunities
+        WHERE status = 'Not Submitted'
+          AND (${patternConditions})
+          ${pharmacyId ? `AND pharmacy_id = $${category.patterns.length + 1}` : ''}
+        GROUP BY patient_id, pharmacy_id
+        HAVING COUNT(*) > 1
+      `, [...category.patterns, ...(pharmacyId ? [pharmacyId] : [])]);
+
+      for (const dup of duplicatesResult.rows) {
+        const keepId = dup.opp_ids[0]; // Keep highest value
+        const removeIds = dup.opp_ids.slice(1);
+        const removedMargin = dup.values.slice(1).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+
+        results.push({
+          category: category.name,
+          patientId: dup.patient_id,
+          pharmacyId: dup.pharmacy_id,
+          keptOpportunityId: keepId,
+          keptValue: dup.values[0],
+          removedCount: removeIds.length,
+          removedMargin
+        });
+
+        totalRemoved += removeIds.length;
+        totalMarginReduction += removedMargin;
+
+        // Actually delete if not dry run
+        if (!dryRun && removeIds.length > 0) {
+          await db.query(
+            `DELETE FROM opportunities WHERE opportunity_id = ANY($1)`,
+            [removeIds]
+          );
+        }
+      }
+    }
+
+    res.json({
+      dryRun,
+      summary: {
+        categoriesChecked: categories.length,
+        patientsAffected: results.length,
+        opportunitiesRemoved: totalRemoved,
+        marginReduction: totalMarginReduction.toFixed(2)
+      },
+      details: results.slice(0, 50), // Limit details for response size
+      message: dryRun
+        ? `Would remove ${totalRemoved} duplicate opportunities, reducing margin by $${totalMarginReduction.toFixed(2)}`
+        : `Removed ${totalRemoved} duplicate opportunities, reducing margin by $${totalMarginReduction.toFixed(2)}`
+    });
+  } catch (error) {
+    console.error('Deduplicate error:', error);
+    res.status(500).json({ error: 'Failed to deduplicate: ' + error.message });
   }
 });
 
