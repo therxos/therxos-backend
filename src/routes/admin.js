@@ -495,10 +495,9 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
       SELECT
         o.opportunity_id,
         o.opportunity_type,
-        o.trigger_type as trigger_group,
+        o.opportunity_type as trigger_group,
         o.current_drug_name,
         o.recommended_drug_name,
-        o.potential_margin_gain,
         o.annual_margin_gain,
         o.staff_notes,
         o.updated_at,
@@ -513,7 +512,7 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
           SELECT COUNT(*)
           FROM opportunities o2
           LEFT JOIN prescriptions pr2 ON pr2.prescription_id = o2.prescription_id
-          WHERE o2.trigger_type = o.trigger_type
+          WHERE o2.opportunity_type = o.opportunity_type
             AND COALESCE(pr2.insurance_group, '') = COALESCE(pr.insurance_group, '')
             AND o2.status NOT IN ('Denied', 'Flagged', 'Didn''t Work')
         ) as affected_count,
@@ -521,7 +520,7 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
           SELECT COALESCE(SUM(o2.annual_margin_gain), 0)
           FROM opportunities o2
           LEFT JOIN prescriptions pr2 ON pr2.prescription_id = o2.prescription_id
-          WHERE o2.trigger_type = o.trigger_type
+          WHERE o2.opportunity_type = o.opportunity_type
             AND COALESCE(pr2.insurance_group, '') = COALESCE(pr.insurance_group, '')
             AND o2.status NOT IN ('Denied', 'Flagged', 'Didn''t Work')
         ) as affected_value
