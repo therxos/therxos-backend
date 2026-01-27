@@ -103,7 +103,73 @@ export async function generateOnboardingDocuments(clientData) {
   };
 }
 
+/**
+ * Generate full onboarding package (BAA, Service Agreement, Onboarding Guide)
+ * @param {object} clientData - Client information
+ * @returns {object} - All documents with filenames
+ */
+export async function generateOnboardingPackage(clientData) {
+  const docs = await generateOnboardingDocuments(clientData);
+
+  // Try to generate onboarding guide if template exists
+  let onboardingGuide = null;
+  let onboardingGuideFilename = null;
+
+  const onboardingTemplatePath = path.join(rootDir, 'OnboardingGuide.docx');
+  if (fs.existsSync(onboardingTemplatePath)) {
+    try {
+      onboardingGuide = await generateDocument('OnboardingGuide', clientData);
+      onboardingGuideFilename = `OnboardingGuide_${clientData.pharmacyName.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.docx`;
+    } catch (err) {
+      console.error('Failed to generate onboarding guide:', err.message);
+    }
+  }
+
+  return {
+    ...docs,
+    onboardingGuide,
+    onboardingGuideFilename,
+  };
+}
+
+/**
+ * PHI Data Fields for BAA Exhibit A
+ * These are the fields TheRxOS accesses from pharmacy data
+ */
+export const PHI_DATA_FIELDS = [
+  // Prescription Data
+  { category: 'Prescription Data', field: 'Rx Number', description: 'Unique prescription identifier' },
+  { category: 'Prescription Data', field: 'Date Written', description: 'Date prescription was written by prescriber' },
+  { category: 'Prescription Data', field: 'DAW Code', description: 'Dispense As Written code' },
+  { category: 'Prescription Data', field: 'Dispensed Item Name', description: 'Name of the medication dispensed' },
+  { category: 'Prescription Data', field: 'Dispensed Item NDC', description: 'National Drug Code of dispensed medication' },
+  { category: 'Prescription Data', field: 'Dispensed Quantity', description: 'Quantity of medication dispensed' },
+  { category: 'Prescription Data', field: 'Dispensing Unit', description: 'Unit of measure for dispensed quantity' },
+  { category: 'Prescription Data', field: 'Days Supply', description: 'Number of days the prescription will last' },
+  { category: 'Prescription Data', field: 'Therapeutic Class Description', description: 'Drug classification category' },
+  { category: 'Prescription Data', field: 'PDC', description: 'Proportion of Days Covered (adherence metric)' },
+  // Financial Data
+  { category: 'Financial Data', field: 'Dispensed AWP', description: 'Average Wholesale Price of dispensed medication' },
+  { category: 'Financial Data', field: 'Net Profit', description: 'Pharmacy profit on the prescription' },
+  { category: 'Financial Data', field: 'Patient Paid Amount', description: 'Amount paid by patient (copay/coinsurance)' },
+  // Insurance/Payer Data
+  { category: 'Insurance Data', field: 'Primary Contract ID', description: 'Insurance contract identifier' },
+  { category: 'Insurance Data', field: 'Primary Prescription Benefit Plan', description: 'Name of prescription benefit plan' },
+  { category: 'Insurance Data', field: 'Primary Third Party BIN', description: 'Bank Identification Number for claims processing' },
+  { category: 'Insurance Data', field: 'Primary Group Number', description: 'Insurance group number' },
+  { category: 'Insurance Data', field: 'Primary Network Reimbursement', description: 'Reimbursement amount from primary payer' },
+  // Patient Data
+  { category: 'Patient Data', field: 'Patient Full Name', description: 'Last name, First name' },
+  { category: 'Patient Data', field: 'Patient Date of Birth', description: 'Patient date of birth' },
+  { category: 'Patient Data', field: 'Patient Age', description: 'Calculated age of patient' },
+  // Prescriber Data
+  { category: 'Prescriber Data', field: 'Prescriber Full Name', description: 'Name of prescribing provider' },
+  { category: 'Prescriber Data', field: 'Prescriber Fax Number', description: 'Fax number for prescriber communications' },
+];
+
 export default {
   generateDocument,
   generateOnboardingDocuments,
+  generateOnboardingPackage,
+  PHI_DATA_FIELDS,
 };

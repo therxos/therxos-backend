@@ -4906,6 +4906,51 @@ router.post('/pharmacies/:pharmacyId/download-baa', authenticateToken, requireSu
   }
 });
 
+// POST /api/admin/pharmacies/:pharmacyId/download-onboarding-guide - Download Onboarding Guide
+router.post('/pharmacies/:pharmacyId/download-onboarding-guide', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { pharmacyId } = req.params;
+
+    // Get pharmacy info
+    const result = await db.query(`
+      SELECT p.pharmacy_name, p.state, p.address, p.city, p.zip, p.phone, p.pharmacy_npi,
+             c.client_name, c.submitter_email
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE p.pharmacy_id = $1
+    `, [pharmacyId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    const pharmacy = result.rows[0];
+
+    // Generate Onboarding Guide document
+    const { generateDocument } = await import('../services/documentGenerator.js');
+    const document = await generateDocument('OnboardingGuide', {
+      pharmacyName: pharmacy.pharmacy_name,
+      companyName: pharmacy.client_name || pharmacy.pharmacy_name,
+      email: pharmacy.submitter_email,
+      address: pharmacy.address,
+      city: pharmacy.city,
+      state: pharmacy.state,
+      zip: pharmacy.zip,
+      phone: pharmacy.phone,
+      npi: pharmacy.pharmacy_npi,
+    });
+
+    const filename = `OnboardingGuide_${pharmacy.pharmacy_name.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.docx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(document);
+  } catch (error) {
+    console.error('Download Onboarding Guide error:', error);
+    res.status(500).json({ error: 'Failed to generate Onboarding Guide: ' + error.message });
+  }
+});
+
 // POST /api/admin/pharmacies/:pharmacyId/download-service-agreement - Download Service Agreement
 router.post('/pharmacies/:pharmacyId/download-service-agreement', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
