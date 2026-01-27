@@ -12,6 +12,21 @@ Do NOT automatically push to production after staging. The user needs time to te
 
 ---
 
+## CRITICAL - Data Recovery
+
+### Bravo Missing Opportunities (Jan 27, 2026)
+- [ ] **URGENT**: Recover ~37+ deleted Completed opportunities from Supabase PITR
+  - Go to: https://supabase.com/dashboard/project/vjqkgkpfkpdmfajiprkp
+  - Database → Backups → Point-in-Time Recovery
+  - Restore to: January 27, 2026 at 9:00 AM EST (before deduplication)
+
+### Protections Added (Jan 27, 2026)
+- [x] Database trigger `protect_actioned_opportunities` - PREVENTS deletion of actioned opportunities
+- [x] Audit log `opportunity_audit_log` - Permanent immutable record of ALL changes
+- [x] Updated CLAUDE.md with critical rules about never deleting actioned opportunities
+
+---
+
 ## High Priority
 
 ### Demo & Marketing

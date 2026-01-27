@@ -548,10 +548,27 @@ Statuses from V1 are stored in `v1_status` and `v1_notes` columns. The main `sta
 
 ## CRITICAL RULES - NEVER VIOLATE
 
-1. **NEVER filter or hide worked opportunities** - Any opportunity with status != 'Not Submitted' must ALWAYS be visible. This includes Submitted, Approved, Completed, Denied, etc.
-2. **NEVER delete worked opportunities** - Only delete opportunities with status = 'Not Submitted'
+### DATABASE PROTECTION (Enforced by Trigger)
+**The database has a trigger `protect_actioned_opportunities` that PREVENTS deletion of any opportunity with status != 'Not Submitted'. This is a hard enforcement - the delete will fail with an error.**
+
+### Rules
+
+1. **MAINTAIN PERMANENT HISTORY** - All actioned opportunities must have a permanent audit trail. Every status change must be logged.
+
+2. **NEVER DELETE ACTIONED OPPORTUNITIES**
+   - **THIS IS THE MOST CRITICAL RULE**
+   - Any opportunity with status other than 'Not Submitted' represents REAL WORK done by pharmacy staff
+   - Statuses that MUST NEVER be deleted: Completed, Approved, Submitted, Denied, Didn't Work, Flagged, Pending
+   - These are worth THOUSANDS OF DOLLARS in captured revenue and testimonials
+   - The database trigger `prevent_actioned_opportunity_deletion()` enforces this at the DB level
+   - ANY code that deletes opportunities MUST explicitly filter for `status = 'Not Submitted'`
+   - Deduplication scripts MUST only affect 'Not Submitted' opportunities
+   - When writing ANY delete query, ALWAYS include: `WHERE status = 'Not Submitted'`
+
 3. **NEVER make changes without explicit request** - Don't "fix" or "improve" things that weren't asked for
+
 4. **NEVER change default values** without asking first (e.g., minMargin)
+
 5. **NEVER deploy to production without user approval** - After deploying to staging, STOP and WAIT for the user to test and explicitly approve before deploying to production. The staging step is useless if you immediately push to production without waiting.
 
 ---
