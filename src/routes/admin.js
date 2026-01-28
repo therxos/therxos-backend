@@ -141,17 +141,17 @@ router.put('/pharmacies/:id', authenticateToken, requireSuperAdmin, async (req, 
 // GET /api/admin/stats - Get platform-wide stats (authenticated)
 router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    // Exclude Hero Pharmacy and any demo pharmacies from stats
+    // Exclude demo-status clients and demo/hero pharmacies from stats
     const stats = await db.query(`
       SELECT
-        (SELECT COUNT(*) FROM pharmacies WHERE pharmacy_name NOT ILIKE '%hero%' AND pharmacy_name NOT ILIKE '%demo%') as total_pharmacies,
+        (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status NOT IN ('demo', 'cancelled') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_pharmacies,
         (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status = 'active' AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as active_pharmacies,
-        (SELECT COUNT(*) FROM users u JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_users,
-        (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_opportunities,
-        (SELECT COALESCE(SUM(o.potential_margin_gain), 0) * 12 FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_value,
-        (SELECT COALESCE(SUM(o.potential_margin_gain), 0) * 12 FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as captured_value,
+        (SELECT COUNT(*) FROM users u JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id JOIN clients c ON c.client_id = p.client_id WHERE c.status NOT IN ('demo', 'cancelled') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_users,
+        (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id JOIN clients c ON c.client_id = p.client_id WHERE c.status NOT IN ('demo', 'cancelled') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_opportunities,
+        (SELECT COALESCE(SUM(o.potential_margin_gain), 0) * 12 FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id JOIN clients c ON c.client_id = p.client_id WHERE c.status NOT IN ('demo', 'cancelled') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_value,
+        (SELECT COALESCE(SUM(o.potential_margin_gain), 0) * 12 FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id JOIN clients c ON c.client_id = p.client_id WHERE o.status IN ('Completed', 'Approved') AND c.status NOT IN ('demo', 'cancelled') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as captured_value,
         (SELECT COUNT(*) FROM data_quality_issues WHERE status = 'pending') as pending_quality_issues,
-        (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN data_quality_issues dqi ON dqi.opportunity_id = o.opportunity_id WHERE dqi.status = 'pending') as blocked_margin
+        (SELECT COALESCE(SUM(o.potential_margin_gain), 0) * 12 FROM opportunities o JOIN data_quality_issues dqi ON dqi.opportunity_id = o.opportunity_id WHERE dqi.status = 'pending') as blocked_margin
     `);
 
     // Calculate MRR and ARR ($599/mo per active pharmacy)
