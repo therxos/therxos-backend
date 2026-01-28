@@ -56,7 +56,17 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as opportunity_count,
         (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as total_value,
         (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = p.pharmacy_id AND status IN ('Completed', 'Approved')) as captured_value,
-        (SELECT MAX(updated_at) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as last_activity
+        (SELECT MAX(updated_at) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as last_activity,
+        (SELECT json_build_object(
+          'run_type', pr.run_type,
+          'completed_at', pr.completed_at,
+          'status', pr.status,
+          'summary', pr.summary
+        ) FROM poll_runs pr
+        WHERE pr.pharmacy_id = p.pharmacy_id
+        ORDER BY pr.completed_at DESC NULLS LAST
+        LIMIT 1) as last_poll,
+        (SELECT MAX(rx.created_at) FROM prescriptions rx WHERE rx.pharmacy_id = p.pharmacy_id) as last_data_received
       FROM pharmacies p
       JOIN clients c ON c.client_id = p.client_id
       ${includeDemo ? '' : "WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%'"}

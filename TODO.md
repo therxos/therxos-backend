@@ -35,10 +35,10 @@ Do NOT automatically push to production after staging. The user needs time to te
 
 ### Client Features
 - [ ] `/change-password` page (currently returns 404)
-- [ ] Fix logout hydration error
+- [x] Fix logout hydration error
 
 ### Onboarding
-- [ ] Aracoma Drug RX30 data import
+- [x] Aracoma Drug RX30 data import
 - [ ] Gmail OAuth credentials for email sending (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET)
 
 ---
