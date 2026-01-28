@@ -596,6 +596,9 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
         LIMIT 1
       ) recent_rx ON true
       WHERE o.status = 'Didn''t Work'
+        AND p.pharmacy_name NOT ILIKE '%hero%'
+        AND p.pharmacy_name NOT ILIKE '%demo%'
+        AND p.pharmacy_name NOT ILIKE '%marvel%'
       ORDER BY o.updated_at DESC
     `);
 

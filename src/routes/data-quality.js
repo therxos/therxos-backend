@@ -64,6 +64,9 @@ router.get('/', authenticateToken, async (req, res) => {
     if (pharmacyId) {
       query += ` AND dqi.pharmacy_id = $${paramIndex++}`;
       params.push(pharmacyId);
+    } else if (req.user.role === 'super_admin') {
+      // Exclude demo pharmacies
+      query += ` AND ph.pharmacy_name NOT ILIKE '%hero%' AND ph.pharmacy_name NOT ILIKE '%demo%' AND ph.pharmacy_name NOT ILIKE '%marvel%'`;
     }
 
     if (status && status !== 'all') {
@@ -91,15 +94,16 @@ router.get('/', authenticateToken, async (req, res) => {
     }));
 
     // Get counts by status
+    const demoFilter = `pharmacy_id NOT IN (SELECT pharmacy_id FROM pharmacies WHERE pharmacy_name ILIKE '%hero%' OR pharmacy_name ILIKE '%demo%' OR pharmacy_name ILIKE '%marvel%')`;
     const statusCountsQuery = pharmacyId
       ? `SELECT status, COUNT(*) as count FROM data_quality_issues WHERE pharmacy_id = $1 GROUP BY status`
-      : `SELECT status, COUNT(*) as count FROM data_quality_issues GROUP BY status`;
+      : `SELECT status, COUNT(*) as count FROM data_quality_issues WHERE ${demoFilter} GROUP BY status`;
     const statusCounts = await db.query(statusCountsQuery, pharmacyId ? [pharmacyId] : []);
 
     // Get counts by issue type
     const typeCountsQuery = pharmacyId
       ? `SELECT issue_type, COUNT(*) as count FROM data_quality_issues WHERE pharmacy_id = $1 AND status = 'pending' GROUP BY issue_type ORDER BY count DESC`
-      : `SELECT issue_type, COUNT(*) as count FROM data_quality_issues WHERE status = 'pending' GROUP BY issue_type ORDER BY count DESC`;
+      : `SELECT issue_type, COUNT(*) as count FROM data_quality_issues WHERE ${demoFilter} AND status = 'pending' GROUP BY issue_type ORDER BY count DESC`;
     const typeCounts = await db.query(typeCountsQuery, pharmacyId ? [pharmacyId] : []);
 
     res.json({
@@ -354,7 +358,8 @@ router.get('/stats/summary', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
-    const pharmacyFilter = pharmacyId ? 'WHERE pharmacy_id = $1' : 'WHERE 1=1';
+    const demoExclude = `pharmacy_id NOT IN (SELECT pharmacy_id FROM pharmacies WHERE pharmacy_name ILIKE '%hero%' OR pharmacy_name ILIKE '%demo%' OR pharmacy_name ILIKE '%marvel%')`;
+    const pharmacyFilter = pharmacyId ? 'WHERE pharmacy_id = $1' : `WHERE ${demoExclude}`;
     const params = pharmacyId ? [pharmacyId] : [];
 
     // Overall counts
