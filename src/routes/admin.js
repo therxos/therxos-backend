@@ -559,6 +559,7 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
         o.annual_margin_gain,
         o.staff_notes,
         o.updated_at,
+        o.trigger_id,
         p.pharmacy_name,
         p.pharmacy_id,
         COALESCE(pr.insurance_bin, recent_rx.insurance_bin, 'CASH') as insurance_bin,
@@ -566,6 +567,14 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
         COALESCE(pr.plan_name, recent_rx.plan_name) as plan_name,
         pt.first_name as patient_first_name,
         pt.last_name as patient_last_name,
+        CASE
+          WHEN tbv.coverage_status = 'excluded' OR tbv.is_excluded = true THEN 'excluded'
+          WHEN tbv.coverage_status IN ('verified', 'works') THEN 'verified'
+          WHEN tbv.verified_claim_count > 0 THEN 'verified'
+          WHEN tbv_bin.coverage_status IN ('verified', 'works') THEN 'likely'
+          WHEN tbv_bin.verified_claim_count > 0 THEN 'likely'
+          ELSE 'unknown'
+        END as coverage_confidence,
         (
           SELECT COUNT(*)
           FROM opportunities o2
@@ -595,6 +604,13 @@ router.get('/didnt-work-queue', authenticateToken, requireSuperAdmin, async (req
         ORDER BY rx.dispensed_date DESC NULLS LAST
         LIMIT 1
       ) recent_rx ON true
+      LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+        AND tbv.insurance_bin = COALESCE(pr.insurance_bin, recent_rx.insurance_bin)
+        AND COALESCE(tbv.insurance_group, '') = COALESCE(COALESCE(pr.insurance_group, recent_rx.insurance_group), '')
+      LEFT JOIN trigger_bin_values tbv_bin ON tbv_bin.trigger_id = o.trigger_id
+        AND tbv_bin.insurance_bin = COALESCE(pr.insurance_bin, recent_rx.insurance_bin)
+        AND tbv_bin.insurance_group IS NULL
+        AND tbv.trigger_id IS NULL
       WHERE o.status = 'Didn''t Work'
         AND p.pharmacy_name NOT ILIKE '%hero%'
         AND p.pharmacy_name NOT ILIKE '%demo%'
@@ -833,13 +849,51 @@ router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) =
       });
     });
 
-    // Add pharmacy stats to each trigger
+    // Get coverage confidence distribution per trigger
+    const confidenceResult = await db.query(`
+      SELECT
+        o.trigger_id,
+        CASE
+          WHEN tbv.coverage_status = 'excluded' OR tbv.is_excluded = true THEN 'excluded'
+          WHEN tbv.coverage_status IN ('verified', 'works') THEN 'verified'
+          WHEN tbv.verified_claim_count > 0 THEN 'verified'
+          WHEN tbv_bin.coverage_status IN ('verified', 'works') THEN 'likely'
+          WHEN tbv_bin.verified_claim_count > 0 THEN 'likely'
+          ELSE 'unknown'
+        END as confidence,
+        COUNT(*) as cnt
+      FROM opportunities o
+      LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+      LEFT JOIN patients pt ON pt.patient_id = o.patient_id
+      LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+        AND tbv.insurance_bin = COALESCE(pr.insurance_bin, pt.primary_insurance_bin)
+        AND COALESCE(tbv.insurance_group, '') = COALESCE(pr.insurance_group, pt.primary_insurance_group, '')
+      LEFT JOIN trigger_bin_values tbv_bin ON tbv_bin.trigger_id = o.trigger_id
+        AND tbv_bin.insurance_bin = COALESCE(pr.insurance_bin, pt.primary_insurance_bin)
+        AND tbv_bin.insurance_group IS NULL
+        AND tbv.trigger_id IS NULL
+      WHERE o.trigger_id IS NOT NULL
+        AND o.status NOT IN ('Denied', 'Flagged')
+      GROUP BY o.trigger_id, confidence
+    `);
+
+    // Build confidence map: trigger_id -> { verified: N, likely: N, unknown: N, excluded: N }
+    const confidenceByTrigger = {};
+    confidenceResult.rows.forEach(row => {
+      if (!confidenceByTrigger[row.trigger_id]) {
+        confidenceByTrigger[row.trigger_id] = { verified: 0, likely: 0, unknown: 0, excluded: 0 };
+      }
+      confidenceByTrigger[row.trigger_id][row.confidence] = parseInt(row.cnt);
+    });
+
+    // Add pharmacy stats and confidence to each trigger
     const triggersWithStats = result.rows.map(trigger => ({
       ...trigger,
       pharmacy_stats: pharmacyStatsByTrigger[trigger.trigger_id] || [],
       total_opportunities: (pharmacyStatsByTrigger[trigger.trigger_id] || []).reduce((sum, p) => sum + p.opportunity_count, 0),
       total_patients: (pharmacyStatsByTrigger[trigger.trigger_id] || []).reduce((sum, p) => sum + p.patient_count, 0),
-      total_margin: (pharmacyStatsByTrigger[trigger.trigger_id] || []).reduce((sum, p) => sum + p.total_margin, 0)
+      total_margin: (pharmacyStatsByTrigger[trigger.trigger_id] || []).reduce((sum, p) => sum + p.total_margin, 0),
+      confidence_distribution: confidenceByTrigger[trigger.trigger_id] || { verified: 0, likely: 0, unknown: 0, excluded: 0 }
     }));
 
     // Get counts by type
@@ -1989,15 +2043,17 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
             opportunity_id, pharmacy_id, patient_id, opportunity_type,
             current_drug_name, recommended_drug_name, potential_margin_gain,
             annual_margin_gain, current_margin, prescriber_name,
-            status, clinical_priority, clinical_rationale, staff_notes, avg_dispensed_qty
-          ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            status, clinical_priority, clinical_rationale, staff_notes, avg_dispensed_qty,
+            trigger_id, prescription_id
+          ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         `, [
           pharmacy.pharmacy_id, patientId, trigger.trigger_type,
           matchedDrug, trigger.recommended_drug, netGain, annualValue,
           currentGP, matchedRx?.prescriber_name || null,
           'Not Submitted', trigger.priority || 'medium', rationale,
           `Scanned for trigger "${trigger.display_name}" on ${new Date().toISOString().split('T')[0]}`,
-          avgDispensedQty
+          avgDispensedQty,
+          trigger.trigger_id, matchedRx?.prescription_id || null
         ]);
 
         existingOpps.add(oppKey);
@@ -2505,8 +2561,9 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
               opportunity_id, pharmacy_id, patient_id, opportunity_type,
               current_drug_name, recommended_drug_name, potential_margin_gain,
               annual_margin_gain, current_margin, prescriber_name,
-              status, clinical_priority, clinical_rationale, staff_notes, avg_dispensed_qty
-            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+              status, clinical_priority, clinical_rationale, staff_notes, avg_dispensed_qty,
+              trigger_id, prescription_id
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
           `, [
             pharmacyId,
             patientId,
@@ -2521,7 +2578,8 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
             trigger.priority || 'medium',
             rationale,
             `Auto-detected by rescan on ${new Date().toISOString().split('T')[0]}`,
-            avgDispensedQty
+            avgDispensedQty,
+            trigger.trigger_id, matchedRx?.prescription_id || null
           ]);
 
           newOpportunities++;
@@ -3736,6 +3794,7 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
         p.patient_id,
         p.first_name,
         p.last_name,
+        pr.prescription_id,
         pr.drug_name as current_drug,
         pr.ndc as current_ndc,
         pr.prescriber_name,
@@ -3800,9 +3859,10 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
         INSERT INTO opportunities (
           opportunity_id, pharmacy_id, patient_id, opportunity_type, trigger_group,
           current_drug_name, current_ndc, recommended_drug_name, recommended_ndc,
-          prescriber_name, annual_margin_gain, clinical_rationale, status, created_at
+          prescriber_name, annual_margin_gain, clinical_rationale, status, created_at,
+          trigger_id, prescription_id
         ) VALUES (
-          gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'Not Submitted', NOW()
+          gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'Not Submitted', NOW(), $12, $13
         )
       `, [
         pharmacyId,
@@ -3815,7 +3875,8 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
         trigger.recommended_ndc,
         patient.prescriber_name,
         (trigger.default_gp_value || 0) * (trigger.annual_fills || 12),
-        trigger.clinical_rationale
+        trigger.clinical_rationale,
+        trigger.trigger_id, patient.prescription_id || null
       ]);
       opportunitiesCreated++;
     }

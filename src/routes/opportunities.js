@@ -20,6 +20,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Query using columns that exist in the patients and prescriptions tables
     // Excludes opportunities with pending data quality issues (missing prescriber, unknown drug, etc.)
+    // Includes coverage_confidence computed from trigger_bin_values
     let query = `
       SELECT o.*,
         p.patient_hash,
@@ -37,10 +38,27 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(o.current_drug_name, pr.drug_name) as current_drug,
         COALESCE(o.prescriber_name, pr.prescriber_name) as prescriber_name,
         COALESCE(o.potential_margin_gain, 0) as potential_margin_gain,
-        COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0) as annual_margin_gain
+        COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0) as annual_margin_gain,
+        CASE
+          WHEN tbv.coverage_status = 'excluded' OR tbv.is_excluded = true THEN 'excluded'
+          WHEN tbv.coverage_status IN ('verified', 'works') THEN 'verified'
+          WHEN tbv.verified_claim_count > 0 THEN 'verified'
+          WHEN tbv_bin.coverage_status IN ('verified', 'works') THEN 'likely'
+          WHEN tbv_bin.verified_claim_count > 0 THEN 'likely'
+          ELSE 'unknown'
+        END as coverage_confidence,
+        COALESCE(tbv.verified_claim_count, tbv_bin.verified_claim_count, 0) as verified_claim_count,
+        COALESCE(tbv.avg_reimbursement, tbv_bin.avg_reimbursement) as avg_reimbursement
       FROM opportunities o
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+      LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+        AND tbv.insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin)
+        AND COALESCE(tbv.insurance_group, '') = COALESCE(pr.insurance_group, p.primary_insurance_group, '')
+      LEFT JOIN trigger_bin_values tbv_bin ON tbv_bin.trigger_id = o.trigger_id
+        AND tbv_bin.insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin)
+        AND tbv_bin.insurance_group IS NULL
+        AND tbv.trigger_id IS NULL
       WHERE o.pharmacy_id = $1
         AND (o.status != 'Not Submitted' OR o.opportunity_id NOT IN (
           SELECT dqi.opportunity_id FROM data_quality_issues dqi
@@ -232,6 +250,43 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
     updates.updated_at = new Date();
 
     const result = await db.update('opportunities', 'opportunity_id', opportunityId, updates);
+
+    // Auto-exclude BIN+Group when "Didn't Work" is reported
+    if (status === "Didn't Work") {
+      const opp = existing.rows[0];
+      if (opp.trigger_id) {
+        try {
+          // Look up the BIN and Group from prescription/patient
+          const binLookup = await db.query(`
+            SELECT COALESCE(pr.insurance_bin, pat.primary_insurance_bin) as bin,
+                   COALESCE(pr.insurance_group, pat.primary_insurance_group) as grp
+            FROM opportunities o
+            LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+            LEFT JOIN patients pat ON pat.patient_id = o.patient_id
+            WHERE o.opportunity_id = $1
+          `, [opportunityId]);
+
+          const { bin, grp } = binLookup.rows[0] || {};
+          if (bin) {
+            await db.query(`
+              INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, is_excluded, coverage_status, verified_at)
+              VALUES ($1, $2, $3, true, 'excluded', NOW())
+              ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
+              DO UPDATE SET is_excluded = true, coverage_status = 'excluded', verified_at = NOW()
+            `, [opp.trigger_id, bin, grp || null]);
+
+            logger.info('Auto-excluded BIN+Group from Didn\'t Work', {
+              triggerId: opp.trigger_id,
+              bin,
+              group: grp,
+              opportunityId
+            });
+          }
+        } catch (excludeErr) {
+          logger.warn('Failed to auto-exclude BIN+Group', { error: excludeErr.message });
+        }
+      }
+    }
 
     // Log the action (non-blocking, don't fail if logging fails)
     try {
