@@ -54,8 +54,8 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
         (SELECT COUNT(*) FROM users WHERE pharmacy_id = p.pharmacy_id) as user_count,
         (SELECT COUNT(*) FROM patients WHERE pharmacy_id = p.pharmacy_id) as patient_count,
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as opportunity_count,
-        (SELECT COALESCE(SUM(COALESCE(annual_margin_gain, potential_margin_gain * 12, 0)), 0) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as total_value,
-        (SELECT COALESCE(SUM(COALESCE(annual_margin_gain, potential_margin_gain * 12, 0)), 0) FROM opportunities WHERE pharmacy_id = p.pharmacy_id AND status IN ('Completed', 'Approved')) as captured_value,
+        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as total_value,
+        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = p.pharmacy_id AND status IN ('Completed', 'Approved')) as captured_value,
         (SELECT MAX(updated_at) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as last_activity,
         (SELECT json_build_object(
           'run_type', pr.run_type,
@@ -148,8 +148,8 @@ router.get('/stats', authenticateToken, requireSuperAdmin, async (req, res) => {
         (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status = 'active' AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as active_pharmacies,
         (SELECT COUNT(*) FROM users u JOIN pharmacies p ON p.pharmacy_id = u.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_users,
         (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_opportunities,
-        (SELECT COALESCE(SUM(COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0)), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_value,
-        (SELECT COALESCE(SUM(COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0)), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as captured_value,
+        (SELECT COALESCE(SUM(o.potential_margin_gain), 0) * 12 FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as total_value,
+        (SELECT COALESCE(SUM(o.potential_margin_gain), 0) * 12 FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%') as captured_value,
         (SELECT COUNT(*) FROM data_quality_issues WHERE status = 'pending') as pending_quality_issues,
         (SELECT COALESCE(SUM(o.annual_margin_gain), 0) FROM opportunities o JOIN data_quality_issues dqi ON dqi.opportunity_id = o.opportunity_id WHERE dqi.status = 'pending') as blocked_margin
     `);
@@ -291,8 +291,8 @@ router.get('/public-stats', async (req, res) => {
         (SELECT COUNT(*) FROM prescriptions pr JOIN pharmacies p ON p.pharmacy_id = pr.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as claims_analyzed,
         (SELECT COUNT(*) FROM pharmacies p JOIN clients c ON c.client_id = p.client_id WHERE c.status IN ('active', 'onboarding') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as pharmacies_live,
         (SELECT COUNT(*) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as opportunities_found,
-        (SELECT COALESCE(SUM(COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0)), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as profit_identified,
-        (SELECT COALESCE(SUM(COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0)), 0) FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as profit_captured
+        (SELECT COALESCE(SUM(o.potential_margin_gain), 0) * 12 FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as profit_identified,
+        (SELECT COALESCE(SUM(o.potential_margin_gain), 0) * 12 FROM opportunities o JOIN pharmacies p ON p.pharmacy_id = o.pharmacy_id WHERE o.status IN ('Completed', 'Approved') AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%') as profit_captured
     `);
 
     const data = stats.rows[0];
