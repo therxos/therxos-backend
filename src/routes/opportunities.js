@@ -64,7 +64,7 @@ router.get('/', authenticateToken, async (req, res) => {
           SELECT dqi.opportunity_id FROM data_quality_issues dqi
           WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
         ))
-        AND (tbv.is_excluded IS NOT TRUE AND COALESCE(tbv.coverage_status, '') != 'excluded')
+        AND (o.status != 'Not Submitted' OR (tbv.is_excluded IS NOT TRUE AND COALESCE(tbv.coverage_status, '') != 'excluded'))
     `;
     const params = [pharmacyId];
     let paramIndex = 2;
@@ -119,7 +119,7 @@ router.get('/', authenticateToken, async (req, res) => {
           SELECT dqi.opportunity_id FROM data_quality_issues dqi
           WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
         ))
-        AND (tbv.is_excluded IS NOT TRUE AND COALESCE(tbv.coverage_status, '') != 'excluded')
+        AND (o.status != 'Not Submitted' OR (tbv.is_excluded IS NOT TRUE AND COALESCE(tbv.coverage_status, '') != 'excluded'))
       GROUP BY o.status
     `, [pharmacyId]);
 
