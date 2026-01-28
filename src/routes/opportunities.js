@@ -40,6 +40,7 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(o.potential_margin_gain, 0) as potential_margin_gain,
         COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0) as annual_margin_gain,
         CASE
+          WHEN o.trigger_id IS NULL THEN NULL
           WHEN tbv.coverage_status = 'excluded' OR tbv.is_excluded = true THEN 'excluded'
           WHEN tbv.coverage_status IN ('verified', 'works') THEN 'verified'
           WHEN tbv.verified_claim_count > 0 THEN 'verified'
@@ -449,21 +450,21 @@ router.get('/summary/stats', authenticateToken, async (req, res) => {
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed'
           AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
         ) as completed_count,
-        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed'
+        (SELECT COALESCE(SUM(COALESCE(annual_margin_gain, potential_margin_gain * 12, 0)), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed'
           AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
         ) as completed_value,
         -- Approved stats (all-time, not limited by days)
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved'
           AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
         ) as approved_count,
-        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved'
+        (SELECT COALESCE(SUM(COALESCE(annual_margin_gain, potential_margin_gain * 12, 0)), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved'
           AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
         ) as approved_value,
         -- Captured = Approved + Completed (all-time)
         (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')
           AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
         ) as captured_count,
-        (SELECT COALESCE(SUM(annual_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')
+        (SELECT COALESCE(SUM(COALESCE(annual_margin_gain, potential_margin_gain * 12, 0)), 0) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')
           AND opportunity_id NOT IN (SELECT dqi.opportunity_id FROM data_quality_issues dqi WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL)
         ) as captured_value
       FROM opportunities
