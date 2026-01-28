@@ -64,6 +64,7 @@ router.get('/', authenticateToken, async (req, res) => {
           SELECT dqi.opportunity_id FROM data_quality_issues dqi
           WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
         ))
+        AND (tbv.is_excluded IS NOT TRUE AND COALESCE(tbv.coverage_status, '') != 'excluded')
     `;
     const params = [pharmacyId];
     let paramIndex = 2;
@@ -101,19 +102,25 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const result = await db.query(query, params);
 
-    // Get counts by status (excluding opportunities with pending data quality issues)
+    // Get counts by status (excluding data quality issues and excluded coverage)
     const countsResult = await db.query(`
       SELECT
-        status,
+        o.status,
         COUNT(*) as count,
-        SUM(potential_margin_gain) as total_margin
-      FROM opportunities
-      WHERE pharmacy_id = $1
-        AND (status != 'Not Submitted' OR opportunity_id NOT IN (
+        SUM(o.potential_margin_gain) as total_margin
+      FROM opportunities o
+      LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+      LEFT JOIN patients p ON p.patient_id = o.patient_id
+      LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+        AND tbv.insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin)
+        AND COALESCE(tbv.insurance_group, '') = COALESCE(pr.insurance_group, p.primary_insurance_group, '')
+      WHERE o.pharmacy_id = $1
+        AND (o.status != 'Not Submitted' OR o.opportunity_id NOT IN (
           SELECT dqi.opportunity_id FROM data_quality_issues dqi
           WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
         ))
-      GROUP BY status
+        AND (tbv.is_excluded IS NOT TRUE AND COALESCE(tbv.coverage_status, '') != 'excluded')
+      GROUP BY o.status
     `, [pharmacyId]);
 
     const counts = {};
