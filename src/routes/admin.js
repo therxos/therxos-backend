@@ -3659,10 +3659,10 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
     // Store bin values in trigger_bin_values table
     for (const bv of binValues) {
       await db.query(`
-        INSERT INTO trigger_bin_values (trigger_id, bin, group_number, gp_value, avg_qty, claim_count, coverage_status, verified_at)
+        INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, avg_qty, verified_claim_count, coverage_status, verified_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-        ON CONFLICT (trigger_id, bin, COALESCE(group_number, ''))
-        DO UPDATE SET gp_value = $4, avg_qty = $5, claim_count = $6, coverage_status = $7, verified_at = NOW()
+        ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
+        DO UPDATE SET gp_value = $4, avg_qty = $5, verified_claim_count = $6, coverage_status = $7, verified_at = NOW()
       `, [triggerId, bv.bin, bv.group, bv.gpValue, bv.avgQty, bv.claimCount, bv.coverageStatus]);
     }
 
