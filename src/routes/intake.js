@@ -40,7 +40,7 @@ router.post('/process', authenticateToken, upload.single('file'), async (req, re
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const { pharmacyId } = req.body;
+    const { pharmacyId, manualBin, manualPcn, manualGroup } = req.body;
     if (!pharmacyId) {
       return res.status(400).json({ error: 'Pharmacy ID required' });
     }
@@ -49,7 +49,8 @@ router.post('/process', authenticateToken, upload.single('file'), async (req, re
       filename: req.file.originalname,
       mimetype: req.file.mimetype,
       size: req.file.size,
-      pharmacyId
+      pharmacyId,
+      hasManualInsurance: !!(manualBin || manualPcn || manualGroup)
     });
 
     let extractedData;
@@ -75,12 +76,19 @@ router.post('/process', authenticateToken, upload.single('file'), async (req, re
       return res.status(400).json({ error: 'Could not extract medication information from the file' });
     }
 
+    // Merge manual insurance with OCR-extracted (manual takes priority)
+    const mergedInsurance = {
+      bin: (manualBin || '').trim() || extractedData.insurance?.bin || '',
+      pcn: (manualPcn || '').trim() || extractedData.insurance?.pcn || '',
+      group: (manualGroup || '').trim() || extractedData.insurance?.group || ''
+    };
+
     // Find matching opportunities from triggers
     const opportunities = await findOpportunities(extractedData.medications, pharmacyId);
 
     const result = {
       patient: extractedData.patient || { firstName: '', lastName: '', dob: '' },
-      insurance: extractedData.insurance || { bin: '', pcn: '', group: '' },
+      insurance: mergedInsurance,
       medications: extractedData.medications,
       opportunities
     };
