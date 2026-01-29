@@ -5,8 +5,19 @@ import db from '../database/index.js';
 import { logger } from '../utils/logger.js';
 import { authenticateToken } from './auth.js';
 import { formatPatientName, formatPrescriberName } from '../utils/formatters.js';
+import { getEquivalencyForDrug } from '../data/equivalency-tables.js';
 
 const router = express.Router();
+
+// Get drug class equivalency table for a given drug name
+router.get('/equivalency', authenticateToken, (req, res) => {
+  const { drug } = req.query;
+  if (!drug) {
+    return res.status(400).json({ error: 'Drug name required' });
+  }
+  const result = getEquivalencyForDrug(drug);
+  res.json(result);
+});
 
 // Get opportunities for authenticated user's pharmacy
 router.get('/', authenticateToken, async (req, res) => {
