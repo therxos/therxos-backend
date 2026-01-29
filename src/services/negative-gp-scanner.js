@@ -355,7 +355,11 @@ async function scanNegativeGPOpportunities(options = {}) {
     skippedNoAlternative: 0,
     skippedLowGain: 0,
     errors: [],
-    details: []
+    details: [],
+    unclassifiedDrugs: [],
+    noAlternativeDrugs: [],
+    existingTriggerDrugs: [],
+    lowGainDrugs: []
   };
 
   logger.info('Starting Negative GP scan', { thresholds });
@@ -378,6 +382,15 @@ async function scanNegativeGPOpportunities(options = {}) {
         const classInfo = await classifyDrug(loser.drug_name);
         if (!classInfo) {
           results.skippedNoClass++;
+          results.unclassifiedDrugs.push({
+            drug: loser.drug_name,
+            bin: loser.insurance_bin,
+            group: loser.insurance_group,
+            avgGP: parseFloat(loser.avg_gp),
+            fills: parseInt(loser.fill_count),
+            patients: parseInt(loser.patient_count),
+            totalLoss: parseFloat(loser.total_loss)
+          });
           continue;
         }
 
@@ -392,6 +405,16 @@ async function scanNegativeGPOpportunities(options = {}) {
 
         if (alternatives.length === 0) {
           results.skippedNoAlternative++;
+          results.noAlternativeDrugs.push({
+            drug: loser.drug_name,
+            bin: loser.insurance_bin,
+            group: loser.insurance_group,
+            avgGP: parseFloat(loser.avg_gp),
+            fills: parseInt(loser.fill_count),
+            patients: parseInt(loser.patient_count),
+            totalLoss: parseFloat(loser.total_loss),
+            therapeuticClass: classInfo.displayName
+          });
           continue;
         }
 
@@ -401,6 +424,16 @@ async function scanNegativeGPOpportunities(options = {}) {
 
         if (perPatientAnnualGain < thresholds.minMarginGain) {
           results.skippedLowGain++;
+          results.lowGainDrugs.push({
+            drug: loser.drug_name,
+            bin: loser.insurance_bin,
+            group: loser.insurance_group,
+            avgGP: parseFloat(loser.avg_gp),
+            recommendedDrug: bestAlt.alternative_drug,
+            altAvgGP: parseFloat(bestAlt.avg_gp),
+            annualGainPerPatient: parseFloat(perPatientAnnualGain.toFixed(2)),
+            therapeuticClass: classInfo.displayName
+          });
           continue;
         }
 
@@ -410,6 +443,13 @@ async function scanNegativeGPOpportunities(options = {}) {
         const alreadyExists = await checkExisting(bestAlt.alternative_drug, loser.drug_name);
         if (alreadyExists) {
           results.skippedExisting++;
+          results.existingTriggerDrugs.push({
+            drug: loser.drug_name,
+            bin: loser.insurance_bin,
+            group: loser.insurance_group,
+            recommendedDrug: bestAlt.alternative_drug,
+            therapeuticClass: classInfo.displayName
+          });
           continue;
         }
 
