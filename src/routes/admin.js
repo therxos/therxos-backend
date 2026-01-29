@@ -863,6 +863,7 @@ router.get('/reference-data', authenticateToken, requireSuperAdmin, async (req, 
         AND tbv.gp_value IS NOT NULL
         AND tbv.gp_value > $1
         AND COALESCE(tbv.verified_claim_count, 0) >= $2
+        AND tbv.insurance_bin NOT LIKE 'MEDICARE:%'
     `;
     const params = [parseFloat(minGp), parseInt(minClaims)];
     let paramIndex = 3;
@@ -998,7 +999,7 @@ router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) =
           'avgQty', tbv.avg_qty,
           'bestDrugName', tbv.best_drug_name,
           'bestNdc', tbv.best_ndc
-        )) FROM trigger_bin_values tbv WHERE tbv.trigger_id = t.trigger_id) as bin_values,
+        )) FROM trigger_bin_values tbv WHERE tbv.trigger_id = t.trigger_id AND tbv.insurance_bin NOT LIKE 'MEDICARE:%') as bin_values,
         (SELECT json_agg(json_build_object(
           'type', tr.restriction_type,
           'bin', tr.insurance_bin,
