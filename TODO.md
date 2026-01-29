@@ -51,8 +51,7 @@ Do NOT automatically push to production after staging. The user needs time to te
 - [ ] Patient communication log
 
 ### Triggers & Scanning
-- [ ] 340B specialty trigger variations (test in Marvel Pharmacy)
-- [ ] Compounding opportunity triggers
+- [x] Negative GP opportunity discovery scanner (2026-01-29)
 - [ ] Auto-rescan on new data upload
 
 ### Admin Tools
@@ -66,7 +65,6 @@ Do NOT automatically push to production after staging. The user needs time to te
 
 ### Integrations
 - [ ] Direct PMS API connections (beyond CSV upload)
-- [ ] E-prescribing integration
 - [ ] Pharmacy network benchmarking
 
 ### Advanced Features
@@ -78,6 +76,7 @@ Do NOT automatically push to production after staging. The user needs time to te
 
 ## Completed Recently
 
+- [x] Negative GP opportunity discovery scanner - auto-finds losing drugs, suggests alternatives with positive GP on same BIN/GROUP, queues for admin review (2026-01-29)
 - [x] Client-facing changelog in dashboard sidebar (2026-01-19)
 - [x] Website best fit updated for smaller pharmacies (25K+ scripts) (2026-01-19)
 - [x] Test email feature for admin (2026-01-19)

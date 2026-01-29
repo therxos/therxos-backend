@@ -5439,4 +5439,85 @@ router.post('/opportunities/deduplicate', authenticateToken, requireSuperAdmin, 
   }
 });
 
+// ==========================================
+// NEGATIVE GP OPPORTUNITY DISCOVERY
+// ==========================================
+
+// GET /api/admin/negative-gp-losers - Preview negative GP drugs without submitting
+router.get('/negative-gp-losers', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const {
+      minFills = 3,
+      maxAvgGP = -2.00,
+      lookbackDays = 180,
+      limit = 100
+    } = req.query;
+
+    const { findNegativeGPDrugs } = await import('../services/negative-gp-scanner.js');
+
+    const losers = await findNegativeGPDrugs({
+      lookbackDays: parseInt(lookbackDays),
+      minFillsNegative: parseInt(minFills),
+      maxAvgGP: parseFloat(maxAvgGP)
+    });
+
+    res.json({
+      losers: losers.slice(0, parseInt(limit)).map(r => ({
+        ...r,
+        avg_gp: parseFloat(r.avg_gp),
+        total_loss: parseFloat(r.total_loss),
+        worst_gp: parseFloat(r.worst_gp),
+        best_gp: parseFloat(r.best_gp),
+        fill_count: parseInt(r.fill_count),
+        patient_count: parseInt(r.patient_count),
+        pharmacy_count: parseInt(r.pharmacy_count)
+      })),
+      count: losers.length,
+      thresholds: {
+        minFills: parseInt(minFills),
+        maxAvgGP: parseFloat(maxAvgGP),
+        lookbackDays: parseInt(lookbackDays)
+      }
+    });
+  } catch (error) {
+    console.error('Negative GP losers error:', error);
+    res.status(500).json({ error: 'Failed to get negative GP losers: ' + error.message });
+  }
+});
+
+// POST /api/admin/scan-negative-gp - Run full negative GP scan and submit to approval queue
+router.post('/scan-negative-gp', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const {
+      minFillsNegative = 3,
+      maxAvgGP = -2.00,
+      minFillsAlternative = 2,
+      minAvgGPAlternative = 5.00,
+      lookbackDays = 180,
+      minMarginGain = 10.00,
+      maxResults = 50
+    } = req.body;
+
+    const { scanNegativeGPOpportunities } = await import('../services/negative-gp-scanner.js');
+
+    const results = await scanNegativeGPOpportunities({
+      minFillsNegative: parseInt(minFillsNegative),
+      maxAvgGP: parseFloat(maxAvgGP),
+      minFillsAlternative: parseInt(minFillsAlternative),
+      minAvgGPAlternative: parseFloat(minAvgGPAlternative),
+      lookbackDays: parseInt(lookbackDays),
+      minMarginGain: parseFloat(minMarginGain),
+      maxResults: parseInt(maxResults)
+    });
+
+    res.json({
+      success: true,
+      ...results
+    });
+  } catch (error) {
+    console.error('Negative GP scan error:', error);
+    res.status(500).json({ error: 'Failed to scan for negative GP opportunities: ' + error.message });
+  }
+});
+
 export default router;
