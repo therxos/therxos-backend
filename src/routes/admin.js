@@ -2104,11 +2104,11 @@ router.get('/audit-rules', authenticateToken, requireSuperAdmin, async (req, res
         ph.pharmacy_name,
         COUNT(*) as risk_count,
         COUNT(DISTINCT af.patient_id) as patient_count,
-        COALESCE(SUM(af.potential_audit_exposure), 0) as total_exposure
+        COALESCE(SUM(af.gross_profit), 0) as total_exposure
       FROM audit_rules ar
-      LEFT JOIN audit_flags af ON af.rule_id = ar.rule_id AND af.status = 'pending'
+      LEFT JOIN audit_flags af ON af.rule_id = ar.rule_id AND af.status = 'open'
       LEFT JOIN pharmacies ph ON ph.pharmacy_id = af.pharmacy_id
-      WHERE af.audit_flag_id IS NOT NULL
+      WHERE af.flag_id IS NOT NULL
       GROUP BY ar.rule_id, af.pharmacy_id, ph.pharmacy_name
       ORDER BY ar.rule_id, total_exposure DESC
     `);
