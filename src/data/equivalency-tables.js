@@ -29,6 +29,19 @@ const EQUIVALENCY_TABLES = {
       { drug: 'Azilsartan', values: ['20 mg', '40 mg', '80 mg'] },
     ],
     note: 'Dosing ranges for hypertension management.'
+  },
+  ace_inhibitors: {
+    className: 'ACE Inhibitors',
+    columns: ['Drug', 'Low', 'Mid', 'High/Max'],
+    rows: [
+      { drug: 'Trandolapril', values: ['0.5 mg', '2.5 mg', '5 mg'] },
+      { drug: 'Quinapril', values: ['5 mg', '10 mg', '20-40 mg*'] },
+      { drug: 'Enalapril', values: ['2.5 mg', '5-10 mg', '20 mg*'] },
+      { drug: 'Lisinopril', values: ['5 mg', '10 mg', '20-40 mg'] },
+      { drug: 'Perindopril', values: ['2 mg', '2-4 mg', '8 mg'] },
+      { drug: 'Ramipril', values: ['1.25 mg', '2.5 mg', '5-10 mg*'] },
+    ],
+    note: '* Maximum dose for heart failure may differ. See ARB table for Candesartan/Losartan equivalency.'
   }
 };
 
