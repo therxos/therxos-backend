@@ -3684,12 +3684,19 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
 
     // Build search patterns from detection keywords
     const keywords = trigger.detection_keywords || [];
+    const excludeKeywords = trigger.exclude_keywords || [];
     if (keywords.length === 0) {
       return res.status(400).json({ error: 'Trigger has no detection keywords' });
     }
 
-    // Find matching prescriptions
+    // Find matching prescriptions (with exclude keyword filtering)
     const keywordPatterns = keywords.map(k => `%${k.toLowerCase()}%`);
+    const excludePatterns = excludeKeywords.map(k => `%${k.toLowerCase()}%`);
+    const allParams = [...keywordPatterns, ...excludePatterns, minMargin];
+    const excludeCondition = excludePatterns.length > 0
+      ? `AND NOT (${excludePatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${keywordPatterns.length + i + 1}`).join(' OR ')})`
+      : '';
+
     const prescriptionsResult = await db.query(`
       SELECT DISTINCT
         p.insurance_bin as bin,
@@ -3700,11 +3707,12 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       FROM prescriptions p
       WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
         AND (${keywordPatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${i + 1}`).join(' OR ')})
+        ${excludeCondition}
         AND p.insurance_bin IS NOT NULL
       GROUP BY p.insurance_bin, p.insurance_group
-      HAVING AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) >= $${keywordPatterns.length + 1}
+      HAVING AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) >= $${keywordPatterns.length + excludePatterns.length + 1}
       ORDER BY claim_count DESC
-    `, [...keywordPatterns, minMargin]);
+    `, allParams);
 
     const binValues = prescriptionsResult.rows.map(row => ({
       bin: row.bin,
