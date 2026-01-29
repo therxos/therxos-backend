@@ -74,7 +74,10 @@ const DRUG_PATTERNS = {
   ppi: /omeprazole|esomeprazole|lansoprazole|pantoprazole|rabeprazole|dexlansoprazole|prilosec|nexium|prevacid|protonix|aciphex|dexilant/i,
   thyroid: /levothyroxine|synthroid|levoxyl|tirosint|unithroid|armour thyroid|liothyronine/i,
   bisphosphonates: /alendronate|risedronate|ibandronate|zoledronic|fosamax|actonel|boniva|reclast/i,
-  anticoagulants: /warfarin|apixaban|rivaroxaban|dabigatran|edoxaban|coumadin|eliquis|xarelto|pradaxa|savaysa/i
+  anticoagulants: /warfarin|apixaban|rivaroxaban|dabigatran|edoxaban|coumadin|eliquis|xarelto|pradaxa|savaysa/i,
+  glucose_test_strips: /freestyle|onetouch|one touch|contour|accu-chek|accu chek|true metrix|truemetrix|prodigy|relion|embrace|test strip|blood glucose strip/i,
+  lancets: /lancet|microlet|unistik/i,
+  pen_needles: /pen needle|novofine|novotwist|nano pen|bd nano/i
 };
 
 /**

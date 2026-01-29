@@ -38,7 +38,10 @@ const CLASS_PATTERNS = {
   ppi: 'omeprazole|esomeprazole|lansoprazole|pantoprazole|rabeprazole|dexlansoprazole|prilosec|nexium|prevacid|protonix|aciphex|dexilant',
   thyroid: 'levothyroxine|synthroid|levoxyl|tirosint|unithroid|armour thyroid|liothyronine',
   bisphosphonates: 'alendronate|risedronate|ibandronate|zoledronic|fosamax|actonel|boniva|reclast',
-  anticoagulants: 'warfarin|apixaban|rivaroxaban|dabigatran|edoxaban|coumadin|eliquis|xarelto|pradaxa|savaysa'
+  anticoagulants: 'warfarin|apixaban|rivaroxaban|dabigatran|edoxaban|coumadin|eliquis|xarelto|pradaxa|savaysa',
+  glucose_test_strips: 'freestyle|onetouch|one touch|contour|accu-chek|accu chek|true metrix|truemetrix|prodigy|relion|embrace|test strip|blood glucose strip',
+  lancets: 'lancet|microlet|unistik',
+  pen_needles: 'pen needle|novofine|novotwist|nano pen|bd nano'
 };
 
 // Human-readable class names
@@ -69,7 +72,10 @@ const CLASS_DISPLAY_NAMES = {
   ppi: 'Proton Pump Inhibitors',
   thyroid: 'Thyroid Agents',
   bisphosphonates: 'Bisphosphonates',
-  anticoagulants: 'Anticoagulants'
+  anticoagulants: 'Anticoagulants',
+  glucose_test_strips: 'Glucose Test Strips',
+  lancets: 'Lancets',
+  pen_needles: 'Pen Needles'
 };
 
 // Broader therapeutic area groupings for fallback matching
@@ -84,7 +90,8 @@ const THERAPEUTIC_AREAS = {
   cholesterol: ['statins'],
   anticoagulation: ['anticoagulants'],
   bone_health: ['bisphosphonates'],
-  thyroid: ['thyroid']
+  thyroid: ['thyroid'],
+  diabetic_supplies: ['glucose_test_strips', 'lancets', 'pen_needles']
 };
 
 const THERAPEUTIC_AREA_NAMES = {
@@ -97,7 +104,8 @@ const THERAPEUTIC_AREA_NAMES = {
   cholesterol: 'Cholesterol Agents',
   anticoagulation: 'Anticoagulants',
   bone_health: 'Bone Health',
-  thyroid: 'Thyroid Agents'
+  thyroid: 'Thyroid Agents',
+  diabetic_supplies: 'Diabetic Supplies'
 };
 
 /**
