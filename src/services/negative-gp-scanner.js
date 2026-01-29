@@ -154,16 +154,16 @@ async function findNegativeGPDrugs(thresholds) {
       COUNT(DISTINCT p.pharmacy_id) as pharmacy_count,
       ARRAY_AGG(DISTINCT p.pharmacy_id) as pharmacy_ids,
       ROUND(AVG(
-        COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
       )::numeric, 2) as avg_gp,
       ROUND(SUM(
-        COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
       )::numeric, 2) as total_loss,
       ROUND(MIN(
-        COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
       )::numeric, 2) as worst_gp,
       ROUND(MAX(
-        COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
       )::numeric, 2) as best_gp
     FROM prescriptions p
     JOIN pharmacies ph ON ph.pharmacy_id = p.pharmacy_id
@@ -176,10 +176,10 @@ async function findNegativeGPDrugs(thresholds) {
     GROUP BY UPPER(SPLIT_PART(p.drug_name, ' ', 1)), p.drug_name, p.insurance_bin, p.insurance_group
     HAVING COUNT(*) >= $2
       AND AVG(
-        COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
       ) <= $3
     ORDER BY SUM(
-      COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+      (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
     ) ASC
     LIMIT 200
   `, [thresholds.lookbackDays, thresholds.minFillsNegative, thresholds.maxAvgGP]);
@@ -197,10 +197,10 @@ async function findPositiveAlternatives(classPattern, bin, group, baseDrugName, 
       COUNT(*) as fill_count,
       COUNT(DISTINCT p.patient_id) as patient_count,
       ROUND(AVG(
-        COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
       )::numeric, 2) as avg_gp,
       ROUND(MAX(
-        COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
       )::numeric, 2) as max_gp
     FROM prescriptions p
     WHERE p.dispensed_date >= CURRENT_DATE - ($1 || ' days')::INTERVAL
@@ -213,10 +213,10 @@ async function findPositiveAlternatives(classPattern, bin, group, baseDrugName, 
     GROUP BY p.drug_name
     HAVING COUNT(*) >= $6
       AND AVG(
-        COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
       ) >= $7
     ORDER BY AVG(
-      COALESCE(p.gross_profit, COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+      (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
     ) DESC
     LIMIT 5
   `, [
