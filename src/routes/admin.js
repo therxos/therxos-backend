@@ -769,6 +769,212 @@ router.post('/resolve-didnt-work', authenticateToken, requireSuperAdmin, async (
 
 
 // ===========================================
+// REFERENCE DATA - Best Reimbursing Drugs Per Class Per BIN
+// ===========================================
+
+const DRUG_PATTERNS_REF = {
+  statins: /atorvastatin|simvastatin|rosuvastatin|pravastatin|lovastatin|fluvastatin|pitavastatin|lipitor|crestor|zocor/i,
+  ace_inhibitors: /lisinopril|enalapril|ramipril|benazepril|captopril|fosinopril|quinapril|moexipril|perindopril|trandolapril|prinivil|zestril|vasotec|altace/i,
+  arbs: /losartan|valsartan|irbesartan|olmesartan|candesartan|telmisartan|azilsartan|cozaar|diovan|avapro/i,
+  beta_blockers: /metoprolol|atenolol|carvedilol|bisoprolol|propranolol|nadolol|nebivolol|labetalol|lopressor|toprol|coreg/i,
+  ccb: /amlodipine|nifedipine|diltiazem|verapamil|felodipine|nicardipine|norvasc|cardizem|procardia/i,
+  thiazides: /hydrochlorothiazide|chlorthalidone|indapamide|metolazone|hctz/i,
+  loop_diuretics: /furosemide|bumetanide|torsemide|lasix|bumex/i,
+  metformin: /metformin|glucophage|fortamet|glumetza|riomet/i,
+  sulfonylureas: /glipizide|glyburide|glimepiride|glucotrol|diabeta|micronase|amaryl/i,
+  sglt2: /canagliflozin|dapagliflozin|empagliflozin|ertugliflozin|invokana|farxiga|jardiance|steglatro/i,
+  glp1: /semaglutide|liraglutide|dulaglutide|exenatide|ozempic|wegovy|victoza|trulicity|byetta|bydureon/i,
+  dpp4: /sitagliptin|saxagliptin|linagliptin|alogliptin|januvia|onglyza|tradjenta|nesina/i,
+  insulin: /insulin|novolog|humalog|lantus|levemir|basaglar|tresiba|toujeo|admelog|fiasp/i,
+  laba: /salmeterol|formoterol|vilanterol|olodaterol|indacaterol|serevent|foradil/i,
+  lama: /tiotropium|umeclidinium|aclidinium|glycopyrrolate|spiriva|incruse|tudorza/i,
+  ics: /fluticasone|budesonide|beclomethasone|mometasone|ciclesonide|flovent|pulmicort|qvar|asmanex|alvesco/i,
+  ics_laba: /advair|symbicort|breo|dulera|wixela|airduo/i,
+  saba: /albuterol|levalbuterol|proair|proventil|ventolin|xopenex/i,
+  ssri: /fluoxetine|sertraline|paroxetine|escitalopram|citalopram|fluvoxamine|prozac|zoloft|paxil|lexapro|celexa/i,
+  snri: /venlafaxine|duloxetine|desvenlafaxine|levomilnacipran|effexor|cymbalta|pristiq|fetzima/i,
+  benzo: /alprazolam|lorazepam|clonazepam|diazepam|temazepam|xanax|ativan|klonopin|valium|restoril/i,
+  opioids: /oxycodone|hydrocodone|morphine|fentanyl|tramadol|codeine|hydromorphone|oxycontin|percocet|vicodin|norco|dilaudid/i,
+  nsaids: /ibuprofen|naproxen|meloxicam|diclofenac|celecoxib|indomethacin|ketorolac|motrin|advil|aleve|mobic|voltaren|celebrex/i,
+  ppi: /omeprazole|esomeprazole|lansoprazole|pantoprazole|rabeprazole|dexlansoprazole|prilosec|nexium|prevacid|protonix|aciphex|dexilant/i,
+  thyroid: /levothyroxine|synthroid|levoxyl|tirosint|unithroid|armour thyroid|liothyronine/i,
+  bisphosphonates: /alendronate|risedronate|ibandronate|zoledronic|fosamax|actonel|boniva|reclast/i,
+  anticoagulants: /warfarin|apixaban|rivaroxaban|dabigatran|edoxaban|coumadin|eliquis|xarelto|pradaxa|savaysa/i,
+  glucose_test_strips: /freestyle|onetouch|one touch|contour|accu-chek|accu chek|true metrix|truemetrix|prodigy|relion|embrace|test strip|blood glucose strip/i,
+  lancets: /lancet|microlet|unistik/i,
+  pen_needles: /pen needle|novofine|novotwist|nano pen|bd nano/i
+};
+
+const DRUG_CLASS_LABELS = {
+  statins: 'Statins', ace_inhibitors: 'ACE Inhibitors', arbs: 'ARBs',
+  beta_blockers: 'Beta Blockers', ccb: 'Calcium Channel Blockers',
+  thiazides: 'Thiazide Diuretics', loop_diuretics: 'Loop Diuretics',
+  metformin: 'Metformin', sulfonylureas: 'Sulfonylureas',
+  sglt2: 'SGLT2 Inhibitors', glp1: 'GLP-1 Agonists', dpp4: 'DPP-4 Inhibitors',
+  insulin: 'Insulin', laba: 'LABA Inhalers', lama: 'LAMA Inhalers',
+  ics: 'Inhaled Corticosteroids', ics_laba: 'ICS/LABA Combos',
+  saba: 'Short-Acting Beta Agonists', ssri: 'SSRIs', snri: 'SNRIs',
+  benzo: 'Benzodiazepines', opioids: 'Opioids', nsaids: 'NSAIDs',
+  ppi: 'Proton Pump Inhibitors', thyroid: 'Thyroid',
+  bisphosphonates: 'Bisphosphonates', anticoagulants: 'Anticoagulants',
+  glucose_test_strips: 'Glucose Test Strips', lancets: 'Lancets',
+  pen_needles: 'Pen Needles', other: 'Other'
+};
+
+function classifyTriggerDrugClass(row) {
+  // 1. For ndc_optimization, check detection_keywords for DME
+  if (row.trigger_type === 'ndc_optimization') {
+    const keywords = (row.detection_keywords || []).join(' ').toLowerCase();
+    if (/lancet/i.test(keywords)) return 'lancets';
+    if (/test strip|glucose strip|freestyle|contour|accu.chek|true.?metrix/i.test(keywords)) return 'glucose_test_strips';
+    if (/pen needle|novofine/i.test(keywords)) return 'pen_needles';
+  }
+  // 2. Try recommended_drug
+  if (row.recommended_drug) {
+    for (const [cls, pattern] of Object.entries(DRUG_PATTERNS_REF)) {
+      if (pattern.test(row.recommended_drug)) return cls;
+    }
+  }
+  // 3. Try display_name
+  if (row.display_name) {
+    for (const [cls, pattern] of Object.entries(DRUG_PATTERNS_REF)) {
+      if (pattern.test(row.display_name)) return cls;
+    }
+  }
+  return 'other';
+}
+
+// GET /api/admin/reference-data - Best reimbursing drugs per class per BIN/Group
+router.get('/reference-data', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { minGp = 0, minClaims = 1, bin, group, class: drugClassFilter } = req.query;
+
+    let query = `
+      SELECT
+        t.trigger_id, t.display_name, t.trigger_type, t.category,
+        t.recommended_drug, t.recommended_ndc, t.detection_keywords,
+        tbv.insurance_bin, tbv.insurance_group, tbv.gp_value,
+        tbv.avg_qty, tbv.verified_claim_count, tbv.coverage_status,
+        tbv.best_drug_name, tbv.best_ndc, tbv.verified_at
+      FROM trigger_bin_values tbv
+      JOIN triggers t ON t.trigger_id = tbv.trigger_id
+      WHERE t.is_enabled = true
+        AND tbv.coverage_status IN ('verified', 'works')
+        AND tbv.gp_value IS NOT NULL
+        AND tbv.gp_value > $1
+        AND COALESCE(tbv.verified_claim_count, 0) >= $2
+    `;
+    const params = [parseFloat(minGp), parseInt(minClaims)];
+    let paramIndex = 3;
+
+    if (bin) {
+      query += ` AND tbv.insurance_bin = $${paramIndex++}`;
+      params.push(bin);
+    }
+    if (group) {
+      query += ` AND tbv.insurance_group = $${paramIndex++}`;
+      params.push(group);
+    }
+
+    query += ` ORDER BY tbv.gp_value DESC`;
+
+    const result = await db.query(query, params);
+
+    // Group by drug class
+    const byClass = {};
+    for (const row of result.rows) {
+      const drugClass = classifyTriggerDrugClass(row);
+      if (drugClassFilter && drugClass !== drugClassFilter) continue;
+
+      if (!byClass[drugClass]) {
+        byClass[drugClass] = {
+          drugClassLabel: DRUG_CLASS_LABELS[drugClass] || drugClass,
+          triggers: {}
+        };
+      }
+
+      if (!byClass[drugClass].triggers[row.trigger_id]) {
+        byClass[drugClass].triggers[row.trigger_id] = {
+          triggerId: row.trigger_id,
+          displayName: row.display_name,
+          recommendedDrug: row.recommended_drug,
+          triggerType: row.trigger_type,
+          binValues: []
+        };
+      }
+
+      byClass[drugClass].triggers[row.trigger_id].binValues.push({
+        bin: row.insurance_bin,
+        group: row.insurance_group,
+        gpValue: parseFloat(row.gp_value) || 0,
+        avgQty: parseFloat(row.avg_qty) || 0,
+        claimCount: parseInt(row.verified_claim_count) || 0,
+        bestDrugName: row.best_drug_name,
+        bestNdc: row.best_ndc,
+        coverageStatus: row.coverage_status,
+        verifiedAt: row.verified_at
+      });
+    }
+
+    // Convert triggers from objects to arrays, compute top formulary
+    const topFormulary = [];
+    const drugClasses = [];
+    let totalTriggers = 0, totalBinGroups = 0, totalClaims = 0;
+
+    for (const [cls, data] of Object.entries(byClass)) {
+      data.triggers = Object.values(data.triggers);
+      drugClasses.push(cls);
+      totalTriggers += data.triggers.length;
+
+      let bestEntry = null;
+      for (const trigger of data.triggers) {
+        totalBinGroups += trigger.binValues.length;
+        totalClaims += trigger.binValues.reduce((s, b) => s + b.claimCount, 0);
+
+        for (const bv of trigger.binValues) {
+          if (!bestEntry || bv.gpValue > bestEntry.bestGpValue) {
+            bestEntry = {
+              drugClass: cls,
+              drugClassLabel: data.drugClassLabel,
+              bestDrug: bv.bestDrugName || trigger.recommendedDrug || trigger.displayName,
+              bestGpValue: bv.gpValue,
+              bestBin: bv.bin,
+              bestGroup: bv.group
+            };
+          }
+        }
+      }
+
+      if (bestEntry) {
+        bestEntry.triggerCount = data.triggers.length;
+        bestEntry.binGroupCount = data.triggers.reduce((s, t) => s + t.binValues.length, 0);
+        bestEntry.totalVerifiedClaims = data.triggers.reduce((s, t) =>
+          s + t.binValues.reduce((s2, b) => s2 + b.claimCount, 0), 0);
+        topFormulary.push(bestEntry);
+      }
+    }
+
+    topFormulary.sort((a, b) => a.drugClassLabel.localeCompare(b.drugClassLabel));
+    drugClasses.sort((a, b) => (DRUG_CLASS_LABELS[a] || a).localeCompare(DRUG_CLASS_LABELS[b] || b));
+
+    res.json({
+      topFormulary,
+      byClass,
+      drugClasses,
+      stats: {
+        totalClasses: drugClasses.length,
+        totalTriggers,
+        totalBinGroups,
+        totalVerifiedClaims: totalClaims
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching reference data:', error);
+    res.status(500).json({ error: 'Failed to fetch reference data: ' + error.message });
+  }
+});
+
+// ===========================================
 // TRIGGER MANAGEMENT ENDPOINTS
 // ===========================================
 
