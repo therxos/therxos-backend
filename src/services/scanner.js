@@ -107,12 +107,15 @@ function inferConditionsFromDrugs(drugClasses) {
  */
 async function scanNDCOptimization(pharmacyId, prescriptions, batchId) {
   const opportunities = [];
-  
+
   for (const rx of prescriptions) {
     try {
+      // Skip CASH prescriptions - NDC optimization only applies to insured claims
+      if (!rx.insurance_bin || rx.insurance_bin === '' || rx.insurance_bin === 'CASH') continue;
+
       const currentNDC = await db.query('SELECT * FROM ndc_reference WHERE ndc = $1', [rx.ndc]);
       if (currentNDC.rows.length === 0) continue;
-      
+
       const current = currentNDC.rows[0];
       if (!current.is_brand && !current.therapeutic_class_code) continue;
       

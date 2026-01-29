@@ -465,22 +465,23 @@ router.post('/submit', authenticateToken, async (req, res) => {
       estimated_annual_margin
     } = req.body;
 
-    // Check if this type already exists in queue
+    // Check if this type already exists in queue (use FOR UPDATE to prevent race conditions)
     const existing = await db.query(
-      'SELECT * FROM pending_opportunity_types WHERE recommended_drug_name = $1 AND status = $2',
+      'SELECT * FROM pending_opportunity_types WHERE LOWER(recommended_drug_name) = LOWER($1) AND status = $2 FOR UPDATE',
       [recommended_drug_name, 'pending']
     );
 
     if (existing.rows.length > 0) {
-      // Update existing with new counts
+      // Update existing - replace counts (don't add, to avoid inflation on re-scan)
       await db.query(`
         UPDATE pending_opportunity_types
-        SET total_patient_count = total_patient_count + $1,
-            estimated_annual_margin = estimated_annual_margin + $2,
-            sample_data = $3,
+        SET total_patient_count = GREATEST(total_patient_count, $1),
+            estimated_annual_margin = GREATEST(estimated_annual_margin, $2),
+            sample_data = COALESCE($3, sample_data),
+            source_details = COALESCE($4, source_details),
             updated_at = NOW()
-        WHERE pending_type_id = $4
-      `, [total_patient_count || 0, estimated_annual_margin || 0, sample_data, existing.rows[0].pending_type_id]);
+        WHERE pending_type_id = $5
+      `, [total_patient_count || 0, estimated_annual_margin || 0, sample_data, source_details, existing.rows[0].pending_type_id]);
 
       return res.json({
         success: true,
