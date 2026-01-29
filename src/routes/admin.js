@@ -5520,4 +5520,187 @@ router.post('/scan-negative-gp', authenticateToken, requireSuperAdmin, async (re
   }
 });
 
+// ==========================================
+// POSITIVE GP SCAN (Top Winners)
+// ==========================================
+
+// GET /api/admin/positive-gp-winners - Find drugs with highest positive GP by BIN/GROUP
+router.get('/positive-gp-winners', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const {
+      minFills = 3,
+      minAvgGP = 10,
+      lookbackDays = 180,
+      limit = 100
+    } = req.query;
+
+    const result = await db.query(`
+      SELECT
+        UPPER(SPLIT_PART(p.drug_name, ' ', 1)) as base_drug_name,
+        p.drug_name,
+        p.insurance_bin,
+        p.insurance_group,
+        COUNT(*) as fill_count,
+        COUNT(DISTINCT p.patient_id) as patient_count,
+        COUNT(DISTINCT p.pharmacy_id) as pharmacy_count,
+        ROUND(AVG(
+          COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)
+        )::numeric, 2) as avg_gp,
+        ROUND(SUM(
+          COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)
+        )::numeric, 2) as total_profit,
+        ROUND(MAX(
+          COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)
+        )::numeric, 2) as best_gp,
+        ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
+        ROUND(AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0))::numeric, 2) as avg_reimbursement
+      FROM prescriptions p
+      JOIN pharmacies ph ON ph.pharmacy_id = p.pharmacy_id
+      JOIN clients c ON c.client_id = ph.client_id AND c.status != 'demo'
+      WHERE p.dispensed_date >= CURRENT_DATE - ($1 || ' days')::INTERVAL
+        AND p.acquisition_cost IS NOT NULL
+        AND p.acquisition_cost > 0
+        AND p.insurance_bin IS NOT NULL
+        AND (p.insurance_pay IS NOT NULL OR p.patient_pay IS NOT NULL)
+      GROUP BY UPPER(SPLIT_PART(p.drug_name, ' ', 1)), p.drug_name, p.insurance_bin, p.insurance_group
+      HAVING COUNT(*) >= $2
+        AND AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) >= $3
+      ORDER BY AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) DESC
+      LIMIT $4
+    `, [parseInt(lookbackDays), parseInt(minFills), parseFloat(minAvgGP), parseInt(limit)]);
+
+    const totalProfit = result.rows.reduce((sum, r) => sum + parseFloat(r.total_profit), 0);
+    const totalPatients = result.rows.reduce((sum, r) => sum + parseInt(r.patient_count), 0);
+
+    res.json({
+      winners: result.rows.map(r => ({
+        ...r,
+        avg_gp: parseFloat(r.avg_gp),
+        total_profit: parseFloat(r.total_profit),
+        best_gp: parseFloat(r.best_gp),
+        avg_acq_cost: parseFloat(r.avg_acq_cost),
+        avg_reimbursement: parseFloat(r.avg_reimbursement),
+        fill_count: parseInt(r.fill_count),
+        patient_count: parseInt(r.patient_count),
+        pharmacy_count: parseInt(r.pharmacy_count)
+      })),
+      count: result.rows.length,
+      totalProfit,
+      totalPatients,
+      thresholds: {
+        minFills: parseInt(minFills),
+        minAvgGP: parseFloat(minAvgGP),
+        lookbackDays: parseInt(lookbackDays)
+      }
+    });
+  } catch (error) {
+    console.error('Positive GP winners error:', error);
+    res.status(500).json({ error: 'Failed to get positive GP winners: ' + error.message });
+  }
+});
+
+// ==========================================
+// NDC OPTIMIZATION SCAN
+// ==========================================
+
+// GET /api/admin/ndc-optimization - Find same-drug NDCs with better reimbursement on same BIN/GROUP
+router.get('/ndc-optimization', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const {
+      minFills = 3,
+      minGPDifference = 3,
+      lookbackDays = 180,
+      limit = 100
+    } = req.query;
+
+    // Find drugs where different NDCs of the same base drug have different GP on the same BIN/GROUP
+    const result = await db.query(`
+      WITH drug_ndc_gp AS (
+        SELECT
+          UPPER(SPLIT_PART(p.drug_name, ' ', 1)) as base_drug,
+          p.drug_name,
+          p.ndc,
+          p.insurance_bin,
+          p.insurance_group,
+          COUNT(*) as fill_count,
+          COUNT(DISTINCT p.patient_id) as patient_count,
+          ROUND(AVG(
+            COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)
+          )::numeric, 2) as avg_gp,
+          ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
+          ROUND(AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0))::numeric, 2) as avg_reimbursement
+        FROM prescriptions p
+        JOIN pharmacies ph ON ph.pharmacy_id = p.pharmacy_id
+        JOIN clients c ON c.client_id = ph.client_id AND c.status != 'demo'
+        WHERE p.dispensed_date >= CURRENT_DATE - ($1 || ' days')::INTERVAL
+          AND p.acquisition_cost IS NOT NULL
+          AND p.acquisition_cost > 0
+          AND p.insurance_bin IS NOT NULL
+          AND p.ndc IS NOT NULL
+          AND (p.insurance_pay IS NOT NULL OR p.patient_pay IS NOT NULL)
+        GROUP BY UPPER(SPLIT_PART(p.drug_name, ' ', 1)), p.drug_name, p.ndc, p.insurance_bin, p.insurance_group
+        HAVING COUNT(*) >= $2
+      ),
+      ndc_pairs AS (
+        SELECT
+          low.base_drug,
+          low.drug_name as current_drug,
+          low.ndc as current_ndc,
+          high.drug_name as better_drug,
+          high.ndc as better_ndc,
+          low.insurance_bin,
+          low.insurance_group,
+          low.fill_count as current_fills,
+          low.patient_count as current_patients,
+          low.avg_gp as current_avg_gp,
+          low.avg_acq_cost as current_acq_cost,
+          low.avg_reimbursement as current_reimbursement,
+          high.fill_count as better_fills,
+          high.avg_gp as better_avg_gp,
+          high.avg_acq_cost as better_acq_cost,
+          high.avg_reimbursement as better_reimbursement,
+          (high.avg_gp - low.avg_gp) as gp_difference,
+          (high.avg_gp - low.avg_gp) * 12 as annual_gain_per_patient
+        FROM drug_ndc_gp low
+        JOIN drug_ndc_gp high
+          ON low.base_drug = high.base_drug
+          AND low.insurance_bin = high.insurance_bin
+          AND COALESCE(low.insurance_group, '') = COALESCE(high.insurance_group, '')
+          AND low.ndc != high.ndc
+          AND high.avg_gp > low.avg_gp
+        WHERE (high.avg_gp - low.avg_gp) >= $3
+      )
+      SELECT * FROM ndc_pairs
+      ORDER BY gp_difference DESC
+      LIMIT $4
+    `, [parseInt(lookbackDays), parseInt(minFills), parseFloat(minGPDifference), parseInt(limit)]);
+
+    res.json({
+      opportunities: result.rows.map(r => ({
+        ...r,
+        current_avg_gp: parseFloat(r.current_avg_gp),
+        better_avg_gp: parseFloat(r.better_avg_gp),
+        gp_difference: parseFloat(r.gp_difference),
+        annual_gain_per_patient: parseFloat(r.annual_gain_per_patient),
+        current_acq_cost: parseFloat(r.current_acq_cost),
+        better_acq_cost: parseFloat(r.better_acq_cost),
+        current_reimbursement: parseFloat(r.current_reimbursement),
+        better_reimbursement: parseFloat(r.better_reimbursement),
+        current_fills: parseInt(r.current_fills),
+        current_patients: parseInt(r.current_patients),
+        better_fills: parseInt(r.better_fills)
+      })),
+      count: result.rows.length,
+      thresholds: {
+        minFills: parseInt(minFills),
+        minGPDifference: parseFloat(minGPDifference),
+        lookbackDays: parseInt(lookbackDays)
+      }
+    });
+  } catch (error) {
+    console.error('NDC optimization error:', error);
+    res.status(500).json({ error: 'Failed to get NDC optimization data: ' + error.message });
+  }
+});
+
 export default router;
