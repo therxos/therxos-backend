@@ -72,6 +72,56 @@ const CLASS_DISPLAY_NAMES = {
   anticoagulants: 'Anticoagulants'
 };
 
+// Broader therapeutic area groupings for fallback matching
+// When same-class matching finds nothing, widen to the therapeutic area
+const THERAPEUTIC_AREAS = {
+  diabetes: ['metformin', 'sulfonylureas', 'sglt2', 'glp1', 'dpp4', 'insulin'],
+  hypertension: ['ace_inhibitors', 'arbs', 'beta_blockers', 'ccb', 'thiazides', 'loop_diuretics'],
+  respiratory: ['laba', 'lama', 'ics', 'ics_laba', 'saba'],
+  mental_health: ['ssri', 'snri'],
+  pain: ['nsaids', 'opioids'],
+  gi: ['ppi'],
+  cholesterol: ['statins'],
+  anticoagulation: ['anticoagulants'],
+  bone_health: ['bisphosphonates'],
+  thyroid: ['thyroid']
+};
+
+const THERAPEUTIC_AREA_NAMES = {
+  diabetes: 'Diabetes Agents',
+  hypertension: 'Antihypertensives',
+  respiratory: 'Respiratory Agents',
+  mental_health: 'Antidepressants',
+  pain: 'Pain Management',
+  gi: 'GI Agents',
+  cholesterol: 'Cholesterol Agents',
+  anticoagulation: 'Anticoagulants',
+  bone_health: 'Bone Health',
+  thyroid: 'Thyroid Agents'
+};
+
+/**
+ * Get the broader therapeutic area pattern for a drug class
+ * Returns a combined regex pattern for all classes in the same area
+ */
+function getBroadPattern(drugClass) {
+  for (const [area, classes] of Object.entries(THERAPEUTIC_AREAS)) {
+    if (classes.includes(drugClass)) {
+      // Combine all class patterns in this area into one regex
+      const patterns = classes
+        .map(c => CLASS_PATTERNS[c])
+        .filter(Boolean);
+      return {
+        area,
+        areaName: THERAPEUTIC_AREA_NAMES[area],
+        pattern: patterns.join('|'),
+        classes
+      };
+    }
+  }
+  return null;
+}
+
 // Default thresholds (conservative)
 const DEFAULT_THRESHOLDS = {
   minFillsNegative: 3,         // Minimum fills of the negative GP drug
@@ -483,7 +533,7 @@ async function enrichWithCoverageData(recommendedDrug, bin, group, loserDrug) {
 /**
  * Submit a discovered opportunity to the approval queue
  */
-async function submitToApprovalQueue({ loser, bestAlternative, classInfo, alternatives, perPatientAnnualGain }) {
+async function submitToApprovalQueue({ loser, bestAlternative, classInfo, alternatives, perPatientAnnualGain, matchLevel = 'same_class' }) {
   const recommendedDrugName = bestAlternative.alternative_drug;
   const totalAnnualMargin = perPatientAnnualGain * parseInt(loser.patient_count);
 
@@ -498,6 +548,9 @@ async function submitToApprovalQueue({ loser, bestAlternative, classInfo, altern
   const sourceDetails = {
     scan_type: 'negative_gp_discovery',
     scanned_at: new Date().toISOString(),
+    // Match context
+    match_level: matchLevel, // 'same_class' or 'therapeutic_area'
+    broad_area: classInfo.broadArea || null,
     // Loser drug details
     loser_drug: loser.drug_name,
     loser_bin: loser.insurance_bin,
@@ -623,13 +676,33 @@ async function scanNegativeGPOpportunities(options = {}) {
         }
 
         // Find positive-GP alternatives in same class + same BIN/GROUP
-        const alternatives = await findPositiveAlternatives(
+        let alternatives = await findPositiveAlternatives(
           classInfo.pattern,
           loser.insurance_bin,
           loser.insurance_group,
           loser.base_drug_name,
           thresholds
         );
+
+        let matchLevel = 'same_class';
+
+        // Fallback: if no same-class alternatives, try broader therapeutic area
+        if (alternatives.length === 0) {
+          const broadInfo = getBroadPattern(classInfo.class);
+          if (broadInfo && broadInfo.classes.length > 1) {
+            alternatives = await findPositiveAlternatives(
+              broadInfo.pattern,
+              loser.insurance_bin,
+              loser.insurance_group,
+              loser.base_drug_name,
+              thresholds
+            );
+            if (alternatives.length > 0) {
+              matchLevel = 'therapeutic_area';
+              classInfo.broadArea = broadInfo.areaName;
+            }
+          }
+        }
 
         if (alternatives.length === 0) {
           results.skippedNoAlternative++;
@@ -687,7 +760,8 @@ async function scanNegativeGPOpportunities(options = {}) {
           bestAlternative: bestAlt,
           classInfo,
           alternatives,
-          perPatientAnnualGain
+          perPatientAnnualGain,
+          matchLevel
         });
 
         results.submittedToQueue++;
@@ -700,6 +774,8 @@ async function scanNegativeGPOpportunities(options = {}) {
           patients: parseInt(loser.patient_count),
           totalLoss: parseFloat(loser.total_loss),
           therapeuticClass: classInfo.displayName,
+          broadArea: classInfo.broadArea || null,
+          matchLevel,
           recommendedDrug: bestAlt.alternative_drug,
           altAvgGP: parseFloat(bestAlt.avg_gp),
           altFills: parseInt(bestAlt.fill_count),
