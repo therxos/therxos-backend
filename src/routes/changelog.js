@@ -7,6 +7,27 @@ const router = express.Router();
 // Only include [CLIENT] tagged items - things that affect their experience
 const CHANGELOG_ENTRIES = [
   {
+    date: '2026-01-29',
+    version: '2.6.0',
+    entries: [
+      {
+        type: 'feature',
+        title: 'Insurance Info on Intake',
+        description: 'Enter BIN, PCN, and GROUP before scanning a patient intake image. Edit insurance info in results before adding to queue.'
+      },
+      {
+        type: 'feature',
+        title: 'Group Opportunities by Drug',
+        description: 'New "Drug" option in Group By dropdown — see all patients for a given recommended drug in one view'
+      },
+      {
+        type: 'improvement',
+        title: 'Fax Template Improvements',
+        description: 'Clinical rationale text now displays at proper size on fax PDFs'
+      }
+    ]
+  },
+  {
     date: '2026-01-19',
     version: '2.4.1',
     entries: [
