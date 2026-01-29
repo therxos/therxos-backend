@@ -56,10 +56,15 @@ router.get('/', authenticateToken, async (req, res) => {
       LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
         AND tbv.insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin)
         AND COALESCE(tbv.insurance_group, '') = COALESCE(pr.insurance_group, p.primary_insurance_group, '')
-      LEFT JOIN trigger_bin_values tbv_bin ON tbv_bin.trigger_id = o.trigger_id
-        AND tbv_bin.insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin)
-        AND tbv_bin.insurance_group IS NULL
-        AND tbv.trigger_id IS NULL
+      LEFT JOIN LATERAL (
+        SELECT coverage_status, verified_claim_count, avg_reimbursement
+        FROM trigger_bin_values
+        WHERE trigger_id = o.trigger_id
+          AND insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin)
+          AND (coverage_status IN ('verified', 'works') OR verified_claim_count > 0)
+        ORDER BY verified_claim_count DESC NULLS LAST
+        LIMIT 1
+      ) tbv_bin ON tbv.trigger_id IS NULL
       WHERE o.pharmacy_id = $1
         AND (o.status != 'Not Submitted' OR o.opportunity_id NOT IN (
           SELECT dqi.opportunity_id FROM data_quality_issues dqi
