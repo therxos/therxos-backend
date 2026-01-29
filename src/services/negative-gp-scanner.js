@@ -172,6 +172,8 @@ async function findNegativeGPDrugs(thresholds) {
       AND p.acquisition_cost IS NOT NULL
       AND p.acquisition_cost > 0
       AND p.insurance_bin IS NOT NULL
+      AND p.insurance_bin NOT IN ('000000', '000001', '999999', '')
+      AND (p.insurance_group IS NULL OR p.insurance_group NOT IN ('No Group Number', 'NO GROUP', 'NONE', 'N/A', ''))
       AND (p.insurance_pay IS NOT NULL OR p.patient_pay IS NOT NULL)
     GROUP BY UPPER(SPLIT_PART(p.drug_name, ' ', 1)), p.drug_name, p.insurance_bin, p.insurance_group
     HAVING COUNT(*) >= $2
