@@ -70,7 +70,7 @@ router.get('/', authenticateToken, requireSuperAdmin, async (req, res) => {
     let existingTriggerMap = {};
     if (recommendedDrugs.length > 0) {
       const triggerResult = await db.query(`
-        SELECT trigger_id, trigger_code, display_name, recommended_drug
+        SELECT trigger_id, trigger_code, display_name, recommended_drug, clinical_rationale
         FROM triggers
         WHERE LOWER(recommended_drug) = ANY($1)
       `, [recommendedDrugs.map(d => d?.toLowerCase())]);
@@ -78,7 +78,8 @@ router.get('/', authenticateToken, requireSuperAdmin, async (req, res) => {
         existingTriggerMap[t.recommended_drug?.toLowerCase()] = {
           trigger_id: t.trigger_id,
           trigger_name: t.trigger_code,
-          display_name: t.display_name
+          display_name: t.display_name,
+          clinical_rationale: t.clinical_rationale
         };
       });
     }
@@ -233,13 +234,24 @@ router.get('/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
       ORDER BY oal.created_at DESC
     `, [id]);
 
+    // Get clinical rationale from linked trigger
+    let triggerRationale = null;
+    if (item.recommended_drug_name) {
+      const triggerLookup = await db.query(
+        `SELECT clinical_rationale FROM triggers WHERE LOWER(recommended_drug) = LOWER($1) LIMIT 1`,
+        [item.recommended_drug_name]
+      );
+      triggerRationale = triggerLookup.rows[0]?.clinical_rationale || null;
+    }
+
     res.json({
       ...item,
       affected_pharmacies_resolved: affectedPharmaciesResolved,
       sample_opportunities: sampleOpps.rows,
       bin_breakdown: binBreakdown.rows,
       current_drug_breakdown: currentDrugBreakdown.rows,
-      history: history.rows
+      history: history.rows,
+      trigger_clinical_rationale: triggerRationale
     });
   } catch (error) {
     logger.error('Get pending opportunity type error', { error: error.message });
