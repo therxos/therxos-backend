@@ -389,7 +389,11 @@ async function processComboTrigger(trigger, pharmacy_id, patientRxMap) {
       opportunity_type: mapCategoryToType(trigger['Category']),
       category: trigger['Category'] || 'Pill Count',
       current_ndc: triggeringRx.ndc,
-      current_drug_name: `Combo Match`,
+      current_drug_name: requiredDrugs.map(d => {
+        // Find the actual full drug name from prescriptions that matched this keyword
+        const matchedRx = prescriptions.find(rx => (rx.drug_name || '').toUpperCase().includes(d));
+        return matchedRx ? matchedRx.drug_name : d;
+      }).join(' + '),
       recommended_drug_name: trigger['Recommended Med'],
       potential_margin_gain: gp,
       annual_fills: parseInt(trigger['Annual Fills']) || 12,

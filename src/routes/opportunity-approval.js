@@ -151,15 +151,18 @@ router.get('/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
     const sampleOpps = await db.query(`
       SELECT
         o.opportunity_id,
+        o.patient_id,
         o.current_drug_name,
         o.prescriber_name,
         o.potential_margin_gain,
         o.annual_margin_gain,
+        o.status as opp_status,
         p.first_name || ' ' || p.last_name as patient_name,
         pr.insurance_bin,
         pr.insurance_group,
         pr.plan_name,
-        ph.pharmacy_name
+        ph.pharmacy_name,
+        (SELECT COUNT(*) FROM opportunities o2 WHERE o2.patient_id = o.patient_id AND o2.status != 'Not Submitted') as patient_actioned_count
       FROM opportunities o
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
@@ -615,6 +618,38 @@ router.get('/unauthorized/list', authenticateToken, requireSuperAdmin, async (re
   } catch (error) {
     logger.error('Get unauthorized list error', { error: error.message });
     res.status(500).json({ error: 'Failed to get unauthorized opportunities list' });
+  }
+});
+
+// Get all opportunities for a patient (admin view - no pharmacy restriction)
+router.get('/patient/:patientId/opportunities', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    const result = await db.query(`
+      SELECT
+        o.opportunity_id,
+        o.opportunity_type,
+        o.trigger_type,
+        o.current_drug_name,
+        o.recommended_drug_name,
+        o.status,
+        o.potential_margin_gain,
+        o.annual_margin_gain,
+        o.created_at,
+        o.actioned_at,
+        ph.pharmacy_name
+      FROM opportunities o
+      LEFT JOIN pharmacies ph ON ph.pharmacy_id = o.pharmacy_id
+      WHERE o.patient_id = $1
+      ORDER BY o.status = 'Not Submitted' ASC, o.annual_margin_gain DESC NULLS LAST
+      LIMIT 50
+    `, [patientId]);
+
+    res.json({ opportunities: result.rows });
+  } catch (error) {
+    logger.error('Get patient opportunities error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get patient opportunities' });
   }
 });
 
