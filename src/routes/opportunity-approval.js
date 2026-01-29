@@ -147,12 +147,13 @@ router.get('/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
       }));
     }
 
-    // Get sample opportunities with more context (current drug, insurance info)
+    // Get sample opportunities with more context (current drug, insurance info, GP, coverage confidence)
     const sampleOpps = await db.query(`
       SELECT
         o.opportunity_id,
         o.patient_id,
         o.current_drug_name,
+        o.current_margin,
         o.prescriber_name,
         o.potential_margin_gain,
         o.annual_margin_gain,
@@ -161,12 +162,29 @@ router.get('/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
         pr.insurance_bin,
         pr.insurance_group,
         pr.plan_name,
+        pr.gross_profit as rx_gross_profit,
         ph.pharmacy_name,
-        (SELECT COUNT(*) FROM opportunities o2 WHERE o2.patient_id = o.patient_id AND o2.status != 'Not Submitted') as patient_actioned_count
+        (SELECT COUNT(*) FROM opportunities o2 WHERE o2.patient_id = o.patient_id AND o2.status != 'Not Submitted') as patient_actioned_count,
+        CASE
+          WHEN o.trigger_id IS NULL THEN NULL
+          WHEN tbv.coverage_status = 'excluded' OR tbv.is_excluded = true THEN 'excluded'
+          WHEN tbv.coverage_status IN ('verified', 'works') THEN 'verified'
+          WHEN tbv.verified_claim_count > 0 THEN 'verified'
+          WHEN EXISTS (
+            SELECT 1 FROM trigger_bin_values tbv2
+            WHERE tbv2.trigger_id = o.trigger_id
+              AND tbv2.insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin)
+              AND (tbv2.coverage_status IN ('verified', 'works') OR tbv2.verified_claim_count > 0)
+          ) THEN 'likely'
+          ELSE 'unknown'
+        END as coverage_confidence
       FROM opportunities o
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       LEFT JOIN pharmacies ph ON ph.pharmacy_id = o.pharmacy_id
+      LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+        AND tbv.insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin)
+        AND COALESCE(tbv.insurance_group, '') = COALESCE(pr.insurance_group, p.primary_insurance_group, '')
       WHERE o.recommended_drug_name = $1
       ORDER BY o.annual_margin_gain DESC NULLS LAST
       LIMIT 20
