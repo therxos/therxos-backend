@@ -274,15 +274,231 @@ async function checkExisting(recommendedDrug, currentDrug) {
 }
 
 /**
+ * Enrich a suggestion with coverage verification and claims data
+ * Pulls from: actual paid claims, CMS formulary, formulary_items, trigger_bin_values
+ */
+async function enrichWithCoverageData(recommendedDrug, bin, group, loserDrug) {
+  const enrichment = {
+    // Actual paid claims for the recommended drug on this BIN/GROUP
+    paid_claims: null,
+    // Actual paid claims for the loser drug on this BIN/GROUP (the negative GP detail)
+    loser_claims: null,
+    // CMS formulary coverage for the recommended drug
+    cms_coverage: null,
+    // Commercial formulary data
+    formulary_data: null,
+    // Existing trigger coverage verification
+    trigger_coverage: null,
+    // Estimated GP calculation
+    estimated_gp: null,
+    coverage_confidence: 'none'
+  };
+
+  try {
+    // 1. Actual paid claims for the RECOMMENDED drug on this BIN/GROUP
+    const recClaims = await db.query(`
+      SELECT
+        COUNT(*) as claim_count,
+        COUNT(DISTINCT patient_id) as patient_count,
+        ROUND(AVG(COALESCE(insurance_pay, 0))::numeric, 2) as avg_insurance_pay,
+        ROUND(AVG(COALESCE(patient_pay, 0))::numeric, 2) as avg_patient_pay,
+        ROUND(AVG(COALESCE(acquisition_cost, 0))::numeric, 2) as avg_acquisition_cost,
+        ROUND(AVG(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0))::numeric, 2) as avg_total_reimbursement,
+        ROUND(AVG(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0))::numeric, 2) as avg_gp,
+        ROUND(MIN(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0))::numeric, 2) as min_gp,
+        ROUND(MAX(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0))::numeric, 2) as max_gp,
+        MAX(dispensed_date) as last_fill_date
+      FROM prescriptions
+      WHERE LOWER(drug_name) LIKE LOWER($1)
+        AND insurance_bin = $2
+        AND ($3::text IS NULL AND insurance_group IS NULL OR insurance_group = $3)
+        AND acquisition_cost IS NOT NULL AND acquisition_cost > 0
+    `, [`%${recommendedDrug.split(/\s+/)[0]}%`, bin, group || null]);
+
+    if (recClaims.rows[0] && parseInt(recClaims.rows[0].claim_count) > 0) {
+      enrichment.paid_claims = {
+        claim_count: parseInt(recClaims.rows[0].claim_count),
+        patient_count: parseInt(recClaims.rows[0].patient_count),
+        avg_insurance_pay: parseFloat(recClaims.rows[0].avg_insurance_pay),
+        avg_patient_pay: parseFloat(recClaims.rows[0].avg_patient_pay),
+        avg_acquisition_cost: parseFloat(recClaims.rows[0].avg_acquisition_cost),
+        avg_total_reimbursement: parseFloat(recClaims.rows[0].avg_total_reimbursement),
+        avg_gp: parseFloat(recClaims.rows[0].avg_gp),
+        min_gp: parseFloat(recClaims.rows[0].min_gp),
+        max_gp: parseFloat(recClaims.rows[0].max_gp),
+        last_fill_date: recClaims.rows[0].last_fill_date
+      };
+      enrichment.coverage_confidence = 'verified_claims';
+    }
+
+    // 2. Actual paid claims for the LOSER drug on this BIN/GROUP (so we can show exactly what we're losing)
+    const loserClaims = await db.query(`
+      SELECT
+        COUNT(*) as claim_count,
+        ROUND(AVG(COALESCE(insurance_pay, 0))::numeric, 2) as avg_insurance_pay,
+        ROUND(AVG(COALESCE(patient_pay, 0))::numeric, 2) as avg_patient_pay,
+        ROUND(AVG(COALESCE(acquisition_cost, 0))::numeric, 2) as avg_acquisition_cost,
+        ROUND(AVG(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0))::numeric, 2) as avg_total_reimbursement,
+        ROUND(AVG(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0))::numeric, 2) as avg_gp
+      FROM prescriptions
+      WHERE LOWER(drug_name) LIKE LOWER($1)
+        AND insurance_bin = $2
+        AND ($3::text IS NULL AND insurance_group IS NULL OR insurance_group = $3)
+        AND acquisition_cost IS NOT NULL AND acquisition_cost > 0
+    `, [`%${loserDrug.split(/\s+/)[0]}%`, bin, group || null]);
+
+    if (loserClaims.rows[0] && parseInt(loserClaims.rows[0].claim_count) > 0) {
+      enrichment.loser_claims = {
+        claim_count: parseInt(loserClaims.rows[0].claim_count),
+        avg_insurance_pay: parseFloat(loserClaims.rows[0].avg_insurance_pay),
+        avg_patient_pay: parseFloat(loserClaims.rows[0].avg_patient_pay),
+        avg_acquisition_cost: parseFloat(loserClaims.rows[0].avg_acquisition_cost),
+        avg_total_reimbursement: parseFloat(loserClaims.rows[0].avg_total_reimbursement),
+        avg_gp: parseFloat(loserClaims.rows[0].avg_gp)
+      };
+    }
+
+    // 3. CMS formulary coverage for the recommended drug
+    try {
+      const cmsResult = await db.query(`
+        SELECT
+          cfd.tier_level,
+          cfd.prior_authorization_yn,
+          cfd.step_therapy_yn,
+          cfd.quantity_limit_yn,
+          cfd.quantity_limit_amount,
+          cfd.quantity_limit_days,
+          cpf.plan_name,
+          cpf.contract_name
+        FROM cms_formulary_drugs cfd
+        JOIN cms_plan_formulary cpf ON cpf.formulary_id = cfd.formulary_id
+        WHERE cfd.ndc IN (
+          SELECT DISTINCT ndc FROM prescriptions
+          WHERE LOWER(drug_name) LIKE LOWER($1)
+            AND ndc IS NOT NULL
+          LIMIT 5
+        )
+        LIMIT 5
+      `, [`%${recommendedDrug.split(/\s+/)[0]}%`]);
+
+      if (cmsResult.rows.length > 0) {
+        const row = cmsResult.rows[0];
+        enrichment.cms_coverage = {
+          covered: true,
+          tier: parseInt(row.tier_level),
+          tier_label: ['', 'Preferred Generic', 'Generic', 'Preferred Brand', 'Non-Preferred Brand', 'Specialty', 'Specialty High Cost'][parseInt(row.tier_level)] || `Tier ${row.tier_level}`,
+          prior_auth: row.prior_authorization_yn === 'Y',
+          step_therapy: row.step_therapy_yn === 'Y',
+          quantity_limit: row.quantity_limit_yn === 'Y',
+          quantity_limit_amount: row.quantity_limit_amount,
+          quantity_limit_days: row.quantity_limit_days,
+          plan_count: cmsResult.rows.length,
+          sample_plan: row.contract_name || row.plan_name
+        };
+        if (enrichment.coverage_confidence === 'none') {
+          enrichment.coverage_confidence = 'cms_formulary';
+        }
+      }
+    } catch (e) {
+      // CMS tables may not exist or have data
+      logger.debug('CMS lookup failed', { error: e.message });
+    }
+
+    // 4. formulary_items for commercial coverage
+    try {
+      const formularyResult = await db.query(`
+        SELECT
+          tier, tier_description, preferred, on_formulary,
+          prior_auth_required, step_therapy_required,
+          estimated_copay, reimbursement_rate,
+          data_source, verification_status
+        FROM formulary_items
+        WHERE (bin = $1 AND (group_number = $2 OR ($2 IS NULL AND group_number IS NULL)))
+          AND LOWER(drug_name) LIKE LOWER($3)
+        LIMIT 1
+      `, [bin, group || null, `%${recommendedDrug.split(/\s+/)[0]}%`]);
+
+      if (formularyResult.rows.length > 0) {
+        const f = formularyResult.rows[0];
+        enrichment.formulary_data = {
+          on_formulary: f.on_formulary,
+          tier: f.tier,
+          tier_description: f.tier_description,
+          preferred: f.preferred,
+          prior_auth: f.prior_auth_required,
+          step_therapy: f.step_therapy_required,
+          estimated_copay: f.estimated_copay ? parseFloat(f.estimated_copay) : null,
+          reimbursement_rate: f.reimbursement_rate ? parseFloat(f.reimbursement_rate) : null,
+          data_source: f.data_source,
+          verified: f.verification_status === 'verified'
+        };
+        if (enrichment.coverage_confidence === 'none') {
+          enrichment.coverage_confidence = 'formulary_cache';
+        }
+      }
+    } catch (e) {
+      logger.debug('Formulary lookup failed', { error: e.message });
+    }
+
+    // 5. Estimate GP if we have acquisition cost data
+    const acqResult = await db.query(`
+      SELECT ROUND(AVG(acquisition_cost)::numeric, 2) as avg_acq
+      FROM prescriptions
+      WHERE LOWER(drug_name) LIKE LOWER($1)
+        AND acquisition_cost IS NOT NULL AND acquisition_cost > 0
+      LIMIT 1
+    `, [`%${recommendedDrug.split(/\s+/)[0]}%`]);
+
+    const avgAcq = acqResult.rows[0]?.avg_acq ? parseFloat(acqResult.rows[0].avg_acq) : null;
+
+    if (avgAcq) {
+      let expectedReimbursement = null;
+      let reimbursementSource = null;
+
+      if (enrichment.paid_claims) {
+        expectedReimbursement = enrichment.paid_claims.avg_total_reimbursement;
+        reimbursementSource = 'paid_claims';
+      } else if (enrichment.formulary_data?.reimbursement_rate) {
+        expectedReimbursement = enrichment.formulary_data.reimbursement_rate;
+        reimbursementSource = 'formulary_rate';
+      }
+
+      if (expectedReimbursement) {
+        enrichment.estimated_gp = {
+          avg_acquisition_cost: avgAcq,
+          expected_reimbursement: expectedReimbursement,
+          estimated_gp_per_fill: parseFloat((expectedReimbursement - avgAcq).toFixed(2)),
+          estimated_annual_gp: parseFloat(((expectedReimbursement - avgAcq) * 12).toFixed(2)),
+          source: reimbursementSource
+        };
+      }
+    }
+  } catch (error) {
+    logger.error('Coverage enrichment failed', { drug: recommendedDrug, bin, error: error.message });
+  }
+
+  return enrichment;
+}
+
+/**
  * Submit a discovered opportunity to the approval queue
  */
 async function submitToApprovalQueue({ loser, bestAlternative, classInfo, alternatives, perPatientAnnualGain }) {
   const recommendedDrugName = bestAlternative.alternative_drug;
   const totalAnnualMargin = perPatientAnnualGain * parseInt(loser.patient_count);
 
+  // Enrich with coverage verification data
+  const coverage = await enrichWithCoverageData(
+    recommendedDrugName,
+    loser.insurance_bin,
+    loser.insurance_group,
+    loser.drug_name
+  );
+
   const sourceDetails = {
     scan_type: 'negative_gp_discovery',
     scanned_at: new Date().toISOString(),
+    // Loser drug details
     loser_drug: loser.drug_name,
     loser_bin: loser.insurance_bin,
     loser_group: loser.insurance_group,
@@ -292,9 +508,13 @@ async function submitToApprovalQueue({ loser, bestAlternative, classInfo, altern
     loser_total_loss: parseFloat(loser.total_loss),
     loser_worst_gp: parseFloat(loser.worst_gp),
     loser_best_gp: parseFloat(loser.best_gp),
+    // Loser claims breakdown (actual reimbursement data)
+    loser_claims: coverage.loser_claims,
+    // Therapeutic class
     therapeutic_class: classInfo.class,
     therapeutic_class_display: classInfo.displayName,
     match_tier: classInfo.matchTier,
+    // Alternative drug details
     alternative_avg_gp: parseFloat(bestAlternative.avg_gp),
     alternative_fill_count: parseInt(bestAlternative.fill_count),
     alternative_patient_count: parseInt(bestAlternative.patient_count),
@@ -304,7 +524,13 @@ async function submitToApprovalQueue({ loser, bestAlternative, classInfo, altern
       avg_gp: parseFloat(a.avg_gp),
       fills: parseInt(a.fill_count),
       patients: parseInt(a.patient_count)
-    }))
+    })),
+    // Coverage verification data
+    coverage_confidence: coverage.coverage_confidence,
+    recommended_paid_claims: coverage.paid_claims,
+    cms_coverage: coverage.cms_coverage,
+    formulary_data: coverage.formulary_data,
+    estimated_gp: coverage.estimated_gp
   };
 
   const sampleData = {
