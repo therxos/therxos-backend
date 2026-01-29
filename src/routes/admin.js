@@ -789,7 +789,9 @@ router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) =
           'verifiedAt', tbv.verified_at,
           'verifiedClaimCount', tbv.verified_claim_count,
           'avgReimbursement', tbv.avg_reimbursement,
-          'avgQty', tbv.avg_qty
+          'avgQty', tbv.avg_qty,
+          'bestDrugName', tbv.best_drug_name,
+          'bestNdc', tbv.best_ndc
         )) FROM trigger_bin_values tbv WHERE tbv.trigger_id = t.trigger_id) as bin_values,
         (SELECT json_agg(json_build_object(
           'type', tr.restriction_type,
@@ -3697,21 +3699,33 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       ? `AND NOT (${excludePatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${keywordPatterns.length + i + 1}`).join(' OR ')})`
       : '';
 
+    // Find BEST reimbursing product per BIN/Group (with drug name + NDC)
     const prescriptionsResult = await db.query(`
-      SELECT DISTINCT
-        p.insurance_bin as bin,
-        p.insurance_group as group_number,
-        COUNT(*) as claim_count,
-        AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) as avg_gp,
-        AVG(p.quantity_dispensed) as avg_qty
-      FROM prescriptions p
-      WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
-        AND (${keywordPatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${i + 1}`).join(' OR ')})
-        ${excludeCondition}
-        AND p.insurance_bin IS NOT NULL
-      GROUP BY p.insurance_bin, p.insurance_group
-      HAVING AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) >= $${keywordPatterns.length + excludePatterns.length + 1}
-      ORDER BY claim_count DESC
+      WITH ranked_products AS (
+        SELECT
+          p.insurance_bin as bin,
+          p.insurance_group as group_number,
+          p.drug_name,
+          p.ndc,
+          COUNT(*) as claim_count,
+          AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) as avg_gp,
+          AVG(p.quantity_dispensed) as avg_qty,
+          ROW_NUMBER() OVER (
+            PARTITION BY p.insurance_bin, p.insurance_group
+            ORDER BY AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) DESC
+          ) as rank
+        FROM prescriptions p
+        WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
+          AND (${keywordPatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${i + 1}`).join(' OR ')})
+          ${excludeCondition}
+          AND p.insurance_bin IS NOT NULL
+        GROUP BY p.insurance_bin, p.insurance_group, p.drug_name, p.ndc
+        HAVING AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) >= $${keywordPatterns.length + excludePatterns.length + 1}
+      )
+      SELECT bin, group_number, drug_name, ndc, claim_count, avg_gp, avg_qty
+      FROM ranked_products
+      WHERE rank = 1
+      ORDER BY avg_gp DESC
     `, allParams);
 
     const binValues = prescriptionsResult.rows.map(row => ({
@@ -3720,6 +3734,8 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       gpValue: parseFloat(row.avg_gp) || 0,
       avgQty: parseFloat(row.avg_qty) || 0,
       claimCount: parseInt(row.claim_count),
+      bestDrugName: row.drug_name || null,
+      bestNdc: row.ndc || null,
       coverageStatus: 'verified',
       verifiedAt: new Date().toISOString()
     }));
@@ -3732,14 +3748,14 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       WHERE trigger_id = $1
     `, [triggerId]);
 
-    // Store bin values in trigger_bin_values table
+    // Store bin values in trigger_bin_values table (with best drug name + NDC)
     for (const bv of binValues) {
       await db.query(`
-        INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, avg_qty, verified_claim_count, coverage_status, verified_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, avg_qty, verified_claim_count, coverage_status, verified_at, best_drug_name, best_ndc)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9)
         ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
-        DO UPDATE SET gp_value = $4, avg_qty = $5, verified_claim_count = $6, coverage_status = $7, verified_at = NOW()
-      `, [triggerId, bv.bin, bv.group, bv.gpValue, bv.avgQty, bv.claimCount, bv.coverageStatus]);
+        DO UPDATE SET gp_value = $4, avg_qty = $5, verified_claim_count = $6, coverage_status = $7, verified_at = NOW(), best_drug_name = $8, best_ndc = $9
+      `, [triggerId, bv.bin, bv.group, bv.gpValue, bv.avgQty, bv.claimCount, bv.coverageStatus, bv.bestDrugName, bv.bestNdc]);
     }
 
     console.log(`Found ${binValues.length} BIN/Groups for trigger: ${trigger.display_name}`);
