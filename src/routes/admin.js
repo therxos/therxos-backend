@@ -5828,40 +5828,78 @@ router.get('/positive-gp-winners', authenticateToken, requireSuperAdmin, async (
       limit = 100
     } = req.query;
 
+    // Find best NDC per drug/BIN/GROUP combo and detect if NDCs have identical reimbursement
     const result = await db.query(`
-      SELECT
-        UPPER(SPLIT_PART(p.drug_name, ' ', 1)) as base_drug_name,
-        p.drug_name,
-        p.insurance_bin,
-        p.insurance_group,
-        COUNT(*) as fill_count,
-        COUNT(DISTINCT p.patient_id) as patient_count,
-        COUNT(DISTINCT p.pharmacy_id) as pharmacy_count,
-        ROUND(AVG(
-          COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)
-        )::numeric, 2) as avg_gp,
-        ROUND(SUM(
-          COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)
-        )::numeric, 2) as total_profit,
-        ROUND(MAX(
-          COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)
-        )::numeric, 2) as best_gp,
-        ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
-        ROUND(AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0))::numeric, 2) as avg_reimbursement
-      FROM prescriptions p
-      JOIN pharmacies ph ON ph.pharmacy_id = p.pharmacy_id
-      JOIN clients c ON c.client_id = ph.client_id AND c.status != 'demo'
-      WHERE p.dispensed_date >= CURRENT_DATE - ($1 || ' days')::INTERVAL
-        AND p.acquisition_cost IS NOT NULL
-        AND p.acquisition_cost > 0
-        AND p.insurance_bin IS NOT NULL
-        AND p.insurance_bin NOT IN ('000000', '000001', '999999', '')
-        AND (p.insurance_group IS NULL OR p.insurance_group NOT IN ('No Group Number', 'NO GROUP', 'NONE', 'N/A', ''))
-        AND (p.insurance_pay IS NOT NULL OR p.patient_pay IS NOT NULL)
-      GROUP BY UPPER(SPLIT_PART(p.drug_name, ' ', 1)), p.drug_name, p.insurance_bin, p.insurance_group
-      HAVING COUNT(*) >= $2
-        AND AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) >= $3
-      ORDER BY AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) DESC
+      WITH per_ndc AS (
+        SELECT
+          UPPER(TRIM(p.drug_name)) as normalized_drug,
+          p.drug_name,
+          p.ndc,
+          p.insurance_bin,
+          p.insurance_group,
+          COUNT(*) as fill_count,
+          COUNT(DISTINCT p.patient_id) as patient_count,
+          COUNT(DISTINCT p.pharmacy_id) as pharmacy_count,
+          ROUND(AVG(
+            COALESCE(p.gross_profit, (p.raw_data->>'gross_profit')::numeric,
+              COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+          )::numeric, 2) as avg_gp,
+          ROUND(SUM(
+            COALESCE(p.gross_profit, (p.raw_data->>'gross_profit')::numeric,
+              COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+          )::numeric, 2) as total_profit,
+          ROUND(MAX(
+            COALESCE(p.gross_profit, (p.raw_data->>'gross_profit')::numeric,
+              COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+          )::numeric, 2) as best_gp,
+          ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
+          ROUND(AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0))::numeric, 2) as avg_reimbursement
+        FROM prescriptions p
+        JOIN pharmacies ph ON ph.pharmacy_id = p.pharmacy_id
+        JOIN clients c ON c.client_id = ph.client_id AND c.status != 'demo'
+        WHERE p.dispensed_date >= CURRENT_DATE - ($1 || ' days')::INTERVAL
+          AND p.acquisition_cost IS NOT NULL
+          AND p.acquisition_cost > 0
+          AND p.insurance_bin IS NOT NULL
+          AND p.insurance_bin NOT IN ('000000', '000001', '999999', '')
+          AND (p.insurance_group IS NULL OR p.insurance_group NOT IN ('No Group Number', 'NO GROUP', 'NONE', 'N/A', ''))
+          AND (p.insurance_pay IS NOT NULL OR p.patient_pay IS NOT NULL)
+        GROUP BY UPPER(TRIM(p.drug_name)), p.drug_name, p.ndc, p.insurance_bin, p.insurance_group
+        HAVING COUNT(*) >= 1
+      ),
+      ranked AS (
+        SELECT *,
+          ROW_NUMBER() OVER (PARTITION BY normalized_drug, insurance_bin, COALESCE(insurance_group, '') ORDER BY avg_gp DESC) as rank,
+          COUNT(DISTINCT ndc) OVER (PARTITION BY normalized_drug, insurance_bin, COALESCE(insurance_group, '')) as ndc_count,
+          MAX(avg_gp) OVER (PARTITION BY normalized_drug, insurance_bin, COALESCE(insurance_group, '')) -
+          MIN(avg_gp) OVER (PARTITION BY normalized_drug, insurance_bin, COALESCE(insurance_group, '')) as gp_spread
+        FROM per_ndc
+      ),
+      best_per_combo AS (
+        SELECT
+          normalized_drug as base_drug_name,
+          drug_name,
+          ndc as best_ndc,
+          insurance_bin,
+          insurance_group,
+          SUM(fill_count) OVER w as fill_count,
+          SUM(patient_count) OVER w as patient_count,
+          MAX(pharmacy_count) OVER w as pharmacy_count,
+          avg_gp,
+          SUM(total_profit) OVER w as total_profit,
+          best_gp,
+          avg_acq_cost,
+          avg_reimbursement,
+          ndc_count,
+          CASE WHEN ndc_count <= 1 OR gp_spread < 2 THEN true ELSE false END as ndc_doesnt_matter
+        FROM ranked
+        WHERE rank = 1
+        WINDOW w AS (PARTITION BY normalized_drug, insurance_bin, COALESCE(insurance_group, ''))
+      )
+      SELECT * FROM best_per_combo
+      WHERE fill_count >= $2
+        AND avg_gp >= $3
+      ORDER BY avg_gp DESC
       LIMIT $4
     `, [parseInt(lookbackDays), parseInt(minFills), parseFloat(minAvgGP), parseInt(limit)]);
 
@@ -5878,7 +5916,9 @@ router.get('/positive-gp-winners', authenticateToken, requireSuperAdmin, async (
         avg_reimbursement: parseFloat(r.avg_reimbursement),
         fill_count: parseInt(r.fill_count),
         patient_count: parseInt(r.patient_count),
-        pharmacy_count: parseInt(r.pharmacy_count)
+        pharmacy_count: parseInt(r.pharmacy_count),
+        best_ndc: r.best_ndc || null,
+        ndc_doesnt_matter: r.ndc_doesnt_matter || false
       })),
       count: result.rows.length,
       totalProfit,
