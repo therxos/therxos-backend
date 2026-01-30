@@ -3936,8 +3936,8 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
     const minMarginIdx = paramIndex++;
 
     // Find BEST reimbursing product per BIN/Group (with drug name + NDC)
-    // Uses acquisition_cost when available, falls back to NADAC per-unit * qty
-    // REQUIRES at least one cost source to exist - otherwise GP is inflated (cost=0)
+    // GP priority: 1) gross_profit from claims data, 2) raw_data GP, 3) calculated estimate
+    // Only falls back to estimate when real GP is unavailable
     const prescriptionsResult = await db.query(`
       WITH claim_gp AS (
         SELECT
@@ -3945,8 +3945,16 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           p.insurance_group as group_number,
           p.drug_name,
           p.ndc,
-          COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0)
-            - COALESCE(p.acquisition_cost, n.nadac_per_unit * COALESCE(p.quantity_dispensed, 1)) as gp,
+          COALESCE(
+            p.gross_profit,
+            (raw_data->>'gross_profit')::numeric,
+            (raw_data->>'net_profit')::numeric,
+            CASE WHEN p.acquisition_cost IS NOT NULL OR n.nadac_per_unit IS NOT NULL
+              THEN COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0)
+                   - COALESCE(p.acquisition_cost, n.nadac_per_unit * COALESCE(p.quantity_dispensed, 1))
+              ELSE NULL
+            END
+          ) as gp,
           p.quantity_dispensed as qty
         FROM prescriptions p
         LEFT JOIN LATERAL (
@@ -3958,7 +3966,6 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           AND (${keywordCondition}${ndcCondition})
           ${excludeCondition}
           AND p.insurance_bin IS NOT NULL
-          AND (p.acquisition_cost IS NOT NULL OR n.nadac_per_unit IS NOT NULL)
       ),
       ranked_products AS (
         SELECT
@@ -5918,7 +5925,8 @@ router.get('/ndc-optimization', authenticateToken, requireSuperAdmin, async (req
           COUNT(*) as fill_count,
           COUNT(DISTINCT p.patient_id) as patient_count,
           ROUND(AVG(
-            COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)
+            COALESCE(p.gross_profit, (p.raw_data->>'gross_profit')::numeric,
+              COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
           )::numeric, 2) as avg_gp,
           ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
           ROUND(AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0))::numeric, 2) as avg_reimbursement
