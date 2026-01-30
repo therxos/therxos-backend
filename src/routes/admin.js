@@ -44,6 +44,7 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
         p.phone,
         p.fax,
         p.pms_system,
+        p.settings,
         p.created_at,
         p.baa_signed_at,
         p.service_agreement_signed_at,
