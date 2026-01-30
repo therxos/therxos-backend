@@ -3999,13 +3999,18 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       verifiedAt: new Date().toISOString()
     }));
 
-    // Update trigger with bin values and synced_at
+    // Auto-set recommended_ndc to the best-performing NDC across all BIN/Groups
+    const bestOverall = binValues.length > 0
+      ? binValues.reduce((best, bv) => (bv.gpValue > best.gpValue ? bv : best), binValues[0])
+      : null;
+
     await db.query(`
       UPDATE triggers
       SET synced_at = NOW(),
-          updated_at = NOW()
+          updated_at = NOW(),
+          recommended_ndc = COALESCE($2, recommended_ndc)
       WHERE trigger_id = $1
-    `, [triggerId]);
+    `, [triggerId, bestOverall?.bestNdc || null]);
 
     // Store bin values in trigger_bin_values table (with best drug name + NDC)
     for (const bv of binValues) {
