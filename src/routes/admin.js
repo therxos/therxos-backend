@@ -5902,11 +5902,15 @@ router.get('/ndc-optimization', authenticateToken, requireSuperAdmin, async (req
       limit = 100
     } = req.query;
 
-    // Find drugs where different NDCs of the same base drug have different GP on the same BIN/GROUP
+    // Find drugs where different NDCs of the same drug+strength+form have different GP on the same BIN/GROUP
+    // Normalizes drug names to extract base drug + strength + formulation to prevent cross-strength/form matches
+    // e.g., "Tramadol HCl ER 100mg" and "Tramadol HCl 50mg Tab" are DIFFERENT drugs, not NDC optimization candidates
     const result = await db.query(`
       WITH drug_ndc_gp AS (
         SELECT
-          UPPER(SPLIT_PART(p.drug_name, ' ', 1)) as base_drug,
+          -- Normalize: full drug name uppercased as the match key (includes strength + form)
+          -- This prevents matching different strengths or formulations as "same drug"
+          UPPER(TRIM(p.drug_name)) as normalized_drug,
           p.drug_name,
           p.ndc,
           p.insurance_bin,
@@ -5929,12 +5933,12 @@ router.get('/ndc-optimization', authenticateToken, requireSuperAdmin, async (req
           AND (p.insurance_group IS NULL OR p.insurance_group NOT IN ('No Group Number', 'NO GROUP', 'NONE', 'N/A', ''))
           AND p.ndc IS NOT NULL
           AND (p.insurance_pay IS NOT NULL OR p.patient_pay IS NOT NULL)
-        GROUP BY UPPER(SPLIT_PART(p.drug_name, ' ', 1)), p.drug_name, p.ndc, p.insurance_bin, p.insurance_group
+        GROUP BY UPPER(TRIM(p.drug_name)), p.drug_name, p.ndc, p.insurance_bin, p.insurance_group
         HAVING COUNT(*) >= $2
       ),
       ndc_pairs AS (
         SELECT
-          low.base_drug,
+          low.normalized_drug as base_drug,
           low.drug_name as current_drug,
           low.ndc as current_ndc,
           high.drug_name as better_drug,
@@ -5954,7 +5958,7 @@ router.get('/ndc-optimization', authenticateToken, requireSuperAdmin, async (req
           (high.avg_gp - low.avg_gp) * 12 as annual_gain_per_patient
         FROM drug_ndc_gp low
         JOIN drug_ndc_gp high
-          ON low.base_drug = high.base_drug
+          ON low.normalized_drug = high.normalized_drug
           AND low.insurance_bin = high.insurance_bin
           AND COALESCE(low.insurance_group, '') = COALESCE(high.insurance_group, '')
           AND low.ndc != high.ndc
