@@ -3907,29 +3907,44 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       : '';
 
     // Find BEST reimbursing product per BIN/Group (with drug name + NDC)
+    // Uses acquisition_cost when available, falls back to NADAC per-unit * qty
     const prescriptionsResult = await db.query(`
-      WITH ranked_products AS (
+      WITH claim_gp AS (
         SELECT
           p.insurance_bin as bin,
           p.insurance_group as group_number,
           p.drug_name,
           p.ndc,
-          COUNT(*) as claim_count,
-          AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) as avg_gp,
-          AVG(p.quantity_dispensed) as avg_qty,
-          ROW_NUMBER() OVER (
-            PARTITION BY p.insurance_bin, p.insurance_group
-            ORDER BY AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) DESC
-          ) as rank
+          COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0)
+            - COALESCE(p.acquisition_cost, n.nadac_per_unit * COALESCE(p.quantity_dispensed, 1), 0) as gp,
+          p.quantity_dispensed as qty
         FROM prescriptions p
+        LEFT JOIN LATERAL (
+          SELECT nadac_per_unit FROM nadac_pricing
+          WHERE ndc = p.ndc
+          ORDER BY effective_date DESC LIMIT 1
+        ) n ON true
         WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
           AND (${keywordPatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${i + 1}`).join(' OR ')})
           ${excludeCondition}
           AND p.insurance_bin IS NOT NULL
-        GROUP BY p.insurance_bin, p.insurance_group, p.drug_name, p.ndc
-        HAVING AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0)) >= $${keywordPatterns.length + excludePatterns.length + 1}
+      ),
+      ranked_products AS (
+        SELECT
+          bin, group_number, drug_name, ndc,
+          COUNT(*) as claim_count,
+          AVG(gp) as avg_gp,
+          AVG(qty) as avg_qty,
+          ROW_NUMBER() OVER (
+            PARTITION BY bin, group_number
+            ORDER BY AVG(gp) DESC
+          ) as rank
+        FROM claim_gp
+        GROUP BY bin, group_number, drug_name, ndc
+        HAVING AVG(gp) >= $${keywordPatterns.length + excludePatterns.length + 1}
       )
-      SELECT bin, group_number, drug_name, ndc, claim_count, avg_gp, avg_qty
+      SELECT bin, group_number, drug_name, ndc, claim_count,
+        ROUND(avg_gp::numeric, 2) as avg_gp, avg_qty
       FROM ranked_products
       WHERE rank = 1
       ORDER BY avg_gp DESC
