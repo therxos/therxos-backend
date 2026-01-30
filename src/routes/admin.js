@@ -3946,9 +3946,8 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           p.drug_name,
           p.ndc,
           COALESCE(
-            p.gross_profit,
-            (raw_data->>'gross_profit')::numeric,
-            (raw_data->>'net_profit')::numeric,
+            (p.raw_data->>'gross_profit')::numeric,
+            (p.raw_data->>'net_profit')::numeric,
             CASE WHEN p.acquisition_cost IS NOT NULL OR n.nadac_per_unit IS NOT NULL
               THEN COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0)
                    - COALESCE(p.acquisition_cost, n.nadac_per_unit * COALESCE(p.quantity_dispensed, 1))
@@ -5841,15 +5840,15 @@ router.get('/positive-gp-winners', authenticateToken, requireSuperAdmin, async (
           COUNT(DISTINCT p.patient_id) as patient_count,
           COUNT(DISTINCT p.pharmacy_id) as pharmacy_count,
           ROUND(AVG(
-            COALESCE(p.gross_profit, (p.raw_data->>'gross_profit')::numeric,
+            COALESCE((p.raw_data->>'gross_profit')::numeric,
               COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
           )::numeric, 2) as avg_gp,
           ROUND(SUM(
-            COALESCE(p.gross_profit, (p.raw_data->>'gross_profit')::numeric,
+            COALESCE((p.raw_data->>'gross_profit')::numeric,
               COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
           )::numeric, 2) as total_profit,
           ROUND(MAX(
-            COALESCE(p.gross_profit, (p.raw_data->>'gross_profit')::numeric,
+            COALESCE((p.raw_data->>'gross_profit')::numeric,
               COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
           )::numeric, 2) as best_gp,
           ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
@@ -5965,7 +5964,7 @@ router.get('/ndc-optimization', authenticateToken, requireSuperAdmin, async (req
           COUNT(*) as fill_count,
           COUNT(DISTINCT p.patient_id) as patient_count,
           ROUND(AVG(
-            COALESCE(p.gross_profit, (p.raw_data->>'gross_profit')::numeric,
+            COALESCE((p.raw_data->>'gross_profit')::numeric,
               COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
           )::numeric, 2) as avg_gp,
           ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
