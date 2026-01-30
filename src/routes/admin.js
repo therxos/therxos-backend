@@ -3889,22 +3889,51 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
     }
 
     const trigger = triggerResult.rows[0];
-    console.log(`Scanning coverage for trigger: ${trigger.display_name}`);
-
-    // Build search patterns from detection keywords
-    const keywords = trigger.detection_keywords || [];
+    const recommendedDrug = trigger.recommended_drug || '';
+    const recommendedNdc = trigger.recommended_ndc || null;
     const excludeKeywords = trigger.exclude_keywords || [];
-    if (keywords.length === 0) {
-      return res.status(400).json({ error: 'Trigger has no detection keywords' });
+    console.log(`Scanning coverage for trigger: ${trigger.display_name}, recommended_drug: "${recommendedDrug}", recommended_ndc: ${recommendedNdc || 'none'}`);
+
+    // Build search from RECOMMENDED DRUG (not detection_keywords)
+    // We want to find claims for the drug we're recommending, not the drug patients are currently on
+    const skipWords = ['mg', 'ml', 'mcg', 'er', 'sr', 'xr', 'dr', 'hcl', 'sodium', 'potassium', 'try', 'alternates', 'if', 'fails', 'before', 'saying', 'doesnt', 'work', 'the', 'and', 'for', 'with'];
+    const words = recommendedDrug
+      .split(/[\s,.\-\(\)\[\]]+/)
+      .map(w => w.trim().toUpperCase())
+      .filter(w => w.length >= 2 && !skipWords.includes(w.toLowerCase()) && !/^\d+$/.test(w));
+
+    if (words.length === 0 && !recommendedNdc) {
+      return res.status(400).json({ error: 'Trigger has no recommended drug or NDC set' });
     }
 
-    // Find matching prescriptions (with exclude keyword filtering)
-    const keywordPatterns = keywords.map(k => `%${k.toLowerCase()}%`);
+    // Build keyword search: each word from recommended_drug must appear (AND)
+    const allParams = [];
+    let paramIndex = 1;
+    const wordConditions = words.map(word => {
+      allParams.push(word);
+      return `UPPER(p.drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+    });
+    let keywordCondition = wordConditions.length > 0 ? `(${wordConditions.join(' AND ')})` : 'FALSE';
+
+    // Add NDC match as alternative if set
+    let ndcCondition = '';
+    if (recommendedNdc) {
+      allParams.push(recommendedNdc);
+      ndcCondition = ` OR p.ndc = $${paramIndex++}`;
+    }
+
+    // Build exclude condition from exclude_keywords
     const excludePatterns = excludeKeywords.map(k => `%${k.toLowerCase()}%`);
-    const allParams = [...keywordPatterns, ...excludePatterns, minMargin];
     const excludeCondition = excludePatterns.length > 0
-      ? `AND NOT (${excludePatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${keywordPatterns.length + i + 1}`).join(' OR ')})`
+      ? `AND NOT (${excludePatterns.map((_) => {
+          allParams.push(_);
+          return `LOWER(p.drug_name) LIKE $${paramIndex++}`;
+        }).join(' OR ')})`
       : '';
+
+    // minMargin param
+    allParams.push(minMargin);
+    const minMarginIdx = paramIndex++;
 
     // Find BEST reimbursing product per BIN/Group (with drug name + NDC)
     // Uses acquisition_cost when available, falls back to NADAC per-unit * qty
@@ -3926,7 +3955,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           ORDER BY effective_date DESC LIMIT 1
         ) n ON true
         WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
-          AND (${keywordPatterns.map((_, i) => `LOWER(p.drug_name) LIKE $${i + 1}`).join(' OR ')})
+          AND (${keywordCondition}${ndcCondition})
           ${excludeCondition}
           AND p.insurance_bin IS NOT NULL
           AND (p.acquisition_cost IS NOT NULL OR n.nadac_per_unit IS NOT NULL)
@@ -3943,7 +3972,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           ) as rank
         FROM claim_gp
         GROUP BY bin, group_number, drug_name, ndc
-        HAVING AVG(gp) >= $${keywordPatterns.length + excludePatterns.length + 1}
+        HAVING AVG(gp) >= $${minMarginIdx}
       )
       SELECT bin, group_number, drug_name, ndc, claim_count,
         ROUND(avg_gp::numeric, 2) as avg_gp, avg_qty
