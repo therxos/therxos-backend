@@ -57,8 +57,8 @@ const PMS_COLUMN_MAPPINGS = {
     prescriber_name: ['Prescriber', 'Prescriber Name', 'Doctor', 'Prescriber Full Name'],
     patient_first: ['Patient First', 'FirstName', 'Patient First Name'],
     patient_last: ['Patient Last', 'LastName', 'Patient Last Name'],
-    patient_full_name: ['Patient Full Name', 'Patient Name', 'PatientName'],
-    patient_dob: ['DOB', 'Date of Birth', 'BirthDate'],
+    patient_full_name: ['Patient Full Name', 'Patient Name', 'PatientName', 'Patient Full Name Last then First'],
+    patient_dob: ['DOB', 'Date of Birth', 'BirthDate', 'Patient Date of Birth'],
     patient_zip: ['Zip', 'ZIP', 'Patient Zip'],
     insurance_bin: ['BIN', 'Insurance BIN', 'Ins BIN', 'Primary Third Party Bin'],
     insurance_pcn: ['PCN', 'Insurance PCN', 'Ins PCN', 'Primary Third Party PCN'],
@@ -66,10 +66,10 @@ const PMS_COLUMN_MAPPINGS = {
     patient_pay: ['Patient Pay', 'Copay', 'Patient Cost', 'PatientPay', 'Primary Copay Amount', 'Patient Paid Amount'],
     insurance_pay: ['Insurance Pay', 'Ins Pay', 'Third Party Pay'],
     acquisition_cost: ['ACQ', 'Acquisition Cost', 'Cost'],
-    gross_profit: ['Gross Profit', 'GP', 'Profit'],
+    gross_profit: ['Gross Profit', 'GP', 'Profit', 'Net Profit'],
     sig: ['SIG', 'Directions', 'Instructions'],
-    dispensed_date: ['Fill Date', 'Dispensed Date', 'Date Filled', 'DateFilled'],
-    written_date: ['Written Date', 'Rx Date', 'DateWritten'],
+    dispensed_date: ['Fill Date', 'Dispensed Date', 'Date Filled', 'DateFilled', 'Date Written'],
+    written_date: ['Written Date', 'Rx Date', 'DateWritten', 'Date Written'],
     refills_remaining: ['Refills', 'Refills Remaining', 'RefillsLeft']
   },
   rx30: {
@@ -697,7 +697,7 @@ export async function resolveClientFromEmail(email) {
     FROM clients c
     JOIN pharmacies p ON p.client_id = c.client_id
     WHERE c.submitter_email = $1
-    AND c.status = 'active'
+    AND c.status IN ('active', 'new', 'onboarding')
     AND p.is_active = true
     LIMIT 1
   `, [email.toLowerCase()]);

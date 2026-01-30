@@ -6,6 +6,43 @@ All notable changes to the platform are documented here. Client-visible changes 
 
 ## [Unreleased]
 - Demo video creation (AI generated or animated mockup)
+- Frontend: `/change-password` page routing
+
+---
+
+## 2026-01-30
+
+### Added
+- **Self-Service Onboarding Pipeline** - Full Calendly → upload → BAA → dashboard → agreement → Stripe → active flow
+  - `POST /api/onboarding/calendly-webhook` - Auto-creates client/pharmacy/user from Calendly booking
+  - `GET/POST /api/onboarding/baa` - BAA display and acceptance
+  - `POST /api/onboarding/upload` - CSV upload with async progress tracking
+  - `GET /api/onboarding/upload-progress/:jobId` - Real-time ingestion progress polling
+  - `GET/POST /api/onboarding/agreement` - Service agreement display and e-signing
+  - `POST /api/onboarding/create-checkout` + Stripe webhook - Payment + auto-activation
+  - `GET /api/onboarding/status` - Full onboarding progress for authenticated client
+- **Auto-Upload Client Tool** - PowerShell + batch installer for pharmacy desktops
+  - Watches `Desktop\TheRxOS\` folder for CSV files every 30 minutes
+  - POSTs to `POST /api/auto-upload` with per-pharmacy API key
+  - Moves uploaded files to `Sent\` subfolder with timestamp
+  - Full logging to `%APPDATA%\TheRxOS\upload.log`
+- **Fast Ingestion Service** - Reusable module (`ingest-fast-service.js`) with async progress tracking
+- **Delayed Login Email Cron** - Sends login credentials 1 hour after Calendly call (firstname1234 format)
+- Client status `'new'` for pre-upload Calendly onboarding state
+- Per-pharmacy `upload_api_key` for automated tool authentication
+
+### Fixed
+- **Coverage showing "Unknown"** - Scanner now sets `trigger_id` on opportunities for coverage confidence JOIN
+- **BIN restrictions not enforced** - Added enforcement to all 3 admin.js scan endpoints
+- **Staff notes auto-populated** - Removed "Scanned for trigger" auto-text from 2 scan paths, cleaned 4,143 existing notes
+- **Opportunity detail view broken** - Fixed `pr.gross_profit` (column doesn't exist) → computed from insurance_pay + patient_pay - acquisition_cost
+- **Prescriber missing on opportunities** - Auto-copied from linked prescriptions to 1,323 opps
+- **Legacy junk across all pharmacies** - Deleted 8,000+ legacy opps, 1,332 DQIs, 14 pending types, 8 approval logs
+
+### Database
+- Migration 019: Onboarding columns (calendly, BAA, agreement, payment tracking)
+- Migration 020: Upload API key for pharmacies
+- Ingestion service now allows 'new' and 'onboarding' clients (was only 'active')
 
 ---
 

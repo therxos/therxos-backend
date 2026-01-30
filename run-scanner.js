@@ -206,105 +206,6 @@ async function scanTherapeuticInterchange(pharmacyId) {
 }
 
 /**
- * Missing Therapy Engine
- * Finds patients who might benefit from additional medications based on conditions
- */
-async function scanMissingTherapy(pharmacyId) {
-  console.log('   🔍 Scanning for missing therapy opportunities...');
-  
-  const opportunities = [];
-  
-  // Find diabetic patients not on statins (guideline recommendation)
-  const diabeticResult = await pool.query(`
-    SELECT DISTINCT p.patient_id, p.chronic_conditions
-    FROM patients p
-    WHERE p.pharmacy_id = $1
-      AND (
-        p.chronic_conditions::text LIKE '%Diabetes%'
-        OR p.chronic_conditions::text LIKE '%diabetes%'
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM prescriptions pr 
-        WHERE pr.patient_id = p.patient_id 
-          AND pr.dispensed_date > NOW() - INTERVAL '180 days'
-          AND UPPER(COALESCE(pr.raw_data->>'therapeutic_class', '')) LIKE '%STATIN%'
-      )
-    LIMIT 20
-  `, [pharmacyId]);
-  
-  for (const row of diabeticResult.rows) {
-    const existing = await pool.query(`
-      SELECT opportunity_id FROM opportunities 
-      WHERE pharmacy_id = $1 AND patient_id = $2 
-        AND opportunity_type = 'missing_therapy'
-        AND recommended_drug_name LIKE '%statin%'
-        AND status NOT IN ('Denied', 'Declined')
-    `, [pharmacyId, row.patient_id]);
-    
-    if (existing.rows.length === 0) {
-      opportunities.push({
-        pharmacy_id: pharmacyId,
-        patient_id: row.patient_id,
-        opportunity_type: 'missing_therapy',
-        current_ndc: null,
-        current_drug_name: null,
-        recommended_drug_name: 'Atorvastatin 20mg',
-        potential_margin_gain: 15,
-        clinical_rationale: 'ADA guidelines recommend statin therapy for diabetic patients for cardiovascular risk reduction.',
-        clinical_priority: 'high',
-      });
-    }
-  }
-  
-  // Find hypertensive patients not on ACE/ARB
-  const htnResult = await pool.query(`
-    SELECT DISTINCT p.patient_id, p.chronic_conditions
-    FROM patients p
-    WHERE p.pharmacy_id = $1
-      AND (
-        p.chronic_conditions::text LIKE '%Hypertension%'
-        OR p.chronic_conditions::text LIKE '%hypertension%'
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM prescriptions pr 
-        WHERE pr.patient_id = p.patient_id 
-          AND pr.dispensed_date > NOW() - INTERVAL '180 days'
-          AND (
-            UPPER(COALESCE(pr.raw_data->>'therapeutic_class', '')) LIKE '%ACE%' 
-            OR UPPER(COALESCE(pr.raw_data->>'therapeutic_class', '')) LIKE '%ARB%'
-          )
-      )
-    LIMIT 20
-  `, [pharmacyId]);
-  
-  for (const row of htnResult.rows) {
-    const existing = await pool.query(`
-      SELECT opportunity_id FROM opportunities 
-      WHERE pharmacy_id = $1 AND patient_id = $2 
-        AND opportunity_type = 'missing_therapy'
-        AND recommended_drug_name LIKE '%Lisinopril%'
-        AND status NOT IN ('Denied', 'Declined')
-    `, [pharmacyId, row.patient_id]);
-    
-    if (existing.rows.length === 0) {
-      opportunities.push({
-        pharmacy_id: pharmacyId,
-        patient_id: row.patient_id,
-        opportunity_type: 'missing_therapy',
-        current_ndc: null,
-        current_drug_name: null,
-        recommended_drug_name: 'Lisinopril 10mg',
-        potential_margin_gain: 12,
-        clinical_rationale: 'JNC guidelines recommend ACE inhibitor or ARB for hypertensive patients, especially with diabetes or CKD.',
-        clinical_priority: 'medium',
-      });
-    }
-  }
-  
-  return opportunities;
-}
-
-/**
  * Build flexible drug name patterns for matching
  * Handles variations like "Fluticasone-Salmeterol" vs "FLUTICASONE PROPIONATE-SALMETEROL"
  */
@@ -876,13 +777,7 @@ async function runScanner(clientEmail) {
   // Run admin triggers scanner only (hardcoded engines disabled - use admin panel for full control)
   const allOpportunities = [];
 
-  // Legacy hardcoded engines - DISABLED
-  // These produced low-quality opportunities with poor margins
-  // Use admin-configured triggers instead for full control over detection and pricing
-  // const ndcOpps = await scanNDCOptimizations(pharmacy_id);
-  // const brandOpps = await scanBrandToGeneric(pharmacy_id);
-  // const interchangeOpps = await scanTherapeuticInterchange(pharmacy_id);
-  // const missingOpps = await scanMissingTherapy(pharmacy_id);
+  // All opportunity detection is now handled by admin-configured triggers
 
   const triggerOpps = await scanAdminTriggers(pharmacy_id);
   allOpportunities.push(...triggerOpps);

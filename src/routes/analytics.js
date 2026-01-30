@@ -1240,4 +1240,72 @@ router.get('/glp1/duplicate-therapy', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/analytics/fax-stats - Fax statistics for reports tab
+router.get('/fax-stats', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    if (!pharmacyId) {
+      return res.status(400).json({ error: 'No pharmacy associated with user' });
+    }
+
+    const days = parseInt(req.query.days) || 30;
+    const interval = `${days} days`;
+
+    const [summary, byType, byUser, daily] = await Promise.all([
+      db.query(`
+        SELECT
+          COUNT(*) as total_sent,
+          COUNT(*) FILTER (WHERE fax_status = 'successful') as delivered,
+          COUNT(*) FILTER (WHERE fax_status = 'failed') as failed,
+          COUNT(*) FILTER (WHERE fax_status IN ('queued', 'sending', 'accepted', 'in_progress')) as pending,
+          COALESCE(SUM(page_count), 0) as total_pages,
+          CASE WHEN COUNT(*) > 0
+            THEN ROUND(100.0 * COUNT(*) FILTER (WHERE fax_status = 'successful') / COUNT(*), 1)
+            ELSE 0 END as delivery_rate
+        FROM fax_log
+        WHERE pharmacy_id = $1 AND sent_at >= NOW() - INTERVAL '${interval}'
+      `, [pharmacyId]),
+
+      db.query(`
+        SELECT trigger_type, COUNT(*) as count,
+          COUNT(*) FILTER (WHERE fax_status = 'successful') as delivered
+        FROM fax_log
+        WHERE pharmacy_id = $1 AND sent_at >= NOW() - INTERVAL '${interval}'
+        GROUP BY trigger_type ORDER BY count DESC
+      `, [pharmacyId]),
+
+      db.query(`
+        SELECT u.first_name, u.last_name,
+          COUNT(*) as faxes_sent,
+          COUNT(*) FILTER (WHERE fl.fax_status = 'successful') as delivered
+        FROM fax_log fl
+        JOIN users u ON u.user_id = fl.sent_by
+        WHERE fl.pharmacy_id = $1 AND fl.sent_at >= NOW() - INTERVAL '${interval}'
+        GROUP BY u.user_id, u.first_name, u.last_name
+        ORDER BY faxes_sent DESC
+      `, [pharmacyId]),
+
+      db.query(`
+        SELECT DATE(sent_at) as date,
+          COUNT(*) as sent,
+          COUNT(*) FILTER (WHERE fax_status = 'successful') as delivered
+        FROM fax_log
+        WHERE pharmacy_id = $1 AND sent_at >= NOW() - INTERVAL '${interval}'
+        GROUP BY DATE(sent_at) ORDER BY date ASC
+      `, [pharmacyId])
+    ]);
+
+    res.json({
+      period: `${days} days`,
+      summary: summary.rows[0],
+      byType: byType.rows,
+      byUser: byUser.rows,
+      daily: daily.rows
+    });
+  } catch (error) {
+    logger.error('Fax stats error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get fax statistics' });
+  }
+});
+
 export default router;

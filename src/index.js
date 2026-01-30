@@ -30,6 +30,10 @@ import dataQualityRoutes from './routes/data-quality.js';
 import changelogRoutes from './routes/changelog.js';
 import intakeRoutes from './routes/intake.js';
 import opportunityApprovalRoutes from './routes/opportunity-approval.js';
+import faxRoutes from './routes/fax.js';
+import onboardingRoutes from './routes/onboarding.js';
+import { sendWelcomeEmail } from './services/emailService.js';
+import { ingestSync } from './services/ingest-fast-service.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -129,6 +133,8 @@ app.use('/api/data-quality', dataQualityRoutes);
 app.use('/api/changelog', changelogRoutes);
 app.use('/api/intake', intakeRoutes);
 app.use('/api/opportunity-approval', opportunityApprovalRoutes);
+app.use('/api/fax', faxRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 
 // Microsoft OAuth callback (separate route for redirect URI)
 app.get('/api/microsoft/callback', async (req, res) => {
@@ -250,6 +256,74 @@ app.post('/api/ingest/csv', upload.single('file'), async (req, res) => {
     });
   } catch (error) {
     logger.error('CSV ingestion error', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Auto-upload endpoint for client desktop tool (API key auth, no JWT)
+app.post('/api/auto-upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const apiKey = req.headers['x-api-key'];
+    if (!apiKey) {
+      return res.status(401).json({ error: 'API key required (x-api-key header)' });
+    }
+
+    // Look up pharmacy by upload_api_key
+    const pharmacyResult = await db.query(`
+      SELECT p.pharmacy_id, p.pharmacy_name, p.client_id, c.client_name, c.status as client_status
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE p.upload_api_key = $1
+        AND p.is_active = true
+      LIMIT 1
+    `, [apiKey]);
+
+    if (pharmacyResult.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid API key' });
+    }
+
+    const pharmacy = pharmacyResult.rows[0];
+
+    logger.info('Auto-upload received', {
+      pharmacyId: pharmacy.pharmacy_id,
+      pharmacyName: pharmacy.pharmacy_name,
+      fileName: req.file.originalname,
+      fileSize: req.file.size
+    });
+
+    // Run fast ingestion (synchronous)
+    const csvContent = req.file.buffer.toString('utf-8');
+    const result = await ingestSync(pharmacy.pharmacy_id, csvContent);
+
+    // Trigger scanner in background
+    try {
+      runOpportunityScan({
+        pharmacyIds: [pharmacy.pharmacy_id],
+        scanType: 'auto_upload'
+      }).then(scanResult => {
+        logger.info('Auto-upload scan complete', {
+          pharmacyId: pharmacy.pharmacy_id,
+          opportunities: scanResult?.opportunitiesFound
+        });
+      }).catch(err => {
+        logger.error('Auto-upload scan failed', { error: err.message });
+      });
+    } catch (scanErr) {
+      logger.error('Failed to start auto-upload scan', { error: scanErr.message });
+    }
+
+    res.json({
+      success: true,
+      pharmacyName: pharmacy.pharmacy_name,
+      fileName: req.file.originalname,
+      ...result
+    });
+  } catch (error) {
+    logger.error('Auto-upload error', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });
@@ -568,6 +642,62 @@ cron.schedule('0 8 * * *', async () => {
 
   } catch (error) {
     logger.error('Coverage intelligence scan failed', { error: error.message });
+  }
+}, {
+  timezone: 'America/New_York'
+});
+
+// Schedule delayed onboarding login emails (every 15 minutes)
+cron.schedule('*/15 * * * *', async () => {
+  try {
+    // Find clients with pending login emails past their scheduled time
+    const pendingEmails = await db.query(`
+      SELECT c.client_id, c.client_name, c.submitter_email,
+             c.primary_contact_first_name, c.primary_contact_last_name,
+             p.pharmacy_name,
+             u.user_id, u.email, u.first_name
+      FROM clients c
+      JOIN pharmacies p ON p.client_id = c.client_id
+      JOIN users u ON u.client_id = c.client_id AND u.role = 'admin'
+      WHERE c.status = 'new'
+        AND c.login_email_sent = false
+        AND c.login_email_scheduled_at IS NOT NULL
+        AND c.login_email_scheduled_at <= NOW()
+      LIMIT 5
+    `);
+
+    if (pendingEmails.rows.length === 0) return;
+
+    logger.info('Processing delayed onboarding login emails', { count: pendingEmails.rows.length });
+
+    for (const client of pendingEmails.rows) {
+      try {
+        // Password is firstname1234
+        const password = `${(client.first_name || 'user').toLowerCase()}1234`;
+
+        await sendWelcomeEmail({
+          to: client.email,
+          pharmacyName: client.pharmacy_name || client.client_name,
+          tempPassword: password,
+        });
+
+        // Mark email as sent
+        await db.query(
+          'UPDATE clients SET login_email_sent = true, updated_at = NOW() WHERE client_id = $1',
+          [client.client_id]
+        );
+
+        logger.info('Onboarding login email sent', { clientId: client.client_id, email: client.email });
+      } catch (emailErr) {
+        logger.error('Failed to send onboarding login email', {
+          clientId: client.client_id,
+          email: client.email,
+          error: emailErr.message
+        });
+      }
+    }
+  } catch (error) {
+    logger.error('Onboarding email cron error', { error: error.message });
   }
 }, {
   timezone: 'America/New_York'

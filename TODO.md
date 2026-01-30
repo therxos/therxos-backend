@@ -34,12 +34,20 @@ Do NOT automatically push to production after staging. The user needs time to te
 - [ ] Add waitlist form/modal when beta reaches 10 pharmacies
 
 ### Client Features
-- [ ] `/change-password` page (currently returns 404)
+- [ ] `/change-password` page (currently returns 404 - frontend route missing, backend API exists)
 - [x] Fix logout hydration error
 
 ### Onboarding
 - [x] Aracoma Drug RX30 data import
 - [ ] Gmail OAuth credentials for email sending (GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET)
+- [x] Self-service onboarding pipeline (Calendly → upload → BAA → dashboard → agreement → Stripe → active)
+- [x] Auto-upload client tool (PowerShell scheduled task for pharmacy desktops)
+
+### Pending Deployment (Jan 30, 2026)
+- [ ] Deploy to staging: scanner trigger_id fix, admin.js BIN/notes fixes, opportunity-approval.js GP fix, onboarding pipeline, auto-upload tool
+- [ ] Run migrations 019 + 020 on database
+- [ ] Configure Calendly webhook URL
+- [ ] Set CALENDLY_WEBHOOK_SECRET env var
 
 ---
 
@@ -52,7 +60,7 @@ Do NOT automatically push to production after staging. The user needs time to te
 
 ### Triggers & Scanning
 - [x] Negative GP opportunity discovery scanner (2026-01-29)
-- [ ] Auto-rescan on new data upload
+- [x] Auto-rescan on new data upload (built into onboarding upload + auto-upload tool)
 
 ### Admin Tools
 - [ ] Bulk client email (send updates to all active clients)
@@ -76,7 +84,16 @@ Do NOT automatically push to production after staging. The user needs time to te
 
 ## Completed Recently
 
-- [x] Negative GP opportunity discovery scanner - auto-finds losing drugs, suggests alternatives with positive GP on same BIN/GROUP, queues for admin review (2026-01-29)
+- [x] Self-service onboarding pipeline: Calendly webhook → auto-create profile → delayed login email → BAA acceptance → CSV upload with progress → scanner → read-only dashboard → service agreement → Stripe checkout → auto-activation (2026-01-30)
+- [x] Auto-upload client tool: PowerShell + batch installer, watches Desktop\TheRxOS folder, POSTs to API with per-pharmacy API key, moves to Sent folder (2026-01-30)
+- [x] Fast ingestion service module: extracted ingest-fast.js into reusable service with async progress tracking (2026-01-30)
+- [x] Scanner trigger_id fix: opps now linked to triggers for coverage confidence display (2026-01-30)
+- [x] BIN restriction enforcement in admin.js scan endpoints (3 endpoints fixed) (2026-01-30)
+- [x] Staff notes auto-populate removed (was adding "Scanned for trigger" text) + cleaned 4,143 notes (2026-01-30)
+- [x] Legacy junk cleanup across ALL pharmacies: deleted 8,000+ legacy opps, DQIs, pending types (2026-01-30)
+- [x] Opportunity detail view fix: pr.gross_profit → computed from insurance_pay + patient_pay - acquisition_cost (2026-01-30)
+- [x] Prescriber backfill: auto-copied prescriber from linked prescriptions to 1,323 opportunities (2026-01-30)
+- [x] Negative GP opportunity discovery scanner (2026-01-29)
 - [x] Client-facing changelog in dashboard sidebar (2026-01-19)
 - [x] Website best fit updated for smaller pharmacies (25K+ scripts) (2026-01-19)
 - [x] Test email feature for admin (2026-01-19)

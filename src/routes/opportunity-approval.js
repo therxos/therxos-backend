@@ -163,7 +163,7 @@ router.get('/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
         pr.insurance_bin,
         pr.insurance_group,
         pr.plan_name,
-        pr.gross_profit as rx_gross_profit,
+        COALESCE(pr.insurance_pay, 0) + COALESCE(pr.patient_pay, 0) - COALESCE(pr.acquisition_cost, 0) as rx_gross_profit,
         ph.pharmacy_name,
         (SELECT COUNT(*) FROM opportunities o2 WHERE o2.patient_id = o.patient_id AND o2.status != 'Not Submitted') as patient_actioned_count,
         CASE

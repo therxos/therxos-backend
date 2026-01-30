@@ -2170,6 +2170,16 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
 
         if (!matchedDrug) continue;
 
+        // Check bin_restrictions - if set, patient's BIN must be in the list
+        const binRestrictions = (trigger.bin_restrictions || []).map(b => String(b).trim());
+        if (binRestrictions.length > 0) {
+          const patientBinRaw = String(matchedRx?.insurance_bin || matchedRx?.bin || patientRxs[0]?.insurance_bin || patientRxs[0]?.bin || '').trim();
+          if (!binRestrictions.includes(patientBinRaw)) {
+            pharmacySkipped++;
+            continue;
+          }
+        }
+
         // Check IF_HAS / IF_NOT_HAS conditions
         if (ifHasKeywords.length > 0) {
           const hasRequired = ifHasKeywords.some(kw => patientDrugs.some(d => d.includes(kw.toUpperCase())));
@@ -2270,7 +2280,7 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
           matchedDrug, trigger.recommended_drug, netGain, annualValue,
           currentGP, matchedRx?.prescriber_name || null,
           'Not Submitted', trigger.priority || 'medium', rationale,
-          `Scanned for trigger "${trigger.display_name}" on ${new Date().toISOString().split('T')[0]}`,
+          null,
           avgDispensedQty,
           trigger.trigger_id, matchedRx?.prescription_id || null
         ]);
@@ -2724,6 +2734,13 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
 
           if (!matchedDrug) continue;
 
+          // Check bin_restrictions - if set, patient's BIN must be in the list
+          const binRestrictions = (trigger.bin_restrictions || []).map(b => String(b).trim());
+          if (binRestrictions.length > 0) {
+            const patientBinRaw = String(matchedRx?.bin || patientRxs[0]?.bin || '').trim();
+            if (!binRestrictions.includes(patientBinRaw)) continue;
+          }
+
           // Check IF_HAS condition (patient must have these drugs)
           if (ifHasKeywords.length > 0) {
             const hasRequired = ifHasKeywords.some(kw =>
@@ -2796,7 +2813,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
             'Not Submitted',
             trigger.priority || 'medium',
             rationale,
-            `Auto-detected by rescan on ${new Date().toISOString().split('T')[0]}`,
+            null,
             avgDispensedQty,
             trigger.trigger_id, matchedRx?.prescription_id || null
           ]);
@@ -4066,6 +4083,7 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
     // Parse exclusions
     const groupExclusions = trigger.group_exclusions || [];
     const contractPrefixExclusions = trigger.contract_prefix_exclusions || [];
+    const binRestrictions = (trigger.bin_restrictions || []).map(b => String(b).trim());
 
     // Find matching patients in this pharmacy (with exclusion filters)
     const keywordPatterns = keywords.map(k => `%${k.toLowerCase()}%`);
@@ -4074,6 +4092,13 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
     let exclusionConditions = '';
     const exclusionParams = [];
     let paramOffset = keywordPatterns.length + 2; // +2 for pharmacyId and daysBack placeholder
+
+    // BIN restrictions - only allow these BINs
+    if (binRestrictions.length > 0) {
+      exclusionConditions += ` AND pr.insurance_bin IN (${binRestrictions.map((_, i) => `$${paramOffset + i}`).join(', ')})`;
+      exclusionParams.push(...binRestrictions);
+      paramOffset += binRestrictions.length;
+    }
 
     if (groupExclusions.length > 0) {
       exclusionConditions += ` AND (pr.insurance_group IS NULL OR pr.insurance_group NOT IN (${groupExclusions.map((_, i) => `$${paramOffset + i}`).join(', ')}))`;
@@ -6047,6 +6072,87 @@ router.get('/ndc-optimization', authenticateToken, requireSuperAdmin, async (req
   } catch (error) {
     console.error('NDC optimization error:', error);
     res.status(500).json({ error: 'Failed to get NDC optimization data: ' + error.message });
+  }
+});
+
+// PATCH /api/admin/pharmacies/:id/fax-settings - Toggle fax for a pharmacy
+router.patch('/pharmacies/:id/fax-settings', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { faxEnabled, autoFaxEnabled, autoFaxTypes } = req.body;
+
+    // Build the settings update object (only include provided fields)
+    const faxSettings = {};
+    if (faxEnabled !== undefined) faxSettings.faxEnabled = faxEnabled;
+    if (autoFaxEnabled !== undefined) faxSettings.autoFaxEnabled = autoFaxEnabled;
+    if (autoFaxTypes !== undefined) faxSettings.autoFaxTypes = autoFaxTypes;
+
+    // Merge into existing JSONB settings
+    const result = await db.query(`
+      UPDATE pharmacies
+      SET settings = COALESCE(settings, '{}'::jsonb) || $1::jsonb,
+          updated_at = NOW()
+      WHERE pharmacy_id = $2
+      RETURNING pharmacy_id, pharmacy_name, settings
+    `, [JSON.stringify(faxSettings), id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    logger.info('Pharmacy fax settings updated', {
+      pharmacyId: id,
+      faxSettings,
+      updatedBy: req.user.userId
+    });
+
+    res.json({
+      success: true,
+      pharmacy: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating fax settings:', error);
+    res.status(500).json({ error: 'Failed to update fax settings' });
+  }
+});
+
+// GET /api/admin/fax-overview - Platform-wide fax stats for admin dashboard
+router.get('/fax-overview', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const interval = `${days} days`;
+
+    const [overall, byPharmacy] = await Promise.all([
+      db.query(`
+        SELECT
+          COUNT(*) as total_sent,
+          COUNT(*) FILTER (WHERE fax_status = 'successful') as delivered,
+          COUNT(*) FILTER (WHERE fax_status = 'failed') as failed,
+          COALESCE(SUM(cost_cents), 0) as total_cost_cents,
+          COALESCE(SUM(page_count), 0) as total_pages
+        FROM fax_log
+        WHERE sent_at >= NOW() - INTERVAL '${interval}'
+      `),
+      db.query(`
+        SELECT ph.pharmacy_name, ph.pharmacy_id,
+          COUNT(*) as faxes_sent,
+          COUNT(*) FILTER (WHERE fl.fax_status = 'successful') as delivered,
+          COALESCE(SUM(fl.cost_cents), 0) as cost_cents
+        FROM fax_log fl
+        JOIN pharmacies ph ON ph.pharmacy_id = fl.pharmacy_id
+        WHERE fl.sent_at >= NOW() - INTERVAL '${interval}'
+        GROUP BY ph.pharmacy_id, ph.pharmacy_name
+        ORDER BY faxes_sent DESC
+      `)
+    ]);
+
+    res.json({
+      overall: overall.rows[0],
+      byPharmacy: byPharmacy.rows
+    });
+  } catch (error) {
+    console.error('Fax overview error:', error);
+    res.status(500).json({ error: 'Failed to get fax overview' });
   }
 });
 
