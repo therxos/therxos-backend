@@ -2335,50 +2335,41 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
         let gpValue;
         let binConfig = null;
 
-        // If trigger has NO bin_values configured, use default GP for all patients
-        if (binValues.length === 0) {
-          gpValue = trigger.default_gp_value || 50;
-        } else {
-          // Trigger HAS bin_values - only allow BINs that have entries
+        // Try to find coverage data for this patient's BIN/GROUP
+        // Try exact BIN + GROUP match first
+        binConfig = binValues.find(bv =>
+          (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
+          bv.insurance_group === patientGroup
+        );
 
-          // Try exact BIN + GROUP match first
+        // If no exact match, try BIN-only match (group = null means "all groups")
+        if (!binConfig) {
           binConfig = binValues.find(bv =>
             (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
-            bv.insurance_group === patientGroup
+            !bv.insurance_group
           );
+        }
 
-          // If no exact match, try BIN-only match (group = null means "all groups")
-          if (!binConfig) {
-            binConfig = binValues.find(bv =>
-              (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
-              !bv.insurance_group
-            );
+        if (binConfig) {
+          // Has explicit BIN config - check if excluded
+          if (binConfig.is_excluded || binConfig.coverage_status === 'excluded') {
+            pharmacySkipped++;
+            continue;
           }
+          gpValue = binConfig.gp_value || binConfig.avg_reimbursement || trigger.default_gp_value;
+        } else if (binValues.length > 0) {
+          // Coverage data EXISTS for this trigger but NOT for this patient's BIN - skip
+          pharmacySkipped++;
+          continue;
+        } else {
+          // No coverage data at all for this trigger - use default GP if set
+          gpValue = trigger.default_gp_value;
+        }
 
-          if (binConfig) {
-            // Has explicit BIN config
-            if (binConfig.is_excluded || binConfig.coverage_status === 'excluded') {
-              pharmacySkipped++;
-              continue;
-            }
-            gpValue = binConfig.gp_value || binConfig.avg_reimbursement || trigger.default_gp_value || 50;
-          } else {
-            // No config for this BIN - check if there's any verified coverage for it
-            const verifiedForBin = binValues.find(bv =>
-              (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
-              bv.coverage_status === 'verified' &&
-              bv.avg_reimbursement > 0
-            );
-
-            if (verifiedForBin) {
-              // Use verified reimbursement as GP
-              gpValue = verifiedForBin.avg_reimbursement;
-            } else {
-              // BIN not in allowed list - SKIP
-              pharmacySkipped++;
-              continue;
-            }
-          }
+        // Never create opportunities with no GP value
+        if (!gpValue || gpValue <= 0) {
+          pharmacySkipped++;
+          continue;
         }
 
         // Dedup check - use trigger_type for matching (matches DB constraint)
@@ -2904,13 +2895,39 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
             if (hasForbidden) continue; // Patient already has this therapy
           }
 
-          // Get GP value for this BIN
-          let gpValue = trigger.default_gp_value || 50;
+          // Get GP value for this BIN - only create opportunities where we have coverage data
           const binValues = trigger.bin_values || [];
-          const binConfig = binValues.find(bv => bv.bin === patientBin);
+          let gpValue;
+          let binConfig = null;
+
+          // Try to find BIN-specific coverage
+          binConfig = binValues.find(bv =>
+            (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
+            bv.insurance_group === patientGroup
+          );
+          if (!binConfig) {
+            binConfig = binValues.find(bv =>
+              (bv.insurance_bin === patientBin || bv.bin === patientBin) &&
+              !bv.insurance_group
+            );
+          }
+
           if (binConfig) {
-            if (binConfig.is_excluded) continue; // Skip this BIN
-            if (binConfig.gp_value) gpValue = binConfig.gp_value;
+            if (binConfig.is_excluded || binConfig.coverage_status === 'excluded') continue;
+            gpValue = binConfig.gp_value || binConfig.avg_reimbursement || trigger.default_gp_value;
+          } else if (binValues.length > 0) {
+            // Coverage data exists but not for this BIN - skip
+            skippedOpportunities++;
+            continue;
+          } else {
+            // No coverage data at all - use default GP if set
+            gpValue = trigger.default_gp_value;
+          }
+
+          // Never create opportunities with no GP value
+          if (!gpValue || gpValue <= 0) {
+            skippedOpportunities++;
+            continue;
           }
 
           // Check if opportunity already exists (using opportunity_type + drug as key)

@@ -418,7 +418,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
       let gpValue = null;
       let skipDueToBin = false;
 
-      // 1. Check pre-configured bin_values
+      // 1. Check pre-configured bin_values (from coverage scans)
       if (binValues.length > 0) {
         let binMatch = binValues.find(bv =>
           bv.insurance_bin === rx.insurance_bin &&
@@ -436,12 +436,15 @@ async function scanAdminTriggers(pharmacyId, batchId) {
           } else if (binMatch.gp_value) {
             gpValue = binMatch.gp_value;
           }
+        } else {
+          // Coverage data exists but NOT for this patient's BIN - skip
+          skipDueToBin = true;
         }
       }
 
       if (skipDueToBin) continue;
 
-      // 2. Lookup from cached paid claims (all pharmacies)
+      // 2. No coverage data at all - try cached paid claims
       if (!gpValue && trigger.recommended_drug) {
         const lookupResult = lookupGPFromCache(recommendedDrugGPCache, trigger.recommended_drug, {
           insurance_bin: rx.insurance_bin,
@@ -459,15 +462,8 @@ async function scanAdminTriggers(pharmacyId, batchId) {
         gpValue = trigger.default_gp_value;
       }
 
-      // 4. Current drug profit
-      if (!gpValue && rxProfit > 0) {
-        gpValue = rxProfit;
-      }
-
-      // 5. Final fallback
-      if (!gpValue) {
-        gpValue = 50;
-      }
+      // No GP value found - skip (never make up values)
+      if (!gpValue || gpValue <= 0) continue;
 
       // Skip below $10 threshold
       if (gpValue < 10) continue;
