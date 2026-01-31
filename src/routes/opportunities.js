@@ -68,13 +68,15 @@ router.get('/', authenticateToken, async (req, res) => {
           ELSE 'unknown'
         END as coverage_confidence,
         COALESCE(tbv.verified_claim_count, tbv_bin.verified_claim_count, 0) as verified_claim_count,
-        COALESCE(tbv.avg_reimbursement, tbv_bin.avg_reimbursement) as avg_reimbursement
+        COALESCE(tbv.avg_reimbursement, tbv_bin.avg_reimbursement) as avg_reimbursement,
+        t.category as trigger_category
       FROM opportunities o
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
         AND tbv.insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin)
         AND COALESCE(tbv.insurance_group, '') = COALESCE(pr.insurance_group, p.primary_insurance_group, '')
+      LEFT JOIN triggers t ON t.trigger_id = o.trigger_id
       LEFT JOIN LATERAL (
         SELECT coverage_status, verified_claim_count, avg_reimbursement
         FROM trigger_bin_values
@@ -176,8 +178,69 @@ router.get('/', authenticateToken, async (req, res) => {
       prescriber_name_formatted: formatPrescriberName(opp.prescriber_name)
     }));
 
+    // Group "Not Submitted" opportunities by patient + trigger category
+    // Show only the best-paying option per group, attach others as alternatives
+    // Actioned opportunities (any other status) always show individually
+    const grouped = [];
+    const groupMap = new Map(); // key: "patientId|category" -> primary opp index in grouped[]
+
+    for (const opp of formattedOpportunities) {
+      if (opp.status !== 'Not Submitted' || !opp.trigger_category) {
+        // Actioned or uncategorized - always show individually
+        opp.alternatives = [];
+        grouped.push(opp);
+        continue;
+      }
+
+      const groupKey = `${opp.patient_id}|${opp.trigger_category}`;
+      const annualValue = parseFloat(opp.annual_margin_gain) || 0;
+
+      if (groupMap.has(groupKey)) {
+        const primaryIdx = groupMap.get(groupKey);
+        const primary = grouped[primaryIdx];
+        const primaryValue = parseFloat(primary.annual_margin_gain) || 0;
+
+        if (annualValue > primaryValue) {
+          // New opp is better - demote current primary to alternative
+          primary.alternatives.push({
+            opportunity_id: primary.opportunity_id,
+            recommended_drug_name: primary.recommended_drug_name,
+            potential_margin_gain: primary.potential_margin_gain,
+            annual_margin_gain: primary.annual_margin_gain,
+            coverage_confidence: primary.coverage_confidence,
+            avg_dispensed_qty: primary.avg_dispensed_qty,
+          });
+          // Replace primary with this opp, keeping existing alternatives
+          const existingAlts = primary.alternatives;
+          Object.assign(primary, opp);
+          primary.alternatives = existingAlts;
+        } else {
+          // Current primary is better - add new opp as alternative
+          primary.alternatives.push({
+            opportunity_id: opp.opportunity_id,
+            recommended_drug_name: opp.recommended_drug_name,
+            potential_margin_gain: opp.potential_margin_gain,
+            annual_margin_gain: opp.annual_margin_gain,
+            coverage_confidence: opp.coverage_confidence,
+            avg_dispensed_qty: opp.avg_dispensed_qty,
+          });
+        }
+      } else {
+        opp.alternatives = [];
+        groupMap.set(groupKey, grouped.length);
+        grouped.push(opp);
+      }
+    }
+
+    // Sort alternatives by GP descending
+    for (const opp of grouped) {
+      if (opp.alternatives?.length > 0) {
+        opp.alternatives.sort((a, b) => (parseFloat(b.annual_margin_gain) || 0) - (parseFloat(a.annual_margin_gain) || 0));
+      }
+    }
+
     res.json({
-      opportunities: formattedOpportunities,
+      opportunities: grouped,
       counts,
       pagination: {
         limit: parseInt(limit),
