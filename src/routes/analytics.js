@@ -5,8 +5,13 @@ import { logger } from '../utils/logger.js';
 import { authenticateToken } from './auth.js';
 import glp1Scanner from '../services/glp1-audit-scanner.js';
 import { formatPatientName, formatPrescriberName } from '../utils/formatters.js';
+import { cached } from '../utils/cache.js';
 
 const router = express.Router();
+
+// Cache TTLs
+const CACHE_5MIN = 5 * 60 * 1000;
+const CACHE_10MIN = 10 * 60 * 1000;
 
 // Dashboard overview stats
 router.get('/dashboard', authenticateToken, async (req, res) => {
@@ -14,51 +19,40 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
     const pharmacyId = req.user.pharmacyId;
     const { period = '30' } = req.query;
     const days = parseInt(period);
+    const cacheKey = `pharmacy:${pharmacyId}:dashboard:${days}`;
 
-    // Subquery to filter only Not Submitted opportunities with data quality issues
-    // Worked opportunities (Submitted, Approved, Completed) are NEVER filtered
-    const cleanOppFilter = `AND opportunity_id NOT IN (
-      SELECT dqi.opportunity_id FROM data_quality_issues dqi
-      WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
-    )`;
+    const data = await cached(cacheKey, async () => {
+      const cleanOppFilter = `AND opportunity_id NOT IN (
+        SELECT dqi.opportunity_id FROM data_quality_issues dqi
+        WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
+      )`;
 
-    const overview = await db.query(`
-      SELECT
-        -- Opportunity stats (only filter Not Submitted, never filter worked opps)
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_opportunities,
-        (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_margin,
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Submitted', 'Approved', 'Completed') AND actioned_at >= NOW() - INTERVAL '${days} days') as actioned_count,
+      const overview = await db.query(`
+        SELECT
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_opportunities,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_margin,
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Submitted', 'Approved', 'Completed') AND actioned_at >= NOW() - INTERVAL '${days} days') as actioned_count,
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_count,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_value,
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_count,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_value,
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_count,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_value,
+          (SELECT COUNT(*) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '${days} days') as rx_count,
+          (SELECT COUNT(DISTINCT patient_id) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '${days} days') as active_patients,
+          (SELECT COUNT(*) FROM patients WHERE pharmacy_id = $1) as total_patients,
+          (SELECT COUNT(*) FROM patients WHERE pharmacy_id = $1 AND med_sync_enrolled = true) as med_sync_patients,
+          (SELECT
+            CASE WHEN COUNT(*) > 0
+            THEN ROUND(100.0 * COUNT(*) FILTER (WHERE status NOT IN ('Not Submitted', 'Denied', 'Declined')) / COUNT(*), 1)
+            ELSE 0 END
+          FROM opportunities
+          WHERE pharmacy_id = $1) as action_rate
+      `, [pharmacyId]);
+      return overview.rows[0];
+    }, CACHE_5MIN);
 
-        -- Completed stats (actual captured revenue)
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_count,
-        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_value,
-
-        -- Approved stats (pending capture)
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_count,
-        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_value,
-
-        -- Combined captured (Approved + Completed)
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_count,
-        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_value,
-
-        -- Prescription stats
-        (SELECT COUNT(*) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '${days} days') as rx_count,
-        (SELECT COUNT(DISTINCT patient_id) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '${days} days') as active_patients,
-
-        -- Patient stats
-        (SELECT COUNT(*) FROM patients WHERE pharmacy_id = $1) as total_patients,
-        (SELECT COUNT(*) FROM patients WHERE pharmacy_id = $1 AND med_sync_enrolled = true) as med_sync_patients,
-
-        -- Action rate: opportunities acted on / total opportunities
-        (SELECT
-          CASE WHEN COUNT(*) > 0
-          THEN ROUND(100.0 * COUNT(*) FILTER (WHERE status NOT IN ('Not Submitted', 'Denied', 'Declined')) / COUNT(*), 1)
-          ELSE 0 END
-        FROM opportunities
-        WHERE pharmacy_id = $1) as action_rate
-    `, [pharmacyId]);
-
-    res.json(overview.rows[0]);
+    res.json(data);
   } catch (error) {
     logger.error('Dashboard stats error', { error: error.message });
     res.status(500).json({ error: 'Failed to get dashboard stats' });
@@ -265,7 +259,9 @@ router.get('/ingestion-status', authenticateToken, async (req, res) => {
 router.get('/gp-metrics', authenticateToken, async (req, res) => {
   try {
     const pharmacyId = req.user.pharmacyId;
+    const cacheKey = `pharmacy:${pharmacyId}:gp-metrics`;
 
+    const data = await cached(cacheKey, async () => {
     // Pharmacy-wide GP/Rx
     const pharmacyWide = await db.query(`
       SELECT
@@ -356,7 +352,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
       LIMIT 50
     `, [pharmacyId]);
 
-    res.json({
+    return {
       pharmacy_wide: {
         total_rx_count: parseInt(pharmacyWide.rows[0].total_rx_count) || 0,
         total_gross_profit: parseFloat(pharmacyWide.rows[0].total_gross_profit) || 0,
@@ -389,7 +385,10 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
         opportunity_count: parseInt(r.opportunity_count) || 0,
         opportunity_value: parseFloat(r.opportunity_value) || 0,
       })),
-    });
+    };
+    }, CACHE_10MIN);
+
+    res.json(data);
   } catch (error) {
     logger.error('GP metrics error', { error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to get GP metrics' });
@@ -771,7 +770,9 @@ router.get('/prescriber-stats', authenticateToken, async (req, res) => {
   try {
     const pharmacyId = req.user.pharmacyId;
     const { limit = 50, status = 'all' } = req.query;
+    const cacheKey = `pharmacy:${pharmacyId}:prescriber-stats:${status}:${limit}`;
 
+    const data = await cached(cacheKey, async () => {
     // Top prescribers by opportunity value
     let statusFilter = '';
     if (status !== 'all') {
@@ -875,7 +876,7 @@ router.get('/prescriber-stats', authenticateToken, async (req, res) => {
       WHERE pharmacy_id = $1 ${statusFilter}
     `, [pharmacyId]);
 
-    res.json({
+    return {
       summary: {
         total_prescribers: parseInt(summary.rows[0].total_prescribers) || 0,
         known_prescribers: parseInt(summary.rows[0].known_prescribers) || 0,
@@ -906,7 +907,10 @@ router.get('/prescriber-stats', authenticateToken, async (req, res) => {
         annual_potential: parseFloat(r.annual_potential) || 0
       })),
       by_prescriber_type: byPrescriberType
-    });
+    };
+    }, CACHE_5MIN);
+
+    res.json(data);
   } catch (error) {
     logger.error('Prescriber stats error', { error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to get prescriber stats' });
@@ -918,7 +922,9 @@ router.get('/recommended-drug-stats', authenticateToken, async (req, res) => {
   try {
     const pharmacyId = req.user.pharmacyId;
     const { limit = 30 } = req.query;
+    const cacheKey = `pharmacy:${pharmacyId}:drug-stats:${limit}`;
 
+    const data = await cached(cacheKey, async () => {
     // Top recommended drugs by opportunity value
     const topDrugs = await db.query(`
       SELECT
@@ -952,7 +958,7 @@ router.get('/recommended-drug-stats', authenticateToken, async (req, res) => {
       LIMIT $2
     `, [pharmacyId, parseInt(limit)]);
 
-    res.json({
+    return {
       top_recommended_drugs: topDrugs.rows.map(r => ({
         recommended_drug: r.recommended_drug,
         opportunity_count: parseInt(r.opportunity_count) || 0,
@@ -970,7 +976,10 @@ router.get('/recommended-drug-stats', authenticateToken, async (req, res) => {
         opportunity_count: parseInt(r.opportunity_count) || 0,
         annual_potential: parseFloat(r.annual_potential) || 0
       }))
-    });
+    };
+    }, CACHE_5MIN);
+
+    res.json(data);
   } catch (error) {
     logger.error('Recommended drug stats error', { error: error.message });
     res.status(500).json({ error: 'Failed to get recommended drug stats' });

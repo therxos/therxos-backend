@@ -6,6 +6,7 @@ import { logger } from '../utils/logger.js';
 import { authenticateToken } from './auth.js';
 import { formatPatientName, formatPrescriberName } from '../utils/formatters.js';
 import { getEquivalencyForDrug } from '../data/equivalency-tables.js';
+import { invalidatePharmacy } from '../utils/cache.js';
 
 const router = express.Router();
 
@@ -332,6 +333,9 @@ router.patch('/:opportunityId', authenticateToken, async (req, res) => {
       newStatus: status
     });
 
+    // Invalidate cached analytics for this pharmacy
+    invalidatePharmacy(existing.rows[0].pharmacy_id);
+
     res.json(result);
   } catch (error) {
     logger.error('Update opportunity error', { error: error.message, stack: error.stack });
@@ -388,6 +392,9 @@ router.post('/bulk-update', authenticateToken, async (req, res) => {
       status,
       userId: req.user.userId
     });
+
+    // Invalidate cached analytics
+    invalidatePharmacy(req.user.pharmacyId);
 
     res.json({
       success: true,
