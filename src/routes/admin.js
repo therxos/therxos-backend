@@ -1209,9 +1209,12 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
     const isEnabled = body.isEnabled !== undefined ? body.isEnabled : (body.is_enabled !== false);
     const binValues = body.binValues || body.bin_values;
     const restrictions = body.restrictions;
-    const binRestrictions = body.binRestrictions || body.bin_restrictions;
+    const binInclusions = body.binInclusions || body.bin_inclusions || body.binRestrictions || body.bin_restrictions;
+    const binExclusions = body.binExclusions || body.bin_exclusions;
+    const groupInclusions = body.groupInclusions || body.group_inclusions;
     const groupExclusions = body.groupExclusions || body.group_exclusions;
     const contractPrefixExclusions = body.contractPrefixExclusions || body.contract_prefix_exclusions;
+    const keywordMatchMode = body.keywordMatchMode || body.keyword_match_mode || 'any';
 
     // Auto-generate clinical justification for therapeutic interchanges if not provided
     if (!clinicalRationale && triggerType === 'therapeutic_interchange' && recommendedDrug) {
@@ -1237,16 +1240,18 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
         trigger_code, display_name, trigger_type, category,
         detection_keywords, exclude_keywords, if_has_keywords, if_not_has_keywords,
         recommended_drug, recommended_ndc, action_instructions, clinical_rationale,
-        priority, annual_fills, default_gp_value, is_enabled, bin_restrictions,
-        group_exclusions, contract_prefix_exclusions
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        priority, annual_fills, default_gp_value, is_enabled, bin_inclusions,
+        bin_exclusions, group_inclusions, group_exclusions, contract_prefix_exclusions,
+        keyword_match_mode
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
       RETURNING *
     `, [
       triggerCode, displayName, triggerType, category,
       detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
       recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
-      priority, annualFills, defaultGpValue, isEnabled, binRestrictions || null,
-      groupExclusions || null, contractPrefixExclusions || null
+      priority, annualFills, defaultGpValue, isEnabled, binInclusions || null,
+      binExclusions || null, groupInclusions || null, groupExclusions || null,
+      contractPrefixExclusions || null, keywordMatchMode
     ]);
 
     const triggerId = result.rows[0].trigger_id;
@@ -1305,9 +1310,12 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
     const isEnabled = body.isEnabled !== undefined ? body.isEnabled : body.is_enabled;
     const binValues = body.binValues || body.bin_values;
     const restrictions = body.restrictions;
-    const binRestrictions = body.binRestrictions || body.bin_restrictions;
+    const binInclusions = body.binInclusions || body.bin_inclusions || body.binRestrictions || body.bin_restrictions;
+    const binExclusions = body.binExclusions || body.bin_exclusions;
+    const groupInclusions = body.groupInclusions || body.group_inclusions;
     const groupExclusions = body.groupExclusions || body.group_exclusions;
     const contractPrefixExclusions = body.contractPrefixExclusions || body.contract_prefix_exclusions;
+    const keywordMatchMode = body.keywordMatchMode || body.keyword_match_mode;
 
     // Update trigger
     const result = await db.query(`
@@ -1328,18 +1336,22 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
         annual_fills = COALESCE($14, annual_fills),
         default_gp_value = $15,
         is_enabled = COALESCE($16, is_enabled),
-        bin_restrictions = $17,
-        group_exclusions = $18,
-        contract_prefix_exclusions = $19,
+        bin_inclusions = $17,
+        bin_exclusions = $18,
+        group_inclusions = $19,
+        group_exclusions = $20,
+        contract_prefix_exclusions = $21,
+        keyword_match_mode = COALESCE($22, keyword_match_mode),
         updated_at = NOW()
-      WHERE trigger_id = $20
+      WHERE trigger_id = $23
       RETURNING *
     `, [
       triggerCode, displayName, triggerType, category,
       detectionKeywords, excludeKeywords, ifHasKeywords, ifNotHasKeywords,
       recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
-      priority, annualFills, defaultGpValue, isEnabled, binRestrictions || null,
-      groupExclusions || null, contractPrefixExclusions || null, id
+      priority, annualFills, defaultGpValue, isEnabled, binInclusions || null,
+      binExclusions || null, groupInclusions || null, groupExclusions || null,
+      contractPrefixExclusions || null, keywordMatchMode, id
     ]);
 
     if (result.rows.length === 0) {
@@ -1547,9 +1559,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     const { id: triggerId } = req.params;
     const { minClaims = 1, daysBack = 365, searchKeywords, minMargin = 10 } = req.body;
 
-    // Get trigger info including bin_restrictions
+    // Get trigger info including bin_inclusions
     const triggerResult = await db.query(
-      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name, bin_restrictions FROM triggers WHERE trigger_id = $1',
+      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name, bin_inclusions, bin_exclusions, group_inclusions, group_exclusions FROM triggers WHERE trigger_id = $1',
       [triggerId]
     );
 
@@ -1559,9 +1571,10 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     const trigger = triggerResult.rows[0];
     const recommendedDrug = trigger.recommended_drug || '';
-    const binRestrictions = trigger.bin_restrictions || [];
+    const binInclusions = (trigger.bin_inclusions || []).map(b => String(b).trim());
+    const binExclusions = (trigger.bin_exclusions || []).map(b => String(b).trim());
 
-    console.log(`Verifying coverage for trigger: ${trigger.display_name}, recommended_drug: "${recommendedDrug}", ndc: ${trigger.recommended_ndc || 'none'}, bin_restrictions: ${binRestrictions.length > 0 ? binRestrictions.join(', ') : 'none'}`);
+    console.log(`Verifying coverage for trigger: ${trigger.display_name}, recommended_drug: "${recommendedDrug}", ndc: ${trigger.recommended_ndc || 'none'}, bin_inclusions: ${binInclusions.length > 0 ? binInclusions.join(', ') : 'none'}`);
 
     // Find matching completed claims from last N days (default 365, configurable via daysBack param)
     let matchQuery;
@@ -1619,14 +1632,19 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     // matchParams already contains the keyword params from the loop above
     // minMargin defaults to 10 but can be set to 0 for DME items like monitors
 
-    // Build BIN restriction condition if set
+    // Build BIN inclusion/exclusion conditions
     let binRestrictionCondition = '';
-    let binRestrictionParamIndex = null;
-    if (binRestrictions.length > 0) {
-      binRestrictionParamIndex = matchParams.length + 1;
-      matchParams.push(binRestrictions);
-      binRestrictionCondition = `AND insurance_bin = ANY($${binRestrictionParamIndex})`;
-      console.log(`Restricting coverage scan to BINs: ${binRestrictions.join(', ')}`);
+    if (binInclusions.length > 0) {
+      const idx = matchParams.length + 1;
+      matchParams.push(binInclusions);
+      binRestrictionCondition += `AND insurance_bin = ANY($${idx})`;
+      console.log(`Including only BINs: ${binInclusions.join(', ')}`);
+    }
+    if (binExclusions.length > 0) {
+      const idx = matchParams.length + 1;
+      matchParams.push(binExclusions);
+      binRestrictionCondition += ` AND insurance_bin != ALL($${idx})`;
+      console.log(`Excluding BINs: ${binExclusions.join(', ')}`);
     }
 
     if (trigger.recommended_ndc) {
@@ -1640,25 +1658,37 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       matchParams.push(parseFloat(minMargin));
 
       matchQuery = `
-        SELECT
-          insurance_bin as bin,
-          insurance_group as "group",
-          COUNT(*) as claim_count,
-          AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
-          AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
-          MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
-        FROM prescriptions
-        WHERE (
-          ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
-          OR ndc = $${ndcParamIndex}
+        WITH per_product AS (
+          SELECT
+            insurance_bin as bin,
+            insurance_group as grp,
+            drug_name,
+            ndc,
+            COUNT(*) as claim_count,
+            AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_reimbursement,
+            AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
+            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim,
+            ROW_NUMBER() OVER (
+              PARTITION BY insurance_bin, insurance_group
+              ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) DESC
+            ) as rank
+          FROM prescriptions
+          WHERE (
+            ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
+            OR ndc = $${ndcParamIndex}
+          )
+          AND insurance_bin IS NOT NULL AND insurance_bin != ''
+          ${binRestrictionCondition}
+          AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+          GROUP BY insurance_bin, insurance_group, drug_name, ndc
+          HAVING COUNT(*) >= $${minClaimsParamIndex}
+            AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
         )
-        AND insurance_bin IS NOT NULL AND insurance_bin != ''
-        ${binRestrictionCondition}
-        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
-        GROUP BY insurance_bin, insurance_group
-        HAVING COUNT(*) >= $${minClaimsParamIndex}
-          AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
-        ORDER BY avg_reimbursement DESC, claim_count DESC
+        SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
+               SUM(claim_count) OVER (PARTITION BY bin, grp) as claim_count,
+               avg_reimbursement, avg_qty, most_recent_claim
+        FROM per_product WHERE rank = 1
+        ORDER BY avg_reimbursement DESC
       `;
     } else {
       const minClaimsParamIndex = matchParams.length + 1;
@@ -1669,44 +1699,60 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       matchParams.push(parseFloat(minMargin));
 
       matchQuery = `
-        SELECT
-          insurance_bin as bin,
-          insurance_group as "group",
-          COUNT(*) as claim_count,
-          AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
-          AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
-          MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
-        FROM prescriptions
-        WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
-        AND insurance_bin IS NOT NULL AND insurance_bin != ''
-        ${binRestrictionCondition}
-        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
-        GROUP BY insurance_bin, insurance_group
-        HAVING COUNT(*) >= $${minClaimsParamIndex}
-          AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
-        ORDER BY avg_reimbursement DESC, claim_count DESC
+        WITH per_product AS (
+          SELECT
+            insurance_bin as bin,
+            insurance_group as grp,
+            drug_name,
+            ndc,
+            COUNT(*) as claim_count,
+            AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_reimbursement,
+            AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
+            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim,
+            ROW_NUMBER() OVER (
+              PARTITION BY insurance_bin, insurance_group
+              ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) DESC
+            ) as rank
+          FROM prescriptions
+          WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
+          AND insurance_bin IS NOT NULL AND insurance_bin != ''
+          ${binRestrictionCondition}
+          AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+          GROUP BY insurance_bin, insurance_group, drug_name, ndc
+          HAVING COUNT(*) >= $${minClaimsParamIndex}
+            AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
+        )
+        SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
+               SUM(claim_count) OVER (PARTITION BY bin, grp) as claim_count,
+               avg_reimbursement, avg_qty, most_recent_claim
+        FROM per_product WHERE rank = 1
+        ORDER BY avg_reimbursement DESC
       `;
     }
 
     const matches = await db.query(matchQuery, matchParams);
     console.log(`Found ${matches.rows.length} BIN/Group combinations for "${recommendedDrug}"`);
 
-    // Upsert into trigger_bin_values with verified status
+    // Upsert into trigger_bin_values with verified status and best drug/NDC
     const verified = [];
     for (const match of matches.rows) {
       const result = await db.query(`
         INSERT INTO trigger_bin_values (
           trigger_id, insurance_bin, insurance_group, coverage_status,
-          verified_at, verified_claim_count, avg_reimbursement, avg_qty, gp_value
+          verified_at, verified_claim_count, avg_reimbursement, avg_qty, gp_value,
+          best_drug_name, best_ndc
         )
-        VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $6, $5)
+        VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $6, $5, $7, $8)
         ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
         DO UPDATE SET
           coverage_status = 'verified',
           verified_at = NOW(),
           verified_claim_count = $4,
           avg_reimbursement = $5,
-          avg_qty = $6
+          avg_qty = $6,
+          gp_value = $5,
+          best_drug_name = $7,
+          best_ndc = $8
         RETURNING *
       `, [
         triggerId,
@@ -1714,12 +1760,51 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         match.group || null,
         parseInt(match.claim_count),
         parseFloat(match.avg_reimbursement) || 0,
-        parseFloat(match.avg_qty) || 1
+        parseFloat(match.avg_qty) || 1,
+        match.best_drug || null,
+        match.best_ndc || null
       ]);
       verified.push(result.rows[0]);
     }
 
     console.log(`Verified ${verified.length} BIN/Group combinations for trigger ${trigger.display_name}`);
+
+    // Auto-update trigger's default_gp_value to highest known GP and recommended_ndc from best coverage
+    if (verified.length > 0) {
+      const highestGP = Math.max(...verified.map(v => parseFloat(v.gp_value) || 0));
+      const bestEntry = verified.reduce((best, v) => (parseFloat(v.gp_value) || 0) > (parseFloat(best.gp_value) || 0) ? v : best, verified[0]);
+
+      await db.query(`
+        UPDATE triggers SET
+          default_gp_value = $1,
+          recommended_ndc = COALESCE($2, recommended_ndc),
+          synced_at = NOW()
+        WHERE trigger_id = $3
+      `, [highestGP, bestEntry.best_ndc, triggerId]);
+
+      console.log(`Auto-updated trigger ${trigger.display_name}: default_gp=$${highestGP}, recommended_ndc=${bestEntry.best_ndc || 'unchanged'}`);
+
+      // Backfill opportunities: update annual_margin_gain for "Not Submitted" opportunities
+      // based on new GP values per BIN/GROUP
+      const backfillResult = await db.query(`
+        UPDATE opportunities o SET
+          annual_margin_gain = ROUND(
+            COALESCE(tbv.gp_value, $2) * COALESCE(t.annual_fills, 12), 2
+          ),
+          updated_at = NOW()
+        FROM triggers t
+        LEFT JOIN prescriptions rx ON rx.rx_id = o.prescription_id
+        LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+          AND tbv.insurance_bin = rx.insurance_bin
+          AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+          AND tbv.is_excluded = false
+        WHERE o.trigger_id = $1
+          AND t.trigger_id = o.trigger_id
+          AND o.status = 'Not Submitted'
+      `, [triggerId, highestGP]);
+
+      console.log(`Backfilled ${backfillResult.rowCount} opportunities with updated GP values`);
+    }
 
     res.json({
       success: true,
@@ -1776,7 +1861,7 @@ router.get('/triggers/:id/medicare-data', authenticateToken, requireSuperAdmin, 
         plan_name,
         insurance_bin as bin,
         COUNT(*) as claim_count,
-        AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_gp,
+        AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_gp,
         AVG(COALESCE((raw_data->>'insurance_pay')::numeric, 0)) as avg_insurance_pay,
         MIN(dispensed_date) as first_claim,
         MAX(dispensed_date) as last_claim
@@ -1801,7 +1886,7 @@ router.get('/triggers/:id/medicare-data', authenticateToken, requireSuperAdmin, 
       SELECT
         COUNT(*) as total_claims,
         COUNT(DISTINCT contract_id) as unique_plans,
-        AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_gp,
+        AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_gp,
         AVG(COALESCE((raw_data->>'insurance_pay')::numeric, 0)) as avg_insurance_pay
       FROM prescriptions
       WHERE ${conditions.length > 0 ? `(${conditions.join(' AND ')})` : 'FALSE'}
@@ -1913,7 +1998,7 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
           insurance_bin as bin,
           insurance_group as "group",
           COUNT(*) as claim_count,
-          AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
+          AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_reimbursement,
           AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
         FROM prescriptions
@@ -1922,7 +2007,7 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
         AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackIdx}
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= $${minClaimsIdx}
-          AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginIdx}
+          AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginIdx}
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
 
@@ -2155,13 +2240,16 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
         const excludeKeywords = trigger.exclude_keywords || [];
         const ifHasKeywords = trigger.if_has_keywords || [];
         const ifNotHasKeywords = trigger.if_not_has_keywords || [];
+        const keywordMatchMode = trigger.keyword_match_mode || 'any';
 
         // Find matching drug
         let matchedDrug = null;
         let matchedRx = null;
         for (const rx of patientRxs) {
           const drugUpper = rx.drug_name?.toUpperCase() || '';
-          const matchesDetect = detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+          const matchesDetect = keywordMatchMode === 'all'
+            ? detectKeywords.every(kw => drugUpper.includes(kw.toUpperCase()))
+            : detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
           if (!matchesDetect) continue;
           const matchesExclude = excludeKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
           if (matchesExclude) continue;
@@ -2172,14 +2260,30 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
 
         if (!matchedDrug) continue;
 
-        // Check bin_restrictions - if set, patient's BIN must be in the list
-        const binRestrictions = (trigger.bin_restrictions || []).map(b => String(b).trim());
-        if (binRestrictions.length > 0) {
-          const patientBinRaw = String(matchedRx?.insurance_bin || matchedRx?.bin || patientRxs[0]?.insurance_bin || patientRxs[0]?.bin || '').trim();
-          if (!binRestrictions.includes(patientBinRaw)) {
-            pharmacySkipped++;
-            continue;
-          }
+        // Check BIN inclusions/exclusions
+        const binInclusions = (trigger.bin_inclusions || []).map(b => String(b).trim());
+        const binExclusions = (trigger.bin_exclusions || []).map(b => String(b).trim());
+        const patientBinRaw = String(matchedRx?.insurance_bin || matchedRx?.bin || patientRxs[0]?.insurance_bin || patientRxs[0]?.bin || '').trim();
+        if (binInclusions.length > 0 && !binInclusions.includes(patientBinRaw)) {
+          pharmacySkipped++;
+          continue;
+        }
+        if (binExclusions.length > 0 && binExclusions.includes(patientBinRaw)) {
+          pharmacySkipped++;
+          continue;
+        }
+
+        // Check group inclusions/exclusions
+        const groupInclusions = (trigger.group_inclusions || []).map(g => String(g).trim().toUpperCase());
+        const groupExclusions = (trigger.group_exclusions || []).map(g => String(g).trim().toUpperCase());
+        const patientGroupRaw = String(matchedRx?.insurance_group || matchedRx?.group_number || patientRxs[0]?.insurance_group || patientRxs[0]?.group_number || '').trim().toUpperCase();
+        if (groupInclusions.length > 0 && patientGroupRaw && !groupInclusions.includes(patientGroupRaw)) {
+          pharmacySkipped++;
+          continue;
+        }
+        if (groupExclusions.length > 0 && groupExclusions.includes(patientGroupRaw)) {
+          pharmacySkipped++;
+          continue;
         }
 
         // Check IF_HAS / IF_NOT_HAS conditions
@@ -2714,6 +2818,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           const excludeKeywords = trigger.exclude_keywords || [];
           const ifHasKeywords = trigger.if_has_keywords || [];
           const ifNotHasKeywords = trigger.if_not_has_keywords || [];
+          const keywordMatchMode = trigger.keyword_match_mode || 'any';
 
           // Find matching drug
           let matchedDrug = null;
@@ -2721,8 +2826,10 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           for (const rx of patientRxs) {
             const drugUpper = rx.drug_name?.toUpperCase() || '';
 
-            // Check if drug matches detection keywords
-            const matchesDetect = detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+            // Check if drug matches detection keywords (any vs all mode)
+            const matchesDetect = keywordMatchMode === 'all'
+              ? detectKeywords.every(kw => drugUpper.includes(kw.toUpperCase()))
+              : detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
             if (!matchesDetect) continue;
 
             // Check if drug is excluded
@@ -2736,12 +2843,19 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
 
           if (!matchedDrug) continue;
 
-          // Check bin_restrictions - if set, patient's BIN must be in the list
-          const binRestrictions = (trigger.bin_restrictions || []).map(b => String(b).trim());
-          if (binRestrictions.length > 0) {
-            const patientBinRaw = String(matchedRx?.bin || patientRxs[0]?.bin || '').trim();
-            if (!binRestrictions.includes(patientBinRaw)) continue;
-          }
+          // Check BIN inclusions/exclusions
+          const binInclusions = (trigger.bin_inclusions || []).map(b => String(b).trim());
+          const binExclusions = (trigger.bin_exclusions || []).map(b => String(b).trim());
+          const patientBinRaw = String(matchedRx?.bin || patientRxs[0]?.bin || '').trim();
+          if (binInclusions.length > 0 && !binInclusions.includes(patientBinRaw)) continue;
+          if (binExclusions.length > 0 && binExclusions.includes(patientBinRaw)) continue;
+
+          // Check group inclusions/exclusions
+          const groupInclusions = (trigger.group_inclusions || []).map(g => String(g).trim().toUpperCase());
+          const groupExclusions = (trigger.group_exclusions || []).map(g => String(g).trim().toUpperCase());
+          const patientGroupRaw = String(matchedRx?.group_number || patientRxs[0]?.group_number || '').trim().toUpperCase();
+          if (groupInclusions.length > 0 && patientGroupRaw && !groupInclusions.includes(patientGroupRaw)) continue;
+          if (groupExclusions.length > 0 && groupExclusions.includes(patientGroupRaw)) continue;
 
           // Check IF_HAS condition (patient must have these drugs)
           if (ifHasKeywords.length > 0) {
@@ -3967,6 +4081,8 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           COALESCE(
             (p.raw_data->>'gross_profit')::numeric,
             (p.raw_data->>'net_profit')::numeric,
+            (p.raw_data->>'Gross Profit')::numeric,
+            (p.raw_data->>'Net Profit')::numeric,
             CASE WHEN p.acquisition_cost IS NOT NULL OR n.nadac_per_unit IS NOT NULL
               THEN COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0)
                    - COALESCE(p.acquisition_cost, n.nadac_per_unit * COALESCE(p.quantity_dispensed, 1))
@@ -4023,13 +4139,16 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       ? binValues.reduce((best, bv) => (bv.gpValue > best.gpValue ? bv : best), binValues[0])
       : null;
 
+    // Auto-update trigger: recommended_ndc from best coverage, default_gp from highest GP
+    const highestGP = bestOverall ? bestOverall.gpValue : null;
     await db.query(`
       UPDATE triggers
       SET synced_at = NOW(),
           updated_at = NOW(),
-          recommended_ndc = COALESCE($2, recommended_ndc)
+          recommended_ndc = COALESCE($2, recommended_ndc),
+          default_gp_value = COALESCE($3, default_gp_value)
       WHERE trigger_id = $1
-    `, [triggerId, bestOverall?.bestNdc || null]);
+    `, [triggerId, bestOverall?.bestNdc || null, highestGP]);
 
     // Store bin values in trigger_bin_values table (with best drug name + NDC)
     for (const bv of binValues) {
@@ -4039,6 +4158,27 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
         ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
         DO UPDATE SET gp_value = $4, avg_qty = $5, verified_claim_count = $6, coverage_status = $7, verified_at = NOW(), best_drug_name = $8, best_ndc = $9
       `, [triggerId, bv.bin, bv.group, bv.gpValue, bv.avgQty, bv.claimCount, bv.coverageStatus, bv.bestDrugName, bv.bestNdc]);
+    }
+
+    // Backfill "Not Submitted" opportunities with updated GP values per BIN/GROUP
+    if (binValues.length > 0) {
+      const backfillResult = await db.query(`
+        UPDATE opportunities o SET
+          annual_margin_gain = ROUND(
+            COALESCE(tbv.gp_value, $2) * COALESCE(t.annual_fills, 12), 2
+          ),
+          updated_at = NOW()
+        FROM triggers t
+        LEFT JOIN prescriptions rx ON rx.rx_id = o.prescription_id
+        LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+          AND tbv.insurance_bin = rx.insurance_bin
+          AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+          AND tbv.is_excluded = false
+        WHERE o.trigger_id = $1
+          AND t.trigger_id = o.trigger_id
+          AND o.status = 'Not Submitted'
+      `, [triggerId, highestGP || 0]);
+      console.log(`Backfilled ${backfillResult.rowCount} opportunities with updated GP values`);
     }
 
     console.log(`Found ${binValues.length} BIN/Groups for trigger: ${trigger.display_name}`);
@@ -4083,23 +4223,39 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
     }
 
     // Parse exclusions
+    const binInclusions = (trigger.bin_inclusions || []).map(b => String(b).trim());
+    const binExclusions = (trigger.bin_exclusions || []).map(b => String(b).trim());
+    const groupInclusions = (trigger.group_inclusions || []).map(g => String(g).trim());
     const groupExclusions = trigger.group_exclusions || [];
     const contractPrefixExclusions = trigger.contract_prefix_exclusions || [];
-    const binRestrictions = (trigger.bin_restrictions || []).map(b => String(b).trim());
 
     // Find matching patients in this pharmacy (with exclusion filters)
     const keywordPatterns = keywords.map(k => `%${k.toLowerCase()}%`);
 
-    // Build exclusion conditions
+    // Build inclusion/exclusion conditions
     let exclusionConditions = '';
     const exclusionParams = [];
     let paramOffset = keywordPatterns.length + 2; // +2 for pharmacyId and daysBack placeholder
 
-    // BIN restrictions - only allow these BINs
-    if (binRestrictions.length > 0) {
-      exclusionConditions += ` AND pr.insurance_bin IN (${binRestrictions.map((_, i) => `$${paramOffset + i}`).join(', ')})`;
-      exclusionParams.push(...binRestrictions);
-      paramOffset += binRestrictions.length;
+    // BIN inclusions - only allow these BINs
+    if (binInclusions.length > 0) {
+      exclusionConditions += ` AND pr.insurance_bin IN (${binInclusions.map((_, i) => `$${paramOffset + i}`).join(', ')})`;
+      exclusionParams.push(...binInclusions);
+      paramOffset += binInclusions.length;
+    }
+
+    // BIN exclusions - exclude these BINs
+    if (binExclusions.length > 0) {
+      exclusionConditions += ` AND pr.insurance_bin NOT IN (${binExclusions.map((_, i) => `$${paramOffset + i}`).join(', ')})`;
+      exclusionParams.push(...binExclusions);
+      paramOffset += binExclusions.length;
+    }
+
+    // Group inclusions - only allow these groups
+    if (groupInclusions.length > 0) {
+      exclusionConditions += ` AND (pr.insurance_group IS NOT NULL AND pr.insurance_group IN (${groupInclusions.map((_, i) => `$${paramOffset + i}`).join(', ')}))`;
+      exclusionParams.push(...groupInclusions);
+      paramOffset += groupInclusions.length;
     }
 
     if (groupExclusions.length > 0) {
@@ -4327,11 +4483,11 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               drug_name,
               ndc,
               COUNT(*) as claim_count,
-              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin,
+              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_margin,
               AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
               ROW_NUMBER() OVER (
                 PARTITION BY insurance_bin, insurance_group
-                ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) DESC
+                ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) DESC
               ) as rank
             FROM prescriptions
             WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
@@ -4339,7 +4495,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
             GROUP BY insurance_bin, insurance_group, drug_name, ndc
             HAVING COUNT(*) >= $${minClaimsParamIndex}
-              AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
+              AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
           )
           SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc, claim_count, avg_margin, avg_qty
           FROM ranked_products
@@ -4358,7 +4514,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               drug_name as best_drug,
               ndc as best_ndc,
               COUNT(*) as claim_count,
-              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin,
+              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_margin,
               AVG(COALESCE(quantity_dispensed, 1)) as avg_qty
             FROM prescriptions
             WHERE (${keywordConditions ? `(${keywordConditions})` : 'FALSE'} OR ndc = $${ndcParamIndex})
@@ -4366,7 +4522,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
             GROUP BY insurance_bin, insurance_group, drug_name, ndc
             HAVING COUNT(*) >= $${minClaimsParamIndex}
-              AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
+              AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
             ORDER BY avg_margin DESC
           `;
         } else {
@@ -4377,7 +4533,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               drug_name as best_drug,
               ndc as best_ndc,
               COUNT(*) as claim_count,
-              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_margin,
+              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_margin,
               AVG(COALESCE(quantity_dispensed, 1)) as avg_qty
             FROM prescriptions
             WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
@@ -4385,7 +4541,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
             GROUP BY insurance_bin, insurance_group, drug_name, ndc
             HAVING COUNT(*) >= $${minClaimsParamIndex}
-              AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginParamIndex}
+              AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
             ORDER BY avg_margin DESC
           `;
         }
@@ -4433,6 +4589,41 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
           parseFloat(match.avg_qty) || null
         ]);
         verifiedCount++;
+      }
+
+      // Auto-update trigger's default_gp_value and recommended_ndc from best coverage
+      if (matches.rows.length > 0) {
+        const bestMatch = matches.rows.reduce((best, m) =>
+          (parseFloat(m.avg_margin) || 0) > (parseFloat(best.avg_margin) || 0) ? m : best,
+          matches.rows[0]
+        );
+        const highestGP = parseFloat(bestMatch.avg_margin) || 0;
+
+        await db.query(`
+          UPDATE triggers SET
+            default_gp_value = $1,
+            recommended_ndc = COALESCE($2, recommended_ndc),
+            synced_at = NOW()
+          WHERE trigger_id = $3
+        `, [highestGP, bestMatch.best_ndc, trigger.trigger_id]);
+
+        // Backfill "Not Submitted" opportunities with updated GP values
+        await db.query(`
+          UPDATE opportunities o SET
+            annual_margin_gain = ROUND(
+              COALESCE(tbv.gp_value, $2) * COALESCE(t.annual_fills, 12), 2
+            ),
+            updated_at = NOW()
+          FROM triggers t
+          LEFT JOIN prescriptions rx ON rx.rx_id = o.prescription_id
+          LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+            AND tbv.insurance_bin = rx.insurance_bin
+            AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+            AND tbv.is_excluded = false
+          WHERE o.trigger_id = $1
+            AND t.trigger_id = o.trigger_id
+            AND o.status = 'Not Submitted'
+        `, [trigger.trigger_id, highestGP]);
       }
 
       results.push({
@@ -5872,15 +6063,15 @@ router.get('/positive-gp-winners', authenticateToken, requireSuperAdmin, async (
           COUNT(DISTINCT p.patient_id) as patient_count,
           COUNT(DISTINCT p.pharmacy_id) as pharmacy_count,
           ROUND(AVG(
-            COALESCE((p.raw_data->>'gross_profit')::numeric,
+            COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric,
               COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
           )::numeric, 2) as avg_gp,
           ROUND(SUM(
-            COALESCE((p.raw_data->>'gross_profit')::numeric,
+            COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric,
               COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
           )::numeric, 2) as total_profit,
           ROUND(MAX(
-            COALESCE((p.raw_data->>'gross_profit')::numeric,
+            COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric,
               COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
           )::numeric, 2) as best_gp,
           ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
@@ -5996,7 +6187,7 @@ router.get('/ndc-optimization', authenticateToken, requireSuperAdmin, async (req
           COUNT(*) as fill_count,
           COUNT(DISTINCT p.patient_id) as patient_count,
           ROUND(AVG(
-            COALESCE((p.raw_data->>'gross_profit')::numeric,
+            COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric,
               COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
           )::numeric, 2) as avg_gp,
           ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,

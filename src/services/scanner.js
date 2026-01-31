@@ -162,6 +162,8 @@ async function buildRecommendedDrugGPCache(pharmacyId, triggers) {
       COALESCE(
         (raw_data->>'gross_profit')::numeric,
         (raw_data->>'net_profit')::numeric,
+        (raw_data->>'Gross Profit')::numeric,
+        (raw_data->>'Net Profit')::numeric,
         insurance_pay - COALESCE(acquisition_cost, 0),
         0
       ) as gp,
@@ -294,7 +296,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
       pr.prescription_id, pr.patient_id, pr.drug_name, pr.ndc,
       pr.insurance_bin, pr.insurance_group, pr.contract_id, pr.plan_name,
       pr.prescriber_name, pr.prescriber_npi, pr.days_supply,
-      COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, 0) as profit,
+      COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, (pr.raw_data->>'Gross Profit')::numeric, (pr.raw_data->>'Net Profit')::numeric, 0) as profit,
       p.chronic_conditions
     FROM prescriptions pr
     JOIN patients p ON p.patient_id = pr.patient_id
@@ -335,16 +337,20 @@ async function scanAdminTriggers(pharmacyId, batchId) {
 
     if (detectionKeywords.length === 0) continue;
 
-    // Normalize bin_restrictions to trimmed strings for safe comparison
-    const binRestrictions = (trigger.bin_restrictions || []).map(b => String(b).trim());
+    // Normalize BIN/group inclusion/exclusion lists
+    const binInclusions = (trigger.bin_inclusions || []).map(b => String(b).trim());
+    const binExclusions = (trigger.bin_exclusions || []).map(b => String(b).trim());
+    const groupInclusions = (trigger.group_inclusions || []).map(g => String(g).trim().toUpperCase());
+    const groupExclusions = (trigger.group_exclusions || []).map(g => String(g).trim().toUpperCase());
+    const keywordMatchMode = trigger.keyword_match_mode || 'any';
 
     for (const rx of prescriptions) {
       const drugName = (rx.drug_name || '').toUpperCase();
 
-      // Check detection keywords
-      const matchesDetection = detectionKeywords.some(kw =>
-        drugName.includes(kw.toUpperCase())
-      );
+      // Check detection keywords (any vs all mode)
+      const matchesDetection = keywordMatchMode === 'all'
+        ? detectionKeywords.every(kw => drugName.includes(kw.toUpperCase()))
+        : detectionKeywords.some(kw => drugName.includes(kw.toUpperCase()));
       if (!matchesDetection) continue;
 
       // Check exclusions
@@ -353,17 +359,28 @@ async function scanAdminTriggers(pharmacyId, batchId) {
       );
       if (matchesExclusion) continue;
 
-      // Check bin restrictions - if set, patient's BIN must be in the list
-      if (binRestrictions.length > 0) {
+      // Check BIN inclusions - if set, patient's BIN must be in the list
+      if (binInclusions.length > 0) {
         const patientBin = String(rx.insurance_bin || '').trim();
-        if (!binRestrictions.includes(patientBin)) continue;
+        if (!binInclusions.includes(patientBin)) continue;
+      }
+
+      // Check BIN exclusions - if set, skip if patient's BIN is in the list
+      if (binExclusions.length > 0) {
+        const patientBin = String(rx.insurance_bin || '').trim();
+        if (binExclusions.includes(patientBin)) continue;
+      }
+
+      // Check group inclusions
+      if (groupInclusions.length > 0) {
+        const patientGroup = (rx.insurance_group || '').toUpperCase();
+        if (patientGroup && !groupInclusions.includes(patientGroup)) continue;
       }
 
       // Check group exclusions
-      const groupExclusions = trigger.group_exclusions || [];
       if (groupExclusions.length > 0) {
         const patientGroup = (rx.insurance_group || '').toUpperCase();
-        if (groupExclusions.some(g => g.toUpperCase() === patientGroup)) continue;
+        if (groupExclusions.includes(patientGroup)) continue;
       }
 
       // Check contract prefix exclusions
