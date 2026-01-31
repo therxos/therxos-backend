@@ -1683,20 +1683,17 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       matchParams.push(parseFloat(minMargin));
 
       matchQuery = `
-        WITH per_product AS (
+        WITH raw_claims AS (
           SELECT
             insurance_bin as bin,
             insurance_group as grp,
             drug_name,
             ndc,
-            COUNT(*) as claim_count,
-            AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_reimbursement,
-            AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
-            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim,
-            ROW_NUMBER() OVER (
-              PARTITION BY insurance_bin, insurance_group
-              ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) DESC
-            ) as rank
+            COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
+              / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+            COALESCE(quantity_dispensed, 1)
+              / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day,
+            dispensed_date, created_at
           FROM prescriptions
           WHERE (
             ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
@@ -1705,9 +1702,22 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
-          GROUP BY insurance_bin, insurance_group, drug_name, ndc
+        ),
+        per_product AS (
+          SELECT
+            bin, grp, drug_name, ndc,
+            COUNT(*) as claim_count,
+            AVG(gp_30day) as avg_reimbursement,
+            AVG(qty_30day) as avg_qty,
+            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim,
+            ROW_NUMBER() OVER (
+              PARTITION BY bin, grp
+              ORDER BY AVG(gp_30day) DESC
+            ) as rank
+          FROM raw_claims
+          GROUP BY bin, grp, drug_name, ndc
           HAVING COUNT(*) >= $${minClaimsParamIndex}
-            AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
+            AND AVG(gp_30day) >= $${minMarginParamIndex}
         )
         SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
                SUM(claim_count) OVER (PARTITION BY bin, grp) as claim_count,
@@ -1724,28 +1734,38 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       matchParams.push(parseFloat(minMargin));
 
       matchQuery = `
-        WITH per_product AS (
+        WITH raw_claims AS (
           SELECT
             insurance_bin as bin,
             insurance_group as grp,
             drug_name,
             ndc,
-            COUNT(*) as claim_count,
-            AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_reimbursement,
-            AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
-            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim,
-            ROW_NUMBER() OVER (
-              PARTITION BY insurance_bin, insurance_group
-              ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) DESC
-            ) as rank
+            COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
+              / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+            COALESCE(quantity_dispensed, 1)
+              / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day,
+            dispensed_date, created_at
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
-          GROUP BY insurance_bin, insurance_group, drug_name, ndc
+        ),
+        per_product AS (
+          SELECT
+            bin, grp, drug_name, ndc,
+            COUNT(*) as claim_count,
+            AVG(gp_30day) as avg_reimbursement,
+            AVG(qty_30day) as avg_qty,
+            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim,
+            ROW_NUMBER() OVER (
+              PARTITION BY bin, grp
+              ORDER BY AVG(gp_30day) DESC
+            ) as rank
+          FROM raw_claims
+          GROUP BY bin, grp, drug_name, ndc
           HAVING COUNT(*) >= $${minClaimsParamIndex}
-            AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
+            AND AVG(gp_30day) >= $${minMarginParamIndex}
         )
         SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
                SUM(claim_count) OVER (PARTITION BY bin, grp) as claim_count,
@@ -4115,7 +4135,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
 
     // Find BEST reimbursing product per BIN/Group (with drug name + NDC)
     // GP priority: 1) gross_profit from claims data, 2) raw_data GP, 3) calculated estimate
-    // Only falls back to estimate when real GP is unavailable
+    // All GP values normalized to 30-day equivalent (90-day fills divided by 3, etc.)
     const prescriptionsResult = await db.query(`
       WITH claim_gp AS (
         SELECT
@@ -4133,8 +4153,9 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
                    - COALESCE(p.acquisition_cost, n.nadac_per_unit * COALESCE(p.quantity_dispensed, 1))
               ELSE NULL
             END
-          ) as gp,
-          p.quantity_dispensed as qty
+          ) / GREATEST(CEIL(COALESCE(p.days_supply, 30)::numeric / 30.0), 1) as gp,
+          p.quantity_dispensed / GREATEST(CEIL(COALESCE(p.days_supply, 30)::numeric / 30.0), 1) as qty,
+          p.days_supply
         FROM prescriptions p
         LEFT JOIN LATERAL (
           SELECT nadac_per_unit FROM nadac_pricing
@@ -4161,7 +4182,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
         HAVING AVG(gp) >= $${minMarginIdx}
       )
       SELECT bin, group_number, drug_name, ndc, claim_count,
-        ROUND(avg_gp::numeric, 2) as avg_gp, avg_qty
+        ROUND(avg_gp::numeric, 2) as avg_gp, ROUND(avg_qty::numeric, 1) as avg_qty
       FROM ranked_products
       WHERE rank = 1
       ORDER BY avg_gp DESC
@@ -4526,27 +4547,37 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
 
       if (isNdcOptimization) {
         // For DME/NDC optimization: Find the BEST reimbursing product per BIN/Group
+        // GP normalized to 30-day equivalent
         matchQuery = `
-          WITH ranked_products AS (
+          WITH raw_claims AS (
             SELECT
               insurance_bin as bin,
               insurance_group as grp,
               drug_name,
               ndc,
-              COUNT(*) as claim_count,
-              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_margin,
-              AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
-              ROW_NUMBER() OVER (
-                PARTITION BY insurance_bin, insurance_group
-                ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) DESC
-              ) as rank
+              COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
+                / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+              COALESCE(quantity_dispensed, 1)
+                / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day
             FROM prescriptions
             WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
               AND insurance_bin IS NOT NULL AND insurance_bin != ''
               AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
-            GROUP BY insurance_bin, insurance_group, drug_name, ndc
+          ),
+          ranked_products AS (
+            SELECT
+              bin, grp, drug_name, ndc,
+              COUNT(*) as claim_count,
+              AVG(gp_30day) as avg_margin,
+              AVG(qty_30day) as avg_qty,
+              ROW_NUMBER() OVER (
+                PARTITION BY bin, grp
+                ORDER BY AVG(gp_30day) DESC
+              ) as rank
+            FROM raw_claims
+            GROUP BY bin, grp, drug_name, ndc
             HAVING COUNT(*) >= $${minClaimsParamIndex}
-              AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
+              AND AVG(gp_30day) >= $${minMarginParamIndex}
           )
           SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc, claim_count, avg_margin, avg_qty
           FROM ranked_products
@@ -4559,40 +4590,56 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
           const ndcParamIndex = matchParams.length + 1;
           matchParams.push(trigger.recommended_ndc);
           matchQuery = `
-            SELECT
-              insurance_bin as bin,
-              insurance_group as "group",
-              drug_name as best_drug,
-              ndc as best_ndc,
+            WITH raw_claims AS (
+              SELECT
+                insurance_bin as bin,
+                insurance_group as grp,
+                drug_name,
+                ndc,
+                COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
+                  / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+                COALESCE(quantity_dispensed, 1)
+                  / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day
+              FROM prescriptions
+              WHERE (${keywordConditions ? `(${keywordConditions})` : 'FALSE'} OR ndc = $${ndcParamIndex})
+                AND insurance_bin IS NOT NULL AND insurance_bin != ''
+                AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+            )
+            SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
               COUNT(*) as claim_count,
-              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_margin,
-              AVG(COALESCE(quantity_dispensed, 1)) as avg_qty
-            FROM prescriptions
-            WHERE (${keywordConditions ? `(${keywordConditions})` : 'FALSE'} OR ndc = $${ndcParamIndex})
-              AND insurance_bin IS NOT NULL AND insurance_bin != ''
-              AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
-            GROUP BY insurance_bin, insurance_group, drug_name, ndc
+              AVG(gp_30day) as avg_margin,
+              AVG(qty_30day) as avg_qty
+            FROM raw_claims
+            GROUP BY bin, grp, drug_name, ndc
             HAVING COUNT(*) >= $${minClaimsParamIndex}
-              AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
+              AND AVG(gp_30day) >= $${minMarginParamIndex}
             ORDER BY avg_margin DESC
           `;
         } else {
           matchQuery = `
-            SELECT
-              insurance_bin as bin,
-              insurance_group as "group",
-              drug_name as best_drug,
-              ndc as best_ndc,
+            WITH raw_claims AS (
+              SELECT
+                insurance_bin as bin,
+                insurance_group as grp,
+                drug_name,
+                ndc,
+                COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
+                  / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+                COALESCE(quantity_dispensed, 1)
+                  / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day
+              FROM prescriptions
+              WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
+                AND insurance_bin IS NOT NULL AND insurance_bin != ''
+                AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+            )
+            SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
               COUNT(*) as claim_count,
-              AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_margin,
-              AVG(COALESCE(quantity_dispensed, 1)) as avg_qty
-            FROM prescriptions
-            WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
-              AND insurance_bin IS NOT NULL AND insurance_bin != ''
-              AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
-            GROUP BY insurance_bin, insurance_group, drug_name, ndc
+              AVG(gp_30day) as avg_margin,
+              AVG(qty_30day) as avg_qty
+            FROM raw_claims
+            GROUP BY bin, grp, drug_name, ndc
             HAVING COUNT(*) >= $${minClaimsParamIndex}
-              AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) >= $${minMarginParamIndex}
+              AND AVG(gp_30day) >= $${minMarginParamIndex}
             ORDER BY avg_margin DESC
           `;
         }
