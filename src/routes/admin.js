@@ -4086,14 +4086,11 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       ndcCondition = ` OR p.ndc = $${paramIndex++}`;
     }
 
-    // Build exclude condition from exclude_keywords
-    const excludePatterns = excludeKeywords.map(k => `%${k.toLowerCase()}%`);
-    const excludeCondition = excludePatterns.length > 0
-      ? `AND NOT (${excludePatterns.map((_) => {
-          allParams.push(_);
-          return `LOWER(p.drug_name) LIKE $${paramIndex++}`;
-        }).join(' OR ')})`
-      : '';
+    // NOTE: exclude_keywords are NOT applied to coverage scans.
+    // They are for the opportunity scanner (e.g., exclude patients already on ODT).
+    // The coverage scan searches for the RECOMMENDED drug, so exclude_keywords would
+    // incorrectly filter out the exact drug we're looking for.
+    const excludeCondition = '';
 
     // minMargin param
     allParams.push(minMargin);
