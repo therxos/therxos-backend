@@ -71,10 +71,26 @@ function loadTriggersFromCSV() {
   return triggers;
 }
 
-// Get available triggers list
+// Get available triggers list (from database)
 router.get('/triggers', authenticateToken, async (req, res) => {
   try {
-    const triggers = loadTriggersFromCSV();
+    const result = await db.query(`
+      SELECT trigger_id, trigger_code, display_name, trigger_type,
+             category, recommended_drug, priority, is_enabled
+      FROM triggers
+      WHERE is_enabled = true
+      ORDER BY category, display_name
+    `);
+
+    const triggers = result.rows.map(t => ({
+      triggerId: t.trigger_id,
+      triggerCode: t.trigger_code,
+      displayName: t.display_name,
+      category: t.category || t.trigger_type || 'Other',
+      priority: (t.priority || 'medium').toUpperCase(),
+      recommendedMed: t.recommended_drug,
+      globalEnabled: t.is_enabled
+    }));
 
     // Group by category
     const grouped = {};
