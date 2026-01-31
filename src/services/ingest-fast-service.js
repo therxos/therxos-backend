@@ -16,10 +16,13 @@ const progressMap = new Map();
 const COLUMN_MAP = {
   'Rx Number': 'rx_number',
   'Patient Full Name Last then First': 'patient_name',
+  'Patient Full Name': 'patient_name',
   'Patient Date of Birth': 'patient_dob',
   'Patient Age': 'patient_age',
   'Date Written': 'date_written',
+  'Date Filled': 'date_written',
   'DAW Code': 'daw_code',
+  'DAW': 'daw_code',
   'Dispensed Item Name': 'drug_name',
   'Dispensed Item NDC': 'ndc',
   'Dispensed Quantity': 'quantity',
@@ -29,6 +32,8 @@ const COLUMN_MAP = {
   'PDC': 'pdc',
   'Dispensed AWP': 'awp',
   'Net Profit': 'net_profit',
+  'Gross Profit': 'net_profit',
+  'Acquisition Cost': 'acquisition_cost',
   'Patient Paid Amount': 'patient_pay',
   'Primary Contract ID': 'contract_id',
   'Primary Prescription Benefit Plan': 'plan_name',
@@ -36,7 +41,9 @@ const COLUMN_MAP = {
   'Primary Third Party Bin': 'insurance_bin',
   'Primary Group Number': 'group_number',
   'Primary Network Reimbursement': 'insurance_pay',
+  'Primary Remit Amount': 'insurance_pay',
   'Prescriber Full Name': 'prescriber_name',
+  'Prescriber Full Name First then Last': 'prescriber_name',
   'Prescriber Fax Number': 'prescriber_fax',
 };
 
@@ -97,6 +104,27 @@ function parseDate(dateStr) {
 function parseAmount(amountStr) {
   if (!amountStr) return 0;
   return parseFloat(String(amountStr).replace(/[$,]/g, '')) || 0;
+}
+
+function normalizeDawCode(daw) {
+  if (!daw) return '0';
+  const d = String(daw).trim();
+  // Already a code (0-9)
+  if (/^\d$/.test(d)) return d;
+  // Map text descriptions to codes
+  const lower = d.toLowerCase();
+  if (lower.includes('no product selection')) return '0';
+  if (lower.includes('not allowed by prescriber') || lower.includes('substitution not allowed')) return '1';
+  if (lower.includes('patient requested')) return '2';
+  if (lower.includes('pharmacist selected')) return '3';
+  if (lower.includes('not in stock')) return '4';
+  if (lower.includes('brand drug dispensed as generic')) return '5';
+  if (lower.includes('override')) return '6';
+  if (lower.includes('mandated by law')) return '7';
+  if (lower.includes('not available in marketplace')) return '8';
+  if (lower.includes('other')) return '9';
+  // Fallback: take first char if numeric, else 0
+  return /^\d/.test(d) ? d[0] : '0';
 }
 
 function inferConditions(therapeuticClass) {
@@ -312,7 +340,7 @@ async function runIngestion(jobId, pharmacyId, csvContent) {
       patient_pay: parseAmount(row.patient_pay),
       insurance_pay: parseAmount(row.insurance_pay),
       prescriber_name: row.prescriber_name,
-      daw_code: row.daw_code,
+      daw_code: normalizeDawCode(row.daw_code),
       raw_data: JSON.stringify({
         therapeutic_class: row.therapeutic_class,
         pdc: row.pdc,
