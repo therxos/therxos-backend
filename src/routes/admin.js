@@ -1386,17 +1386,20 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
       const backfillResult = await db.query(`
         UPDATE opportunities o SET
           annual_margin_gain = ROUND(
-            COALESCE(tbv.gp_value, $2) * COALESCE($3, 12), 2
+            COALESCE(
+              (SELECT tbv.gp_value
+               FROM prescriptions rx
+               JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                 AND tbv.insurance_bin = rx.insurance_bin
+                 AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                 AND tbv.is_excluded = false
+               WHERE rx.prescription_id = o.prescription_id
+               LIMIT 1),
+              $2
+            ) * COALESCE($3, 12), 2
           ),
           updated_at = NOW()
-        FROM triggers t
-        LEFT JOIN prescriptions rx ON rx.rx_id = o.prescription_id
-        LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
-          AND tbv.insurance_bin = rx.insurance_bin
-          AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
-          AND tbv.is_excluded = false
         WHERE o.trigger_id = $1
-          AND t.trigger_id = o.trigger_id
           AND o.status = 'Not Submitted'
       `, [id, updatedTrigger.default_gp_value || 0, updatedTrigger.annual_fills || 12]);
       console.log(`Backfilled ${backfillResult.rowCount} opportunities after trigger update (annual_fills: ${updatedTrigger.annual_fills}, default_gp: ${updatedTrigger.default_gp_value})`);
@@ -1811,17 +1814,23 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       const backfillResult = await db.query(`
         UPDATE opportunities o SET
           annual_margin_gain = ROUND(
-            COALESCE(tbv.gp_value, $2) * COALESCE(t.annual_fills, 12), 2
+            COALESCE(
+              (SELECT tbv.gp_value
+               FROM prescriptions rx
+               JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                 AND tbv.insurance_bin = rx.insurance_bin
+                 AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                 AND tbv.is_excluded = false
+               WHERE rx.prescription_id = o.prescription_id
+               LIMIT 1),
+              $2
+            ) * COALESCE(
+              (SELECT t.annual_fills FROM triggers t WHERE t.trigger_id = o.trigger_id),
+              12
+            ), 2
           ),
           updated_at = NOW()
-        FROM triggers t
-        LEFT JOIN prescriptions rx ON rx.rx_id = o.prescription_id
-        LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
-          AND tbv.insurance_bin = rx.insurance_bin
-          AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
-          AND tbv.is_excluded = false
         WHERE o.trigger_id = $1
-          AND t.trigger_id = o.trigger_id
           AND o.status = 'Not Submitted'
       `, [triggerId, highestGP]);
 
@@ -4187,17 +4196,23 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       const backfillResult = await db.query(`
         UPDATE opportunities o SET
           annual_margin_gain = ROUND(
-            COALESCE(tbv.gp_value, $2) * COALESCE(t.annual_fills, 12), 2
+            COALESCE(
+              (SELECT tbv.gp_value
+               FROM prescriptions rx
+               JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                 AND tbv.insurance_bin = rx.insurance_bin
+                 AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                 AND tbv.is_excluded = false
+               WHERE rx.prescription_id = o.prescription_id
+               LIMIT 1),
+              $2
+            ) * COALESCE(
+              (SELECT t.annual_fills FROM triggers t WHERE t.trigger_id = o.trigger_id),
+              12
+            ), 2
           ),
           updated_at = NOW()
-        FROM triggers t
-        LEFT JOIN prescriptions rx ON rx.rx_id = o.prescription_id
-        LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
-          AND tbv.insurance_bin = rx.insurance_bin
-          AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
-          AND tbv.is_excluded = false
         WHERE o.trigger_id = $1
-          AND t.trigger_id = o.trigger_id
           AND o.status = 'Not Submitted'
       `, [triggerId, highestGP || 0]);
       console.log(`Backfilled ${backfillResult.rowCount} opportunities with updated GP values`);
@@ -4633,17 +4648,23 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
         await db.query(`
           UPDATE opportunities o SET
             annual_margin_gain = ROUND(
-              COALESCE(tbv.gp_value, $2) * COALESCE(t.annual_fills, 12), 2
+              COALESCE(
+                (SELECT tbv.gp_value
+                 FROM prescriptions rx
+                 JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                   AND tbv.insurance_bin = rx.insurance_bin
+                   AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                   AND tbv.is_excluded = false
+                 WHERE rx.prescription_id = o.prescription_id
+                 LIMIT 1),
+                $2
+              ) * COALESCE(
+                (SELECT t.annual_fills FROM triggers t WHERE t.trigger_id = o.trigger_id),
+                12
+              ), 2
             ),
             updated_at = NOW()
-          FROM triggers t
-          LEFT JOIN prescriptions rx ON rx.rx_id = o.prescription_id
-          LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
-            AND tbv.insurance_bin = rx.insurance_bin
-            AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
-            AND tbv.is_excluded = false
           WHERE o.trigger_id = $1
-            AND t.trigger_id = o.trigger_id
             AND o.status = 'Not Submitted'
         `, [trigger.trigger_id, highestGP]);
       }
