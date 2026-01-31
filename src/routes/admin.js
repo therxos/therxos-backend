@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import Stripe from 'stripe';
 import db from '../database/index.js';
+import { logger } from '../utils/logger.js';
 import { authenticateToken } from './auth.js';
 import { ROLES } from '../utils/permissions.js';
 import auditScanner from '../services/audit-scanner.js';
@@ -6113,7 +6114,7 @@ router.patch('/pharmacies/:id/fax-settings', authenticateToken, requireSuperAdmi
     });
   } catch (error) {
     console.error('Error updating fax settings:', error);
-    res.status(500).json({ error: 'Failed to update fax settings', detail: error.message });
+    res.status(500).json({ error: 'Failed to update fax settings' });
   }
 });
 
