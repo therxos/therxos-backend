@@ -539,7 +539,7 @@ export async function runOpportunityScan(options = {}) {
     let pharmacyQuery = `
       SELECT p.pharmacy_id, p.client_id, p.pharmacy_name
       FROM pharmacies p JOIN clients c ON c.client_id = p.client_id
-      WHERE p.is_active = true AND c.status = 'active'
+      WHERE p.is_active = true AND c.status IN ('active', 'new', 'onboarding')
     `;
     const params = [];
 
