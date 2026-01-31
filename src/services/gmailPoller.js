@@ -450,12 +450,12 @@ async function processSPPEmail(gmail, messageId, pharmacyId) {
       }
     }
 
-    // Mark email as processed
+    // Mark email as processed for this pharmacy
     await db.query(`
-      INSERT INTO processed_emails (email_id, message_id, processed_at, job_id, results)
-      VALUES ($1, $2, NOW(), $3, $4)
-      ON CONFLICT (message_id) DO UPDATE SET processed_at = NOW(), results = $4
-    `, [uuidv4(), messageId, jobId, JSON.stringify(results)]);
+      INSERT INTO processed_emails (email_id, message_id, pharmacy_id, processed_at, job_id, results)
+      VALUES ($1, $2, $3, NOW(), $4, $5)
+      ON CONFLICT (message_id, pharmacy_id) DO UPDATE SET processed_at = NOW(), results = $5
+    `, [uuidv4(), messageId, pharmacyId, jobId, JSON.stringify(results)]);
 
     return results;
 
@@ -468,6 +468,8 @@ async function processSPPEmail(gmail, messageId, pharmacyId) {
 
 /**
  * Main polling function - runs nightly to fetch and process SPP reports
+ * Now supports multi-pharmacy: each pharmacy has an spp_report_name in settings
+ * that filters emails by subject line, so Bravo only processes Bravo emails, etc.
  */
 export async function pollForSPPReports(options = {}) {
   const { pharmacyId, daysBack = 1 } = options;
@@ -478,10 +480,18 @@ export async function pollForSPPReports(options = {}) {
   try {
     const gmail = await getGmailClient();
 
-    // Get already processed email IDs
+    // Get pharmacy's SPP report identifier for email filtering
+    const pharmResult = await db.query(
+      "SELECT settings FROM pharmacies WHERE pharmacy_id = $1",
+      [pharmacyId]
+    );
+    const sppReportName = pharmResult.rows[0]?.settings?.spp_report_name;
+
+    // Get already processed email IDs FOR THIS PHARMACY (not globally)
     const intervalDays = parseInt(daysBack) + 1;
     const processedResult = await db.query(
-      `SELECT message_id FROM processed_emails WHERE processed_at >= NOW() - INTERVAL '${intervalDays} days'`
+      `SELECT message_id FROM processed_emails WHERE pharmacy_id = $1 AND processed_at >= NOW() - INTERVAL '${intervalDays} days'`,
+      [pharmacyId]
     );
     const processedIds = processedResult.rows.map(r => r.message_id);
 
@@ -495,11 +505,37 @@ export async function pollForSPPReports(options = {}) {
       processedIds
     });
 
-    logger.info(`Found ${emails.length} unprocessed SPP emails`, { runId });
+    // Filter emails by subject if pharmacy has an SPP report name configured
+    let emailsToProcess = emails;
+    if (sppReportName && emails.length > 0) {
+      emailsToProcess = [];
+      for (const email of emails) {
+        // Fetch just the subject header (lightweight metadata request)
+        const msg = await gmail.users.messages.get({
+          userId: 'me',
+          id: email.id,
+          format: 'metadata',
+          metadataHeaders: ['Subject']
+        });
+        const subject = msg.data.payload?.headers?.find(h => h.name === 'Subject')?.value || '';
+
+        if (subject.toLowerCase().includes(sppReportName.toLowerCase())) {
+          emailsToProcess.push(email);
+          logger.info('Email matches pharmacy filter', { runId, messageId: email.id, subject, filter: sppReportName });
+        } else {
+          logger.info('Email skipped - does not match pharmacy filter', { runId, messageId: email.id, subject, filter: sppReportName });
+        }
+      }
+    }
+
+    logger.info(`Found ${emails.length} unprocessed SPP emails, ${emailsToProcess.length} match pharmacy filter`, {
+      runId,
+      sppReportName: sppReportName || 'none (processing all)'
+    });
 
     const allResults = [];
 
-    for (const email of emails) {
+    for (const email of emailsToProcess) {
       const result = await processSPPEmail(gmail, email.id, pharmacyId);
       allResults.push(result);
     }
