@@ -6113,7 +6113,7 @@ router.patch('/pharmacies/:id/fax-settings', authenticateToken, requireSuperAdmi
     });
   } catch (error) {
     console.error('Error updating fax settings:', error);
-    res.status(500).json({ error: 'Failed to update fax settings' });
+    res.status(500).json({ error: 'Failed to update fax settings', detail: error.message });
   }
 });
 
