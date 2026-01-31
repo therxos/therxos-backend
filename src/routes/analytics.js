@@ -19,25 +19,35 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
     const pharmacyId = req.user.pharmacyId;
     const { period = '30' } = req.query;
     const days = parseInt(period);
-    const cacheKey = `pharmacy:${pharmacyId}:dashboard:${days}`;
+
+    // Get pharmacy's disabled triggers for filtering
+    const settingsResult = await db.query(
+      'SELECT settings FROM pharmacies WHERE pharmacy_id = $1',
+      [pharmacyId]
+    );
+    const disabledTriggers = settingsResult.rows[0]?.settings?.disabledTriggers || [];
+    const cacheKey = `pharmacy:${pharmacyId}:dashboard:${days}:dt${disabledTriggers.length}`;
 
     const data = await cached(cacheKey, async () => {
       const cleanOppFilter = `AND opportunity_id NOT IN (
         SELECT dqi.opportunity_id FROM data_quality_issues dqi
         WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
       )`;
+      const disabledTriggerFilter = disabledTriggers.length > 0
+        ? `AND (trigger_id IS NULL OR trigger_id NOT IN (${disabledTriggers.map(id => `'${id}'`).join(',')}))`
+        : '';
 
       const overview = await db.query(`
         SELECT
-          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_opportunities,
-          (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter}) as pending_margin,
-          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Submitted', 'Approved', 'Completed') AND actioned_at >= NOW() - INTERVAL '${days} days') as actioned_count,
-          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_count,
-          (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed') as completed_value,
-          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_count,
-          (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved') as approved_value,
-          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_count,
-          (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed')) as captured_value,
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter} ${disabledTriggerFilter}) as pending_opportunities,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter} ${disabledTriggerFilter}) as pending_margin,
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Submitted', 'Approved', 'Completed') AND actioned_at >= NOW() - INTERVAL '${days} days' ${disabledTriggerFilter}) as actioned_count,
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed' ${disabledTriggerFilter}) as completed_count,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed' ${disabledTriggerFilter}) as completed_value,
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved' ${disabledTriggerFilter}) as approved_count,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Approved' ${disabledTriggerFilter}) as approved_value,
+          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed') ${disabledTriggerFilter}) as captured_count,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Approved', 'Completed') ${disabledTriggerFilter}) as captured_value,
           (SELECT COUNT(*) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '${days} days') as rx_count,
           (SELECT COUNT(DISTINCT patient_id) FROM prescriptions WHERE pharmacy_id = $1 AND dispensed_date >= NOW() - INTERVAL '${days} days') as active_patients,
           (SELECT COUNT(*) FROM patients WHERE pharmacy_id = $1) as total_patients,
@@ -47,7 +57,7 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
             THEN ROUND(100.0 * COUNT(*) FILTER (WHERE status NOT IN ('Not Submitted', 'Denied', 'Declined')) / COUNT(*), 1)
             ELSE 0 END
           FROM opportunities
-          WHERE pharmacy_id = $1) as action_rate
+          WHERE pharmacy_id = $1 ${disabledTriggerFilter}) as action_rate
       `, [pharmacyId]);
       return overview.rows[0];
     }, CACHE_5MIN);

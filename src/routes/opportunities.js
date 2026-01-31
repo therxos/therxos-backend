@@ -30,6 +30,13 @@ router.get('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'No pharmacy associated with user' });
     }
 
+    // Get pharmacy's disabled triggers list
+    const settingsResult = await db.query(
+      'SELECT settings FROM pharmacies WHERE pharmacy_id = $1',
+      [pharmacyId]
+    );
+    const disabledTriggers = settingsResult.rows[0]?.settings?.disabledTriggers || [];
+
     // Query using columns that exist in the patients and prescriptions tables
     // Excludes opportunities with pending data quality issues (missing prescriber, unknown drug, etc.)
     // Includes coverage_confidence computed from trigger_bin_values
@@ -87,6 +94,12 @@ router.get('/', authenticateToken, async (req, res) => {
     const params = [pharmacyId];
     let paramIndex = 2;
 
+    // Filter out disabled triggers
+    if (disabledTriggers.length > 0) {
+      query += ` AND (o.trigger_id IS NULL OR o.trigger_id != ALL($${paramIndex++}::uuid[]))`;
+      params.push(disabledTriggers);
+    }
+
     // Filters
     if (status) {
       query += ` AND o.status = $${paramIndex++}`;
@@ -120,7 +133,13 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const result = await db.query(query, params);
 
-    // Get counts by status (excluding data quality issues and excluded coverage)
+    // Get counts by status (excluding data quality issues, excluded coverage, and disabled triggers)
+    const countsParams = [pharmacyId];
+    let countsExtra = '';
+    if (disabledTriggers.length > 0) {
+      countsExtra = ' AND (o.trigger_id IS NULL OR o.trigger_id != ALL($2::uuid[]))';
+      countsParams.push(disabledTriggers);
+    }
     const countsResult = await db.query(`
       SELECT
         o.status,
@@ -138,8 +157,9 @@ router.get('/', authenticateToken, async (req, res) => {
           WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
         ))
         AND (o.status != 'Not Submitted' OR (tbv.is_excluded IS NOT TRUE AND COALESCE(tbv.coverage_status, '') != 'excluded'))
+        ${countsExtra}
       GROUP BY o.status
-    `, [pharmacyId]);
+    `, countsParams);
 
     const counts = {};
     for (const row of countsResult.rows) {
