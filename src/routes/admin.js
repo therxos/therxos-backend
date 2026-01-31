@@ -1380,7 +1380,29 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
       }
     }
 
-    res.json({ trigger: result.rows[0] });
+    // Backfill opportunities when annual_fills or default_gp_value changes
+    const updatedTrigger = result.rows[0];
+    if (annualFills !== undefined || defaultGpValue !== undefined) {
+      const backfillResult = await db.query(`
+        UPDATE opportunities o SET
+          annual_margin_gain = ROUND(
+            COALESCE(tbv.gp_value, $2) * COALESCE($3, 12), 2
+          ),
+          updated_at = NOW()
+        FROM triggers t
+        LEFT JOIN prescriptions rx ON rx.rx_id = o.prescription_id
+        LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+          AND tbv.insurance_bin = rx.insurance_bin
+          AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+          AND tbv.is_excluded = false
+        WHERE o.trigger_id = $1
+          AND t.trigger_id = o.trigger_id
+          AND o.status = 'Not Submitted'
+      `, [id, updatedTrigger.default_gp_value || 0, updatedTrigger.annual_fills || 12]);
+      console.log(`Backfilled ${backfillResult.rowCount} opportunities after trigger update (annual_fills: ${updatedTrigger.annual_fills}, default_gp: ${updatedTrigger.default_gp_value})`);
+    }
+
+    res.json({ trigger: updatedTrigger });
   } catch (error) {
     console.error('Error updating trigger:', error);
     res.status(500).json({ error: 'Failed to update trigger' });
