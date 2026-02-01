@@ -36,11 +36,38 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
       const disabledTriggerFilter = disabledTriggers.length > 0
         ? `AND (trigger_id IS NULL OR trigger_id NOT IN (${disabledTriggers.map(id => `'${id}'`).join(',')}))`
         : '';
+      // Aliased version for CTE with table prefix
+      const dtFilterAliased = disabledTriggers.length > 0
+        ? `AND (o.trigger_id IS NULL OR o.trigger_id NOT IN (${disabledTriggers.map(id => `'${id}'`).join(',')}))`
+        : '';
 
       const overview = await db.query(`
+        WITH pending_cov AS (
+          SELECT o.potential_margin_gain,
+            CASE WHEN o.trigger_id IS NULL THEN true
+                 WHEN tbv.coverage_status IN ('verified', 'works') THEN true
+                 WHEN COALESCE(tbv.verified_claim_count, 0) > 0 THEN true
+                 ELSE false
+            END as has_coverage
+          FROM opportunities o
+          LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
+          LEFT JOIN patients p ON p.patient_id = o.patient_id
+          LEFT JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+            AND tbv.insurance_bin = COALESCE(pr.insurance_bin, p.primary_insurance_bin, '')
+            AND COALESCE(tbv.insurance_group, '') = COALESCE(pr.insurance_group, p.primary_insurance_group, '')
+          WHERE o.pharmacy_id = $1 AND o.status = 'Not Submitted'
+            AND o.opportunity_id NOT IN (
+              SELECT dqi.opportunity_id FROM data_quality_issues dqi
+              WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
+            )
+            AND (tbv.is_excluded IS NOT TRUE AND COALESCE(tbv.coverage_status, '') != 'excluded')
+            ${dtFilterAliased}
+        )
         SELECT
-          (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter} ${disabledTriggerFilter}) as pending_opportunities,
-          (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Not Submitted' ${cleanOppFilter} ${disabledTriggerFilter}) as pending_margin,
+          (SELECT COUNT(*) FROM pending_cov) as pending_opportunities,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM pending_cov WHERE has_coverage) as pending_margin,
+          (SELECT COUNT(*) FROM pending_cov WHERE NOT has_coverage) as unknown_coverage_count,
+          (SELECT COALESCE(SUM(potential_margin_gain), 0) FROM pending_cov WHERE NOT has_coverage) as unknown_coverage_margin,
           (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status IN ('Submitted', 'Approved', 'Completed') AND actioned_at >= NOW() - INTERVAL '${days} days' ${disabledTriggerFilter}) as actioned_count,
           (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed' ${disabledTriggerFilter}) as completed_count,
           (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = $1 AND status = 'Completed' ${disabledTriggerFilter}) as completed_value,

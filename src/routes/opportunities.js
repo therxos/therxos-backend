@@ -146,7 +146,19 @@ router.get('/', authenticateToken, async (req, res) => {
       SELECT
         o.status,
         COUNT(*) as count,
-        SUM(o.potential_margin_gain) as total_margin
+        SUM(o.potential_margin_gain) as total_margin,
+        SUM(CASE WHEN (
+          o.status != 'Not Submitted'
+          OR o.trigger_id IS NULL
+          OR tbv.coverage_status IN ('verified', 'works')
+          OR COALESCE(tbv.verified_claim_count, 0) > 0
+        ) THEN o.potential_margin_gain ELSE 0 END) as verified_margin,
+        COUNT(CASE WHEN (
+          o.status = 'Not Submitted'
+          AND o.trigger_id IS NOT NULL
+          AND COALESCE(tbv.coverage_status, '') NOT IN ('verified', 'works')
+          AND COALESCE(tbv.verified_claim_count, 0) = 0
+        ) THEN 1 END) as unknown_count
       FROM opportunities o
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       LEFT JOIN patients p ON p.patient_id = o.patient_id
@@ -167,7 +179,9 @@ router.get('/', authenticateToken, async (req, res) => {
     for (const row of countsResult.rows) {
       counts[row.status] = {
         count: parseInt(row.count),
-        totalMargin: parseFloat(row.total_margin) || 0
+        totalMargin: parseFloat(row.total_margin) || 0,
+        verifiedMargin: parseFloat(row.verified_margin) || 0,
+        unknownCount: parseInt(row.unknown_count) || 0
       };
     }
 
