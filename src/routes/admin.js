@@ -1423,16 +1423,13 @@ router.delete('/triggers/:id', authenticateToken, requireSuperAdmin, async (req,
       return res.status(404).json({ error: 'Trigger not found' });
     }
 
-    // Check for actioned opportunities (anything beyond 'Not Submitted')
-    const actionedOpps = await db.query(`
-      SELECT COUNT(*) as cnt FROM opportunities
+    // Unlink actioned opportunities (preserve them, just remove trigger reference)
+    const unlinked = await db.query(`
+      UPDATE opportunities SET trigger_id = NULL
       WHERE trigger_id = $1 AND status != 'Not Submitted'
     `, [id]);
-
-    if (parseInt(actionedOpps.rows[0].cnt) > 0) {
-      return res.status(400).json({
-        error: `Cannot delete trigger with ${actionedOpps.rows[0].cnt} actioned opportunities. Remove or reassign them first.`
-      });
+    if (unlinked.rowCount > 0) {
+      console.log(`Unlinked ${unlinked.rowCount} actioned opportunities from trigger ${id}`);
     }
 
     // Get IDs of unactioned opportunities to delete
