@@ -1738,10 +1738,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
               / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day,
             dispensed_date, created_at
           FROM prescriptions
-          WHERE (
-            ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
-            OR ndc = $${ndcParamIndex}
-          )
+          WHERE ndc = $${ndcParamIndex}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
