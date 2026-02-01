@@ -278,7 +278,8 @@ async function scanAdminTriggers(pharmacyId, batchId) {
           'gp_value', tbv.gp_value,
           'coverage_status', tbv.coverage_status,
           'is_excluded', tbv.is_excluded,
-          'best_ndc', tbv.best_ndc
+          'best_ndc', tbv.best_ndc,
+          'avg_qty', tbv.avg_qty
         ))
         FROM trigger_bin_values tbv
         WHERE tbv.trigger_id = t.trigger_id
@@ -485,6 +486,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
         current_drug_name: rx.drug_name,
         recommended_drug_name: trigger.recommended_drug || trigger.display_name,
         recommended_ndc: binMatch?.best_ndc || trigger.recommended_ndc || null,
+        avg_dispensed_qty: binMatch?.avg_qty || null,
         potential_margin_gain: gpValue,
         annual_margin_gain: gpValue * 12,
         clinical_rationale: trigger.clinical_rationale || trigger.action_instructions || `${trigger.display_name} opportunity identified.`,

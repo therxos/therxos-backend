@@ -2227,7 +2227,8 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
               'is_excluded', tbv.is_excluded,
               'coverage_status', tbv.coverage_status,
               'avg_reimbursement', tbv.avg_reimbursement,
-              'best_ndc', tbv.best_ndc
+              'best_ndc', tbv.best_ndc,
+              'avg_qty', tbv.avg_qty
             )
           ) FILTER (WHERE tbv.id IS NOT NULL),
           '[]'
@@ -2805,7 +2806,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
       SELECT t.*,
         COALESCE(
           json_agg(
-            json_build_object('bin', tbv.insurance_bin, 'insurance_bin', tbv.insurance_bin, 'insurance_group', tbv.insurance_group, 'gp_value', tbv.gp_value, 'is_excluded', tbv.is_excluded, 'coverage_status', tbv.coverage_status, 'avg_reimbursement', tbv.avg_reimbursement, 'best_ndc', tbv.best_ndc)
+            json_build_object('bin', tbv.insurance_bin, 'insurance_bin', tbv.insurance_bin, 'insurance_group', tbv.insurance_group, 'gp_value', tbv.gp_value, 'is_excluded', tbv.is_excluded, 'coverage_status', tbv.coverage_status, 'avg_reimbursement', tbv.avg_reimbursement, 'best_ndc', tbv.best_ndc, 'avg_qty', tbv.avg_qty)
           ) FILTER (WHERE tbv.id IS NOT NULL),
           '[]'
         ) as bin_values
@@ -4278,13 +4279,48 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
 
     console.log(`Found ${binValues.length} BIN/Groups for trigger: ${trigger.display_name}`);
 
+    // Find all drug name variations matching the search terms
+    let drugVariations = [];
+    try {
+      const varParams = [];
+      let varParamIdx = 1;
+      const varConditions = words.map(word => {
+        varParams.push(word);
+        return `UPPER(p.drug_name) LIKE '%' || $${varParamIdx++} || '%'`;
+      });
+      let varCondition = varConditions.length > 0 ? `(${varConditions.join(' AND ')})` : 'FALSE';
+      if (recommendedNdc) {
+        varParams.push(recommendedNdc);
+        varCondition = `(${varCondition} OR p.ndc = $${varParamIdx++})`;
+      }
+      const varResult = await db.query(`
+        SELECT UPPER(p.drug_name) as drug_name, COUNT(*) as claim_count, COUNT(DISTINCT p.ndc) as ndc_count,
+               array_agg(DISTINCT p.ndc) as ndcs
+        FROM prescriptions p
+        WHERE ${varCondition}
+          AND p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
+          AND p.insurance_bin IS NOT NULL
+        GROUP BY UPPER(p.drug_name)
+        ORDER BY claim_count DESC
+      `, varParams);
+      drugVariations = varResult.rows.map(r => ({
+        drugName: r.drug_name,
+        claimCount: parseInt(r.claim_count),
+        ndcCount: parseInt(r.ndc_count),
+        ndcs: (r.ndcs || []).filter(Boolean).slice(0, 5)
+      }));
+    } catch (varError) {
+      console.error('Error fetching drug variations:', varError.message);
+    }
+
     res.json({
       success: true,
       triggerId,
       triggerName: trigger.display_name,
       binCount: binValues.length,
       prescriptionCount: binValues.reduce((sum, b) => sum + b.claimCount, 0),
-      binValues: binValues.slice(0, 20) // Return first 20 for preview
+      binValues: binValues.slice(0, 20),
+      drugVariations
     });
   } catch (error) {
     console.error('Scan trigger coverage error:', error);
@@ -4753,6 +4789,20 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
         `, [trigger.trigger_id, highestGP]);
       }
 
+      // Collect all unique drug names found in matches
+      const drugVariationMap = new Map();
+      for (const m of matches.rows) {
+        const name = (m.best_drug || '').toUpperCase();
+        if (!name) continue;
+        const existing = drugVariationMap.get(name) || { claimCount: 0, ndcs: new Set() };
+        existing.claimCount += parseInt(m.claim_count) || 0;
+        if (m.best_ndc) existing.ndcs.add(m.best_ndc);
+        drugVariationMap.set(name, existing);
+      }
+      const drugVariations = Array.from(drugVariationMap.entries())
+        .map(([name, data]) => ({ drugName: name, claimCount: data.claimCount, ndcs: Array.from(data.ndcs).slice(0, 5) }))
+        .sort((a, b) => b.claimCount - a.claimCount);
+
       results.push({
         triggerId: trigger.trigger_id,
         triggerName: trigger.display_name,
@@ -4764,7 +4814,8 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
           bestDrug: m.best_drug,
           avgMargin: parseFloat(m.avg_margin).toFixed(2),
           avgQty: parseFloat(m.avg_qty || 0).toFixed(1)
-        }))
+        })),
+        drugVariations
       });
     }
 
