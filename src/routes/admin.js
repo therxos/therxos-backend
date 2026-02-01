@@ -1725,6 +1725,12 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       const minMarginParamIndex = matchParams.length + 1;
       matchParams.push(parseFloat(minMargin));
 
+      // Use keywords OR NDC to find all matching claims (finds best NDCs across all variants)
+      // Falls back to NDC-only if no keyword conditions exist
+      const whereClause = keywordConditions
+        ? `((${keywordConditions}) OR ndc = $${ndcParamIndex})`
+        : `ndc = $${ndcParamIndex}`;
+
       matchQuery = `
         WITH raw_claims AS (
           SELECT
@@ -1738,7 +1744,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
               / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day,
             dispensed_date, created_at
           FROM prescriptions
-          WHERE ndc = $${ndcParamIndex}
+          WHERE ${whereClause}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
           ${binRestrictionCondition}
@@ -4671,6 +4677,12 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
         if (trigger.recommended_ndc) {
           const ndcParamIndex = matchParams.length + 1;
           matchParams.push(trigger.recommended_ndc);
+
+          // Use keywords OR NDC to find all matching claims (finds best NDCs across all variants)
+          const whereClause = keywordConditions
+            ? `((${keywordConditions}) OR ndc = $${ndcParamIndex})`
+            : `ndc = $${ndcParamIndex}`;
+
           matchQuery = `
             WITH raw_claims AS (
               SELECT
@@ -4683,7 +4695,7 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
                 COALESCE(quantity_dispensed, 1)
                   / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day
               FROM prescriptions
-              WHERE ndc = $${ndcParamIndex}
+              WHERE ${whereClause}
                 AND insurance_bin IS NOT NULL AND insurance_bin != ''
                 AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
                 AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
