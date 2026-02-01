@@ -57,7 +57,7 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(o.current_drug_name, pr.drug_name) as current_drug,
         COALESCE(o.prescriber_name, pr.prescriber_name) as prescriber_name,
         COALESCE(o.potential_margin_gain, 0) as potential_margin_gain,
-        COALESCE(o.annual_margin_gain, o.potential_margin_gain * 12, 0) as annual_margin_gain,
+        COALESCE(o.potential_margin_gain, 0) * COALESCE(t.annual_fills, 12) as annual_margin_gain,
         CASE
           WHEN o.trigger_id IS NULL THEN NULL
           WHEN tbv.coverage_status = 'excluded' OR tbv.is_excluded = true THEN 'excluded'
