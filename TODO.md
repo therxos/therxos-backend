@@ -34,7 +34,7 @@ Do NOT automatically push to production after staging. The user needs time to te
 - [ ] Add waitlist form/modal when beta reaches 10 pharmacies
 
 ### Client Features
-- [ ] `/change-password` page (currently returns 404 - frontend route missing, backend API exists)
+- [x] `/change-password` page (verified working - page exists, builds, login redirects here when mustChangePassword=true)
 - [x] Fix logout hydration error
 
 ### Onboarding

@@ -178,21 +178,43 @@ router.get('/', authenticateToken, async (req, res) => {
       prescriber_name_formatted: formatPrescriberName(opp.prescriber_name)
     }));
 
-    // Group "Not Submitted" opportunities by patient + trigger category
-    // Show only the best-paying option per group, attach others as alternatives
-    // Actioned opportunities (any other status) always show individually
+    // Group "Not Submitted" opportunities as alternatives only when they genuinely compete
+    // Only these trigger types have competing options (pick ONE):
+    //   combo_therapy, therapeutic_interchange, formulation_change, ndc_optimization, brand_to_generic
+    // Missing therapy triggers are independent clinical needs (patient can need ALL of them)
+    const GROUPABLE_TYPES = new Set([
+      'combo_therapy', 'therapeutic_interchange', 'formulation_change',
+      'ndc_optimization', 'brand_to_generic',
+      'Combination Therapy', 'Therapeutic Interchange', 'Formulation Change',
+      'NDC Optimization', 'Brand to Generic Change',
+      'Combination Therapy - Triple',
+    ]);
+
     const grouped = [];
-    const groupMap = new Map(); // key: "patientId|category" -> primary opp index in grouped[]
+    const groupMap = new Map(); // key: "patientId|currentDrug|triggerType" -> primary opp index in grouped[]
 
     for (const opp of formattedOpportunities) {
-      if (opp.status !== 'Not Submitted' || !opp.trigger_category) {
-        // Actioned or uncategorized - always show individually
+      const triggerType = opp.opportunity_type || opp.trigger_category;
+
+      // Normalize drug name for grouping: strip special chars, numbers, strength/form
+      const rawDrug = (opp.current_drug || opp.current_drug_name || '');
+      const currentDrug = rawDrug
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b(mg|mcg|ml|tab|cap|tablet|capsule|sol|soln|susp|cream|oint|hfa|er|sr|dr|xl|la)\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // Only group types where alternatives compete — missing_therapy, DME, etc. always show individually
+      if (opp.status !== 'Not Submitted' || !triggerType || !currentDrug || !GROUPABLE_TYPES.has(triggerType)) {
         opp.alternatives = [];
         grouped.push(opp);
         continue;
       }
 
-      const groupKey = `${opp.patient_id}|${opp.trigger_category}`;
+      const groupKey = `${opp.patient_id}|${currentDrug}|${triggerType}`;
       const annualValue = parseFloat(opp.annual_margin_gain) || 0;
 
       if (groupMap.has(groupKey)) {

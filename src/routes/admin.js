@@ -1718,9 +1718,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
             drug_name,
             ndc,
             COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
-              / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+              / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as gp_30day,
             COALESCE(quantity_dispensed, 1)
-              / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day,
+              / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day,
             dispensed_date, created_at
           FROM prescriptions
           WHERE (
@@ -1769,9 +1769,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
             drug_name,
             ndc,
             COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
-              / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+              / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as gp_30day,
             COALESCE(quantity_dispensed, 1)
-              / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day,
+              / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day,
             dispensed_date, created_at
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
@@ -2316,23 +2316,23 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
         const patientPrimaryBin = patientRxs[0]?.primary_insurance_bin;
         if (EXCLUDED_BINS.includes(patientPrimaryBin)) continue;
 
-        const patientDrugs = patientRxs.map(rx => rx.drug_name?.toUpperCase() || '');
+        const patientDrugs = patientRxs.map(rx => (rx.drug_name || '').toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' '));
         const detectKeywords = trigger.detection_keywords || [];
         const excludeKeywords = trigger.exclude_keywords || [];
         const ifHasKeywords = trigger.if_has_keywords || [];
         const ifNotHasKeywords = trigger.if_not_has_keywords || [];
         const keywordMatchMode = trigger.keyword_match_mode || 'any';
 
-        // Find matching drug
+        // Find matching drug - strip special chars for matching
         let matchedDrug = null;
         let matchedRx = null;
         for (const rx of patientRxs) {
-          const drugUpper = rx.drug_name?.toUpperCase() || '';
+          const drugUpper = (rx.drug_name || '').toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ');
           const matchesDetect = keywordMatchMode === 'all'
-            ? detectKeywords.every(kw => drugUpper.includes(kw.toUpperCase()))
-            : detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+            ? detectKeywords.every(kw => drugUpper.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')))
+            : detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')));
           if (!matchesDetect) continue;
-          const matchesExclude = excludeKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+          const matchesExclude = excludeKeywords.some(kw => drugUpper.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')));
           if (matchesExclude) continue;
           matchedDrug = rx.drug_name;
           matchedRx = rx;
@@ -2369,11 +2369,11 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
 
         // Check IF_HAS / IF_NOT_HAS conditions
         if (ifHasKeywords.length > 0) {
-          const hasRequired = ifHasKeywords.some(kw => patientDrugs.some(d => d.includes(kw.toUpperCase())));
+          const hasRequired = ifHasKeywords.some(kw => patientDrugs.some(d => d.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' '))));
           if (!hasRequired) continue;
         }
         if (ifNotHasKeywords.length > 0) {
-          const hasForbidden = ifNotHasKeywords.some(kw => patientDrugs.some(d => d.includes(kw.toUpperCase())));
+          const hasForbidden = ifNotHasKeywords.some(kw => patientDrugs.some(d => d.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' '))));
           if (hasForbidden) continue;
         }
 
@@ -2870,7 +2870,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
     // Scan for opportunities
     if (scanType === 'all' || scanType === 'opportunities') {
       for (const [patientId, patientRxs] of patientRxMap) {
-        const patientDrugs = patientRxs.map(rx => rx.drug_name?.toUpperCase() || '');
+        const patientDrugs = patientRxs.map(rx => (rx.drug_name || '').toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' '));
         const patientBin = patientRxs[0]?.bin;
         const patientGroup = patientRxs[0]?.group_number;
         const patientPrimaryBin = patientRxs[0]?.primary_insurance_bin;
@@ -2889,20 +2889,20 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           const ifNotHasKeywords = trigger.if_not_has_keywords || [];
           const keywordMatchMode = trigger.keyword_match_mode || 'any';
 
-          // Find matching drug
+          // Find matching drug - strip special chars for matching
           let matchedDrug = null;
           let matchedRx = null;
           for (const rx of patientRxs) {
-            const drugUpper = rx.drug_name?.toUpperCase() || '';
+            const drugUpper = (rx.drug_name || '').toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ');
 
             // Check if drug matches detection keywords (any vs all mode)
             const matchesDetect = keywordMatchMode === 'all'
-              ? detectKeywords.every(kw => drugUpper.includes(kw.toUpperCase()))
-              : detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+              ? detectKeywords.every(kw => drugUpper.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')))
+              : detectKeywords.some(kw => drugUpper.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')));
             if (!matchesDetect) continue;
 
             // Check if drug is excluded
-            const matchesExclude = excludeKeywords.some(kw => drugUpper.includes(kw.toUpperCase()));
+            const matchesExclude = excludeKeywords.some(kw => drugUpper.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')));
             if (matchesExclude) continue;
 
             matchedDrug = rx.drug_name;
@@ -2929,7 +2929,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           // Check IF_HAS condition (patient must have these drugs)
           if (ifHasKeywords.length > 0) {
             const hasRequired = ifHasKeywords.some(kw =>
-              patientDrugs.some(d => d.includes(kw.toUpperCase()))
+              patientDrugs.some(d => d.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')))
             );
             if (!hasRequired) continue;
           }
@@ -2937,7 +2937,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           // Check IF_NOT_HAS condition (for missing therapy triggers)
           if (ifNotHasKeywords.length > 0) {
             const hasForbidden = ifNotHasKeywords.some(kw =>
-              patientDrugs.some(d => d.includes(kw.toUpperCase()))
+              patientDrugs.some(d => d.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')))
             );
             if (hasForbidden) continue; // Patient already has this therapy
           }

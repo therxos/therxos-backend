@@ -321,7 +321,8 @@ async function scanAdminTriggers(pharmacyId, batchId) {
     if (!patientDrugsMap.has(rx.patient_id)) {
       patientDrugsMap.set(rx.patient_id, []);
     }
-    patientDrugsMap.get(rx.patient_id).push(rx.drug_name?.toUpperCase() || '');
+    // Strip special characters so if_has/if_not_has matching isn't broken by *, #, etc.
+    patientDrugsMap.get(rx.patient_id).push((rx.drug_name || '').toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' '));
   }
 
   const createdOpps = new Set();
@@ -348,17 +349,19 @@ async function scanAdminTriggers(pharmacyId, batchId) {
     const keywordMatchMode = trigger.keyword_match_mode || 'any';
 
     for (const rx of prescriptions) {
-      const drugName = (rx.drug_name || '').toUpperCase();
+      const drugNameRaw = (rx.drug_name || '').toUpperCase();
+      // Strip special characters for matching (*, #, etc.) but keep letters, numbers, spaces
+      const drugName = drugNameRaw.replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ');
 
       // Check detection keywords (any vs all mode)
       const matchesDetection = keywordMatchMode === 'all'
-        ? detectionKeywords.every(kw => drugName.includes(kw.toUpperCase()))
-        : detectionKeywords.some(kw => drugName.includes(kw.toUpperCase()));
+        ? detectionKeywords.every(kw => drugName.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')))
+        : detectionKeywords.some(kw => drugName.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')));
       if (!matchesDetection) continue;
 
       // Check exclusions
       const matchesExclusion = excludeKeywords.some(kw =>
-        drugName.includes(kw.toUpperCase())
+        drugName.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' '))
       );
       if (matchesExclusion) continue;
 
@@ -399,7 +402,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
       if (ifHasKeywords.length > 0) {
         const patientDrugs = patientDrugsMap.get(rx.patient_id) || [];
         const hasRequired = ifHasKeywords.some(kw =>
-          patientDrugs.some(d => d.includes(kw.toUpperCase()))
+          patientDrugs.some(d => d.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')))
         );
         if (!hasRequired) continue;
       }
@@ -408,7 +411,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
       if (ifNotHasKeywords.length > 0) {
         const patientDrugs = patientDrugsMap.get(rx.patient_id) || [];
         const hasExcluded = ifNotHasKeywords.some(kw =>
-          patientDrugs.some(d => d.includes(kw.toUpperCase()))
+          patientDrugs.some(d => d.includes(kw.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ')))
         );
         if (hasExcluded) continue;
       }
@@ -467,6 +470,17 @@ async function scanAdminTriggers(pharmacyId, batchId) {
       // No GP value found - skip (never make up values)
       if (!gpValue || gpValue <= 0) continue;
 
+      // Normalize GP to 30-day equivalent
+      // Coverage scan is supposed to normalize, but fails when days_supply is NULL on claims
+      // If avg_qty > 34 from bin_values, the data wasn't normalized — fix it here
+      if (binMatch?.avg_qty && binMatch.avg_qty > 34) {
+        const months = Math.ceil(binMatch.avg_qty / 30);
+        gpValue = gpValue / months;
+      } else if (!binMatch && daysSupply > 34) {
+        // For non-coverage paths, use the prescription's days_supply
+        gpValue = gpValue * (30 / daysSupply);
+      }
+
       // Skip below $10 threshold
       if (gpValue < 10) continue;
 
@@ -488,7 +502,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
         recommended_ndc: binMatch?.best_ndc || trigger.recommended_ndc || null,
         avg_dispensed_qty: binMatch?.avg_qty || null,
         potential_margin_gain: gpValue,
-        annual_margin_gain: gpValue * 12,
+        annual_margin_gain: gpValue * (parseInt(trigger.annual_fills) || 12),
         clinical_rationale: trigger.clinical_rationale || trigger.action_instructions || `${trigger.display_name} opportunity identified.`,
         clinical_priority: trigger.priority <= 2 ? 'high' : trigger.priority <= 4 ? 'medium' : 'low',
         prescriber_name: rx.prescriber_name,
