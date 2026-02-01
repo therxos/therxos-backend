@@ -1423,6 +1423,8 @@ router.delete('/triggers/:id', authenticateToken, requireSuperAdmin, async (req,
       return res.status(404).json({ error: 'Trigger not found' });
     }
 
+    console.log(`Deleting trigger "${check.rows[0].display_name}" (${id}) - v2 unlink approach`);
+
     // Unlink actioned opportunities (preserve them, just remove trigger reference)
     const unlinked = await db.query(`
       UPDATE opportunities SET trigger_id = NULL
@@ -2280,6 +2282,7 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
 
     let totalNewOpportunities = 0;
     let totalSkipped = 0;
+    const totalPatientsMatched = new Set();
     const pharmacyResults = [];
 
     for (const pharmacy of pharmacies) {
@@ -2349,6 +2352,7 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
         }
 
         if (!matchedDrug) continue;
+        totalPatientsMatched.add(patientId);
 
         // Check BIN inclusions/exclusions
         const binInclusions = (trigger.bin_inclusions || []).map(b => String(b).trim());
@@ -2487,7 +2491,9 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
       success: true,
       trigger: { id: triggerId, name: trigger.display_name, type: trigger.trigger_type },
       pharmaciesScanned: pharmacies.length,
+      opportunitiesCreated: totalNewOpportunities,
       totalNewOpportunities,
+      patientsMatched: totalPatientsMatched.size,
       totalSkipped,
       results: pharmacyResults
     });
