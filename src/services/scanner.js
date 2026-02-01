@@ -341,6 +341,10 @@ async function scanAdminTriggers(pharmacyId, batchId) {
 
     if (detectionKeywords.length === 0) continue;
 
+    // Check pharmacy_inclusions - if set, skip if this pharmacy isn't in the list
+    const pharmacyInclusions = trigger.pharmacy_inclusions || [];
+    if (pharmacyInclusions.length > 0 && !pharmacyInclusions.includes(pharmacyId)) continue;
+
     // Normalize BIN/group inclusion/exclusion lists
     const binInclusions = (trigger.bin_inclusions || []).map(b => String(b).trim());
     const binExclusions = (trigger.bin_exclusions || []).map(b => String(b).trim());
