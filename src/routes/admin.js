@@ -1740,6 +1740,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           FROM prescriptions
           WHERE ndc = $${ndcParamIndex}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
+          AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         ),
@@ -1788,6 +1789,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
+          AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         ),
@@ -4635,12 +4637,13 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
               drug_name,
               ndc,
               COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
-                / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+                / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as gp_30day,
               COALESCE(quantity_dispensed, 1)
-                / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day
+                / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day
             FROM prescriptions
             WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
               AND insurance_bin IS NOT NULL AND insurance_bin != ''
+              AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
               AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
           ),
           ranked_products AS (
@@ -4676,12 +4679,13 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
                 drug_name,
                 ndc,
                 COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
-                  / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+                  / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as gp_30day,
                 COALESCE(quantity_dispensed, 1)
-                  / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day
+                  / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day
               FROM prescriptions
-              WHERE (${keywordConditions ? `(${keywordConditions})` : 'FALSE'} OR ndc = $${ndcParamIndex})
+              WHERE ndc = $${ndcParamIndex}
                 AND insurance_bin IS NOT NULL AND insurance_bin != ''
+                AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
                 AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
             )
             SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
@@ -4703,12 +4707,13 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
                 drug_name,
                 ndc,
                 COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)
-                  / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as gp_30day,
+                  / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as gp_30day,
                 COALESCE(quantity_dispensed, 1)
-                  / GREATEST(CEIL(COALESCE(days_supply, 30)::numeric / 30.0), 1) as qty_30day
+                  / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day
               FROM prescriptions
               WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
                 AND insurance_bin IS NOT NULL AND insurance_bin != ''
+                AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
                 AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
             )
             SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,

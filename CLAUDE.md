@@ -571,6 +571,8 @@ Statuses from V1 are stored in `v1_status` and `v1_notes` columns. The main `sta
 
 5. **NEVER deploy to production without user approval** - After deploying to staging, STOP and WAIT for the user to test and explicitly approve before deploying to production. The staging step is useless if you immediately push to production without waiting.
 
+6. **ALL values must be normalized to 30-day equivalents** - Pharmacies operate on 30-day and 90-day fills. All GP values, quantities, and margins MUST be normalized to 30-day equivalents. Claims with sub-30-day supply (< 28 days) should be excluded from coverage averages. When days_supply is NULL, estimate from quantity: qty > 60 → 90 days, qty > 34 → 60 days, else → 30 days.
+
 ---
 
 ## INCOMPLETE FEATURES - MUST BE IMPLEMENTED
