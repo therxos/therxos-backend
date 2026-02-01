@@ -1435,6 +1435,18 @@ router.delete('/triggers/:id', authenticateToken, requireSuperAdmin, async (req,
       });
     }
 
+    // Get IDs of unactioned opportunities to delete
+    const unactionedOpps = await db.query(`
+      SELECT opportunity_id FROM opportunities WHERE trigger_id = $1 AND status = 'Not Submitted'
+    `, [id]);
+    const oppIds = unactionedOpps.rows.map(r => r.opportunity_id);
+
+    // Clean up FK references that block opportunity deletion
+    if (oppIds.length > 0) {
+      await db.query('DELETE FROM outreach_queue WHERE opportunity_id = ANY($1::uuid[])', [oppIds]).catch(() => {});
+      await db.query('DELETE FROM fax_log WHERE opportunity_id = ANY($1::uuid[])', [oppIds]).catch(() => {});
+    }
+
     // Delete unactioned opportunities linked to this trigger
     const deletedOpps = await db.query(`
       DELETE FROM opportunities WHERE trigger_id = $1 AND status = 'Not Submitted' RETURNING opportunity_id
