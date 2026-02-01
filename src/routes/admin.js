@@ -1877,10 +1877,22 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
       console.log(`Auto-updated trigger ${trigger.display_name}: default_gp=$${highestGP}, recommended_ndc=${bestEntry.best_ndc || 'unchanged'}`);
 
-      // Backfill opportunities: update annual_margin_gain for "Not Submitted" opportunities
-      // based on new GP values per BIN/GROUP
+      // Backfill opportunities: update GP, annual, qty, and NDC for "Not Submitted" opportunities
       const backfillResult = await db.query(`
         UPDATE opportunities o SET
+          potential_margin_gain = ROUND(
+            COALESCE(
+              (SELECT tbv.gp_value
+               FROM prescriptions rx
+               JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                 AND tbv.insurance_bin = rx.insurance_bin
+                 AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                 AND tbv.is_excluded = false
+               WHERE rx.prescription_id = o.prescription_id
+               LIMIT 1),
+              $2
+            ), 2
+          ),
           annual_margin_gain = ROUND(
             COALESCE(
               (SELECT tbv.gp_value
@@ -1896,6 +1908,28 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
               (SELECT t.annual_fills FROM triggers t WHERE t.trigger_id = o.trigger_id),
               12
             ), 2
+          ),
+          avg_dispensed_qty = COALESCE(
+            (SELECT tbv.avg_qty
+             FROM prescriptions rx
+             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+               AND tbv.insurance_bin = rx.insurance_bin
+               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+               AND tbv.is_excluded = false
+             WHERE rx.prescription_id = o.prescription_id
+             LIMIT 1),
+            o.avg_dispensed_qty
+          ),
+          recommended_ndc = COALESCE(
+            (SELECT tbv.best_ndc
+             FROM prescriptions rx
+             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+               AND tbv.insurance_bin = rx.insurance_bin
+               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+               AND tbv.is_excluded = false
+             WHERE rx.prescription_id = o.prescription_id
+             LIMIT 1),
+            o.recommended_ndc
           ),
           updated_at = NOW()
         WHERE o.trigger_id = $1
@@ -4278,10 +4312,23 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       `, [triggerId, bv.bin, bv.group, bv.gpValue, bv.avgQty, bv.claimCount, bv.coverageStatus, bv.bestDrugName, bv.bestNdc]);
     }
 
-    // Backfill "Not Submitted" opportunities with updated GP values per BIN/GROUP
+    // Backfill "Not Submitted" opportunities with updated GP, qty, and NDC per BIN/GROUP
     if (binValues.length > 0) {
       const backfillResult = await db.query(`
         UPDATE opportunities o SET
+          potential_margin_gain = ROUND(
+            COALESCE(
+              (SELECT tbv.gp_value
+               FROM prescriptions rx
+               JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                 AND tbv.insurance_bin = rx.insurance_bin
+                 AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                 AND tbv.is_excluded = false
+               WHERE rx.prescription_id = o.prescription_id
+               LIMIT 1),
+              $2
+            ), 2
+          ),
           annual_margin_gain = ROUND(
             COALESCE(
               (SELECT tbv.gp_value
@@ -4297,6 +4344,28 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
               (SELECT t.annual_fills FROM triggers t WHERE t.trigger_id = o.trigger_id),
               12
             ), 2
+          ),
+          avg_dispensed_qty = COALESCE(
+            (SELECT tbv.avg_qty
+             FROM prescriptions rx
+             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+               AND tbv.insurance_bin = rx.insurance_bin
+               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+               AND tbv.is_excluded = false
+             WHERE rx.prescription_id = o.prescription_id
+             LIMIT 1),
+            o.avg_dispensed_qty
+          ),
+          recommended_ndc = COALESCE(
+            (SELECT tbv.best_ndc
+             FROM prescriptions rx
+             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+               AND tbv.insurance_bin = rx.insurance_bin
+               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+               AND tbv.is_excluded = false
+             WHERE rx.prescription_id = o.prescription_id
+             LIMIT 1),
+            o.recommended_ndc
           ),
           updated_at = NOW()
         WHERE o.trigger_id = $1
@@ -4801,9 +4870,22 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
           WHERE trigger_id = $3
         `, [highestGP, bestMatch.best_ndc, trigger.trigger_id]);
 
-        // Backfill "Not Submitted" opportunities with updated GP values
+        // Backfill "Not Submitted" opportunities with updated GP values, qty, and NDC
         await db.query(`
           UPDATE opportunities o SET
+            potential_margin_gain = ROUND(
+              COALESCE(
+                (SELECT tbv.gp_value
+                 FROM prescriptions rx
+                 JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                   AND tbv.insurance_bin = rx.insurance_bin
+                   AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                   AND tbv.is_excluded = false
+                 WHERE rx.prescription_id = o.prescription_id
+                 LIMIT 1),
+                $2
+              ), 2
+            ),
             annual_margin_gain = ROUND(
               COALESCE(
                 (SELECT tbv.gp_value
@@ -4819,6 +4901,28 @@ router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmi
                 (SELECT t.annual_fills FROM triggers t WHERE t.trigger_id = o.trigger_id),
                 12
               ), 2
+            ),
+            avg_dispensed_qty = COALESCE(
+              (SELECT tbv.avg_qty
+               FROM prescriptions rx
+               JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                 AND tbv.insurance_bin = rx.insurance_bin
+                 AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                 AND tbv.is_excluded = false
+               WHERE rx.prescription_id = o.prescription_id
+               LIMIT 1),
+              o.avg_dispensed_qty
+            ),
+            recommended_ndc = COALESCE(
+              (SELECT tbv.best_ndc
+               FROM prescriptions rx
+               JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                 AND tbv.insurance_bin = rx.insurance_bin
+                 AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                 AND tbv.is_excluded = false
+               WHERE rx.prescription_id = o.prescription_id
+               LIMIT 1),
+              o.recommended_ndc
             ),
             updated_at = NOW()
           WHERE o.trigger_id = $1
