@@ -276,7 +276,9 @@ async function scanAdminTriggers(pharmacyId, batchId) {
           'insurance_bin', tbv.insurance_bin,
           'insurance_group', tbv.insurance_group,
           'gp_value', tbv.gp_value,
-          'coverage_status', tbv.coverage_status
+          'coverage_status', tbv.coverage_status,
+          'is_excluded', tbv.is_excluded,
+          'best_ndc', tbv.best_ndc
         ))
         FROM trigger_bin_values tbv
         WHERE tbv.trigger_id = t.trigger_id
@@ -417,10 +419,11 @@ async function scanAdminTriggers(pharmacyId, batchId) {
 
       let gpValue = null;
       let skipDueToBin = false;
+      let binMatch = null;
 
       // 1. Check pre-configured bin_values (from coverage scans)
       if (binValues.length > 0) {
-        let binMatch = binValues.find(bv =>
+        binMatch = binValues.find(bv =>
           bv.insurance_bin === rx.insurance_bin &&
           bv.insurance_group === rx.insurance_group
         );
@@ -431,15 +434,13 @@ async function scanAdminTriggers(pharmacyId, batchId) {
           );
         }
         if (binMatch) {
-          if (binMatch.coverage_status === 'excluded') {
+          if (binMatch.is_excluded || binMatch.coverage_status === 'excluded') {
             skipDueToBin = true;
           } else if (binMatch.gp_value) {
             gpValue = binMatch.gp_value;
           }
-        } else {
-          // Coverage data exists but NOT for this patient's BIN - skip
-          skipDueToBin = true;
         }
+        // If BIN not in coverage data, fall through to default GP (don't skip)
       }
 
       if (skipDueToBin) continue;
@@ -483,6 +484,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
         current_ndc: rx.ndc,
         current_drug_name: rx.drug_name,
         recommended_drug_name: trigger.recommended_drug || trigger.display_name,
+        recommended_ndc: binMatch?.best_ndc || trigger.recommended_ndc || null,
         potential_margin_gain: gpValue,
         annual_margin_gain: gpValue * 12,
         clinical_rationale: trigger.clinical_rationale || trigger.action_instructions || `${trigger.display_name} opportunity identified.`,

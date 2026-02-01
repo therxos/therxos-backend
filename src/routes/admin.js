@@ -1417,18 +1417,46 @@ router.delete('/triggers/:id', authenticateToken, requireSuperAdmin, async (req,
   try {
     const { id } = req.params;
 
+    // Check if trigger exists
+    const check = await db.query('SELECT trigger_id, display_name FROM triggers WHERE trigger_id = $1', [id]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    // Check for actioned opportunities (anything beyond 'Not Submitted')
+    const actionedOpps = await db.query(`
+      SELECT COUNT(*) as cnt FROM opportunities
+      WHERE trigger_id = $1 AND status != 'Not Submitted'
+    `, [id]);
+
+    if (parseInt(actionedOpps.rows[0].cnt) > 0) {
+      return res.status(400).json({
+        error: `Cannot delete trigger with ${actionedOpps.rows[0].cnt} actioned opportunities. Remove or reassign them first.`
+      });
+    }
+
+    // Delete unactioned opportunities linked to this trigger
+    const deletedOpps = await db.query(`
+      DELETE FROM opportunities WHERE trigger_id = $1 AND status = 'Not Submitted' RETURNING opportunity_id
+    `, [id]);
+
+    // Nullify any remaining FK references (pending_opportunity_types, etc.)
+    await db.query('UPDATE pending_opportunity_types SET created_trigger_id = NULL WHERE created_trigger_id = $1', [id]).catch(() => {});
+
+    // Now delete the trigger (cascade handles trigger_bin_values and trigger_restrictions)
     const result = await db.query(`
       DELETE FROM triggers WHERE trigger_id = $1 RETURNING trigger_id
     `, [id]);
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Trigger not found' });
-    }
-
-    res.json({ success: true, deletedId: id });
+    res.json({
+      success: true,
+      deletedId: id,
+      triggerName: check.rows[0].display_name,
+      opportunitiesRemoved: deletedOpps.rowCount
+    });
   } catch (error) {
     console.error('Error deleting trigger:', error);
-    res.status(500).json({ error: 'Failed to delete trigger' });
+    res.status(500).json({ error: 'Failed to delete trigger: ' + error.message });
   }
 });
 
@@ -2198,7 +2226,8 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
               'gp_value', tbv.gp_value,
               'is_excluded', tbv.is_excluded,
               'coverage_status', tbv.coverage_status,
-              'avg_reimbursement', tbv.avg_reimbursement
+              'avg_reimbursement', tbv.avg_reimbursement,
+              'best_ndc', tbv.best_ndc
             )
           ) FILTER (WHERE tbv.id IS NOT NULL),
           '[]'
@@ -2377,11 +2406,8 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
             continue;
           }
           gpValue = binConfig.gp_value || binConfig.avg_reimbursement || trigger.default_gp_value;
-        } else if (binValues.length > 0) {
-          // Coverage data EXISTS for this trigger but NOT for this patient's BIN - skip
-          pharmacySkipped++;
-          continue;
         } else {
+          // BIN not in coverage data - fall through to default GP (don't skip)
           // No coverage data at all for this trigger - use default GP if set
           gpValue = trigger.default_gp_value;
         }
@@ -2418,14 +2444,14 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
         await db.query(`
           INSERT INTO opportunities (
             opportunity_id, pharmacy_id, patient_id, opportunity_type,
-            current_drug_name, recommended_drug_name, potential_margin_gain,
+            current_drug_name, recommended_drug_name, recommended_ndc, potential_margin_gain,
             annual_margin_gain, current_margin, prescriber_name,
             status, clinical_priority, clinical_rationale, staff_notes, avg_dispensed_qty,
             trigger_id, prescription_id
-          ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         `, [
           pharmacy.pharmacy_id, patientId, trigger.trigger_type,
-          matchedDrug, trigger.recommended_drug, netGain, annualValue,
+          matchedDrug, trigger.recommended_drug, binConfig?.best_ndc || trigger.recommended_ndc || null, netGain, annualValue,
           currentGP, matchedRx?.prescriber_name || null,
           'Not Submitted', trigger.priority || 'medium', rationale,
           null,
@@ -2779,7 +2805,7 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
       SELECT t.*,
         COALESCE(
           json_agg(
-            json_build_object('bin', tbv.insurance_bin, 'gp_value', tbv.gp_value, 'is_excluded', tbv.is_excluded)
+            json_build_object('bin', tbv.insurance_bin, 'insurance_bin', tbv.insurance_bin, 'insurance_group', tbv.insurance_group, 'gp_value', tbv.gp_value, 'is_excluded', tbv.is_excluded, 'coverage_status', tbv.coverage_status, 'avg_reimbursement', tbv.avg_reimbursement, 'best_ndc', tbv.best_ndc)
           ) FILTER (WHERE tbv.id IS NOT NULL),
           '[]'
         ) as bin_values
@@ -2935,12 +2961,8 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           if (binConfig) {
             if (binConfig.is_excluded || binConfig.coverage_status === 'excluded') continue;
             gpValue = binConfig.gp_value || binConfig.avg_reimbursement || trigger.default_gp_value;
-          } else if (binValues.length > 0) {
-            // Coverage data exists but not for this BIN - skip
-            skippedOpportunities++;
-            continue;
           } else {
-            // No coverage data at all - use default GP if set
+            // BIN not in coverage data - fall through to default GP (don't skip)
             gpValue = trigger.default_gp_value;
           }
 
@@ -2979,17 +3001,18 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
           await db.query(`
             INSERT INTO opportunities (
               opportunity_id, pharmacy_id, patient_id, opportunity_type,
-              current_drug_name, recommended_drug_name, potential_margin_gain,
+              current_drug_name, recommended_drug_name, recommended_ndc, potential_margin_gain,
               annual_margin_gain, current_margin, prescriber_name,
               status, clinical_priority, clinical_rationale, staff_notes, avg_dispensed_qty,
               trigger_id, prescription_id
-            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
           `, [
             pharmacyId,
             patientId,
             trigger.trigger_type,
             matchedDrug,
             trigger.recommended_drug,
+            binConfig?.best_ndc || trigger.recommended_ndc || null,
             netGain,
             annualValue,
             currentGP,
