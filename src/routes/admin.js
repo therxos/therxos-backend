@@ -1419,11 +1419,11 @@ router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperA
               opportunity_id, pharmacy_id, patient_id, opportunity_type, trigger_group,
               current_drug_name, current_ndc, recommended_drug_name, recommended_ndc,
               potential_margin_gain, annual_margin_gain, avg_dispensed_qty,
-              prescriber_name, trigger_id, status, created_at
+              prescriber_name, trigger_id, clinical_rationale, status, created_at
             ) VALUES (
               gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8,
               ROUND($9::numeric, 2), ROUND(($9 * $10)::numeric, 2), $11,
-              $12, $13, 'Not Submitted', NOW()
+              $12, $13, $14, 'Not Submitted', NOW()
             )
           `, [
             pharmacy.pharmacy_id, patient.patient_id,
@@ -1431,7 +1431,8 @@ router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperA
             patient.current_drug, patient.current_ndc,
             trigger.recommended_drug, bestNdc,
             gpValue, annualFills, avgQty,
-            patient.prescriber_name, trigger.trigger_id
+            patient.prescriber_name, trigger.trigger_id,
+            trigger.clinical_rationale || ''
           ]);
 
           triggerCreated++;
