@@ -1297,6 +1297,177 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
   }
 });
 
+// POST /api/admin/triggers/scan-all-opportunities - Scan ALL pharmacies for opportunities across ALL enabled triggers
+// IMPORTANT: Must be defined before /triggers/:id routes to avoid Express matching "scan-all-opportunities" as :id
+router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { daysBack = 90 } = req.body;
+
+    // Get all enabled triggers
+    const triggersResult = await db.query(`
+      SELECT * FROM triggers WHERE is_enabled = true ORDER BY display_name
+    `);
+    const triggers = triggersResult.rows;
+
+    // Get all active pharmacies
+    const pharmaciesResult = await db.query(`
+      SELECT p.pharmacy_id, p.pharmacy_name
+      FROM pharmacies p
+      JOIN clients c ON c.client_id = p.client_id
+      WHERE c.status != 'demo'
+    `);
+    const pharmacies = pharmaciesResult.rows;
+
+    console.log(`=== SCAN ALL OPPORTUNITIES: ${triggers.length} triggers x ${pharmacies.length} pharmacies ===`);
+
+    let totalCreated = 0;
+    let totalSkipped = 0;
+    let totalPatientsMatched = 0;
+    const triggerResults = [];
+
+    for (const trigger of triggers) {
+      const keywords = trigger.detection_keywords || [];
+      if (keywords.length === 0) continue;
+
+      // Determine which pharmacies to scan (respect pharmacy_inclusions)
+      const pharmacyInclusions = trigger.pharmacy_inclusions || [];
+      const targetPharmacies = pharmacyInclusions.length > 0
+        ? pharmacies.filter(p => pharmacyInclusions.includes(p.pharmacy_id))
+        : pharmacies;
+
+      let triggerCreated = 0;
+      let triggerMatched = 0;
+
+      for (const pharmacy of targetPharmacies) {
+        // Build keyword patterns
+        const keywordPatterns = keywords.map(k => `%${k.toLowerCase()}%`);
+
+        // Parse exclusions
+        const binExclusions = (trigger.bin_exclusions || []).map(b => String(b).trim());
+        const groupExclusions = trigger.group_exclusions || [];
+        const excludeKeywords = trigger.exclude_keywords || [];
+
+        let exclusionConditions = '';
+        const exclusionParams = [];
+        let paramOffset = keywordPatterns.length + 2;
+
+        if (binExclusions.length > 0) {
+          exclusionConditions += ` AND pr.insurance_bin NOT IN (${binExclusions.map((_, i) => `$${paramOffset + i}`).join(', ')})`;
+          exclusionParams.push(...binExclusions);
+          paramOffset += binExclusions.length;
+        }
+        if (groupExclusions.length > 0) {
+          exclusionConditions += ` AND (pr.insurance_group IS NULL OR pr.insurance_group NOT IN (${groupExclusions.map((_, i) => `$${paramOffset + i}`).join(', ')}))`;
+          exclusionParams.push(...groupExclusions);
+          paramOffset += groupExclusions.length;
+        }
+
+        // Exclude keywords
+        let excludeCondition = '';
+        if (excludeKeywords.length > 0) {
+          const excConds = excludeKeywords.map(ek => {
+            exclusionParams.push(ek.toUpperCase());
+            return `POSITION($${paramOffset++} IN UPPER(pr.drug_name)) = 0`;
+          });
+          excludeCondition = ` AND (${excConds.join(' AND ')})`;
+        }
+
+        const patientsResult = await db.query(`
+          SELECT DISTINCT ON (p.patient_id)
+            p.patient_id, p.first_name, p.last_name,
+            pr.prescription_id, pr.drug_name as current_drug, pr.ndc as current_ndc,
+            pr.prescriber_name, pr.quantity_dispensed,
+            pr.insurance_bin as bin, pr.insurance_group as group_number
+          FROM patients p
+          JOIN prescriptions pr ON pr.patient_id = p.patient_id
+          WHERE p.pharmacy_id = $1
+            AND pr.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
+            AND (${keywordPatterns.map((_, i) => `LOWER(pr.drug_name) LIKE $${i + 2}`).join(' OR ')})
+            ${exclusionConditions}
+            ${excludeCondition}
+          ORDER BY p.patient_id, pr.dispensed_date DESC
+        `, [pharmacy.pharmacy_id, ...keywordPatterns, ...exclusionParams]);
+
+        for (const patient of patientsResult.rows) {
+          // Check if opportunity already exists
+          const existing = await db.query(`
+            SELECT 1 FROM opportunities
+            WHERE patient_id = $1 AND trigger_id = $2 AND status = 'Not Submitted'
+          `, [patient.patient_id, trigger.trigger_id]);
+
+          if (existing.rows.length > 0) {
+            totalSkipped++;
+            continue;
+          }
+
+          // Look up GP from bin values
+          const binMatch = await db.query(`
+            SELECT gp_value, avg_qty, best_ndc FROM trigger_bin_values
+            WHERE trigger_id = $1 AND insurance_bin = $2
+              AND COALESCE(insurance_group, '') = COALESCE($3, '')
+              AND (is_excluded = false OR is_excluded IS NULL)
+            LIMIT 1
+          `, [trigger.trigger_id, patient.bin, patient.group_number || null]);
+
+          const gpValue = binMatch.rows[0]?.gp_value || trigger.default_gp_value || 0;
+          const avgQty = binMatch.rows[0]?.avg_qty || null;
+          const bestNdc = binMatch.rows[0]?.best_ndc || trigger.recommended_ndc || null;
+          const annualFills = trigger.annual_fills || 12;
+
+          await db.query(`
+            INSERT INTO opportunities (
+              opportunity_id, pharmacy_id, patient_id, opportunity_type, trigger_group,
+              current_drug_name, current_ndc, recommended_drug_name, recommended_ndc,
+              potential_margin_gain, annual_margin_gain, avg_dispensed_qty,
+              prescriber_name, trigger_id, status, created_at
+            ) VALUES (
+              gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8,
+              ROUND($9::numeric, 2), ROUND(($9 * $10)::numeric, 2), $11,
+              $12, $13, 'Not Submitted', NOW()
+            )
+          `, [
+            pharmacy.pharmacy_id, patient.patient_id,
+            trigger.trigger_type || 'therapeutic_interchange', trigger.trigger_group,
+            patient.current_drug, patient.current_ndc,
+            trigger.recommended_drug, bestNdc,
+            gpValue, annualFills, avgQty,
+            patient.prescriber_name, trigger.trigger_id
+          ]);
+
+          triggerCreated++;
+          totalCreated++;
+          triggerMatched++;
+        }
+      }
+
+      triggerResults.push({
+        triggerName: trigger.display_name,
+        pharmaciesScanned: targetPharmacies.length,
+        opportunitiesCreated: triggerCreated,
+        patientsMatched: triggerMatched
+      });
+    }
+
+    totalPatientsMatched = triggerResults.reduce((sum, r) => sum + r.patientsMatched, 0);
+
+    console.log(`=== SCAN COMPLETE: ${totalCreated} opportunities created, ${totalSkipped} duplicates skipped ===`);
+    invalidateCache('trigger-coverage:');
+
+    res.json({
+      success: true,
+      triggersScanned: triggers.length,
+      pharmaciesScanned: pharmacies.length,
+      totalCreated,
+      totalSkipped,
+      totalPatientsMatched,
+      triggerResults
+    });
+  } catch (error) {
+    console.error('Scan all opportunities error:', error);
+    res.status(500).json({ error: 'Failed to scan opportunities: ' + error.message });
+  }
+});
+
 // PUT /api/admin/triggers/:id - Update trigger
 router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
@@ -4819,6 +4990,7 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
     res.status(500).json({ error: 'Failed to scan pharmacy: ' + error.message });
   }
 });
+
 
 // POST /api/admin/triggers/verify-all-coverage - Scan coverage for ALL triggers at once
 // For NDC optimization triggers: finds BEST reimbursing product per BIN/Group
