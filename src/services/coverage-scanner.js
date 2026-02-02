@@ -167,8 +167,10 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       daysFilter = `${DAYS_SUPPLY_EST} >= 28`;
     }
 
-    // Shared filters: exclude claims with qty=0/NULL (garbage data) and require GP > 0
-    const qtyFilter = `AND COALESCE(quantity_dispensed, 0) > 0`;
+    // Shared filters: require valid drug name and GP > 0
+    // Don't require qty > 0 — some PMS exports (e.g. Aracoma/RX30) lack quantity columns
+    // but still have valid GP data. Claims without qty normalize using days_supply estimate.
+    const dataQualityFilter = `AND drug_name IS NOT NULL AND TRIM(drug_name) != ''`;
     const gpPositiveFilter = `AND ${GP_SQL} > 0`;
 
     // Fetch excluded BINs for this trigger so we don't include them in results
@@ -201,7 +203,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             ${excludeCondition}
             AND insurance_bin IS NOT NULL AND insurance_bin != ''
             AND ${daysFilter}
-            ${qtyFilter}
+            ${dataQualityFilter}
             ${gpPositiveFilter}
             ${binExclusionCondition}
             AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
@@ -234,7 +236,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             ${excludeCondition}
             AND insurance_bin IS NOT NULL AND insurance_bin != ''
             AND ${daysFilter}
-            ${qtyFilter}
+            ${dataQualityFilter}
             ${gpPositiveFilter}
             ${binExclusionCondition}
             AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}

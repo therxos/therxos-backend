@@ -2020,7 +2020,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           ${excludeCondition}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           AND ${daysFilterSQL}
-          AND COALESCE(quantity_dispensed, 0) > 0
+          AND drug_name IS NOT NULL AND TRIM(drug_name) != ''
           AND ${GP_SQL_INLINE} > 0
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
@@ -2070,7 +2070,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           ${excludeCondition}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           AND ${daysFilterSQL}
-          AND COALESCE(quantity_dispensed, 0) > 0
+          AND drug_name IS NOT NULL AND TRIM(drug_name) != ''
           AND ${GP_SQL_INLINE} > 0
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
@@ -4705,7 +4705,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           AND (${keywordCondition})
           AND p.insurance_bin IS NOT NULL
           AND ${daysFilter2}
-          AND COALESCE(p.quantity_dispensed, 0) > 0
+          AND p.drug_name IS NOT NULL AND TRIM(p.drug_name) != ''
           AND ${GP_RAW} > 0
           ${binRestriction}
       ),
