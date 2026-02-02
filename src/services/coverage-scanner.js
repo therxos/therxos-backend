@@ -247,13 +247,18 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       verifiedCount++;
     }
 
-    // Auto-update trigger's default_gp_value and recommended_ndc from best coverage
+    // Auto-update trigger's default_gp_value from median coverage GP
     if (matches.rows.length > 0) {
-      const bestMatch = matches.rows.reduce((best, m) =>
-        (parseFloat(m.avg_margin) || 0) > (parseFloat(best.avg_margin) || 0) ? m : best,
-        matches.rows[0]
-      );
-      const highestGP = parseFloat(bestMatch.avg_margin) || 0;
+      // Use median GP across all BIN/Groups (not max) to keep estimates reasonable
+      const gpValues = matches.rows
+        .map(m => parseFloat(m.avg_margin) || 0)
+        .filter(gp => gp > 0)
+        .sort((a, b) => a - b);
+      const medianGP = gpValues.length > 0
+        ? gpValues.length % 2 === 0
+          ? (gpValues[gpValues.length / 2 - 1] + gpValues[gpValues.length / 2]) / 2
+          : gpValues[Math.floor(gpValues.length / 2)]
+        : 0;
 
       // Only update default_gp_value and synced_at — do NOT overwrite recommended_ndc
       // The trigger's recommended_ndc is admin-configured and should not be auto-replaced
@@ -263,7 +268,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
           default_gp_value = $1,
           synced_at = NOW()
         WHERE trigger_id = $2
-      `, [highestGP, trigger.trigger_id]);
+      `, [medianGP, trigger.trigger_id]);
 
       // Backfill "Not Submitted" opportunities with updated GP values, qty, and NDC
       await db.query(`
@@ -322,7 +327,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
           updated_at = NOW()
         WHERE o.trigger_id = $1
           AND o.status = 'Not Submitted'
-      `, [trigger.trigger_id, highestGP]);
+      `, [trigger.trigger_id, medianGP]);
     }
 
     // Collect drug variation stats

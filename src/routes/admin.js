@@ -1937,9 +1937,17 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     console.log(`Verified ${verified.length} BIN/Group combinations for trigger ${trigger.display_name}`);
 
-    // Auto-update trigger's default_gp_value to highest known GP and recommended_ndc from best coverage
+    // Auto-update trigger's default_gp_value to median GP (not max) for reasonable estimates
     if (verified.length > 0) {
-      const highestGP = Math.max(...verified.map(v => parseFloat(v.gp_value) || 0));
+      const gpValues = verified
+        .map(v => parseFloat(v.gp_value) || 0)
+        .filter(gp => gp > 0)
+        .sort((a, b) => a - b);
+      const medianGP = gpValues.length > 0
+        ? gpValues.length % 2 === 0
+          ? (gpValues[gpValues.length / 2 - 1] + gpValues[gpValues.length / 2]) / 2
+          : gpValues[Math.floor(gpValues.length / 2)]
+        : 0;
       const bestEntry = verified.reduce((best, v) => (parseFloat(v.gp_value) || 0) > (parseFloat(best.gp_value) || 0) ? v : best, verified[0]);
 
       await db.query(`
@@ -1948,9 +1956,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           recommended_ndc = COALESCE($2, recommended_ndc),
           synced_at = NOW()
         WHERE trigger_id = $3
-      `, [highestGP, bestEntry.best_ndc, triggerId]);
+      `, [medianGP, bestEntry.best_ndc, triggerId]);
 
-      console.log(`Auto-updated trigger ${trigger.display_name}: default_gp=$${highestGP}, recommended_ndc=${bestEntry.best_ndc || 'unchanged'}`);
+      console.log(`Auto-updated trigger ${trigger.display_name}: default_gp=$${medianGP} (median), recommended_ndc=${bestEntry.best_ndc || 'unchanged'}`);
 
       // Backfill opportunities: update GP, annual, qty, and NDC for "Not Submitted" opportunities
       const backfillResult = await db.query(`
@@ -2009,7 +2017,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           updated_at = NOW()
         WHERE o.trigger_id = $1
           AND o.status = 'Not Submitted'
-      `, [triggerId, highestGP]);
+      `, [triggerId, medianGP]);
 
       console.log(`Backfilled ${backfillResult.rowCount} opportunities with updated GP values`);
     }
@@ -4467,21 +4475,23 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       verifiedAt: new Date().toISOString()
     }));
 
-    // Auto-set recommended_ndc to the best-performing NDC across all BIN/Groups
-    const bestOverall = binValues.length > 0
-      ? binValues.reduce((best, bv) => (bv.gpValue > best.gpValue ? bv : best), binValues[0])
+    // Auto-update trigger: default_gp from median GP (not max) for reasonable estimates
+    const gpValues = binValues
+      .map(bv => bv.gpValue)
+      .filter(gp => gp > 0)
+      .sort((a, b) => a - b);
+    const medianGP = gpValues.length > 0
+      ? gpValues.length % 2 === 0
+        ? (gpValues[gpValues.length / 2 - 1] + gpValues[gpValues.length / 2]) / 2
+        : gpValues[Math.floor(gpValues.length / 2)]
       : null;
-
-    // Auto-update trigger: default_gp from highest GP
-    // Do NOT overwrite recommended_ndc — it's admin-configured and may differ from scan results
-    const highestGP = bestOverall ? bestOverall.gpValue : null;
     await db.query(`
       UPDATE triggers
       SET synced_at = NOW(),
           updated_at = NOW(),
           default_gp_value = COALESCE($2, default_gp_value)
       WHERE trigger_id = $1
-    `, [triggerId, highestGP]);
+    `, [triggerId, medianGP]);
 
     // Clear stale BIN values from previous scans (preserve manually excluded entries)
     await db.query(`
@@ -4557,7 +4567,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           updated_at = NOW()
         WHERE o.trigger_id = $1
           AND o.status = 'Not Submitted'
-      `, [triggerId, highestGP || 0]);
+      `, [triggerId, medianGP || 0]);
       console.log(`Backfilled ${backfillResult.rowCount} opportunities with updated GP values`);
     }
 
