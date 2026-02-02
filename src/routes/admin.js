@@ -4372,12 +4372,9 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
     });
     let keywordCondition = wordConditions.length > 0 ? `(${wordConditions.join(' AND ')})` : 'FALSE';
 
-    // Add NDC match as alternative if set
-    let ndcCondition = '';
-    if (recommendedNdc) {
-      allParams.push(recommendedNdc);
-      ndcCondition = ` OR p.ndc = $${paramIndex++}`;
-    }
+    // Do NOT add OR NDC match - it pulls wrong drug formulations
+    // e.g. recommended_ndc for Diclofenac 2% pump could match oral tablet claims
+    // Keyword matching alone is sufficient and more accurate
 
     // NOTE: exclude_keywords are NOT applied to coverage scans.
     // They are for the opportunity scanner (e.g., exclude patients already on ODT).
@@ -4419,7 +4416,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           ORDER BY effective_date DESC LIMIT 1
         ) n ON true
         WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
-          AND (${keywordCondition}${ndcCondition})
+          AND (${keywordCondition})
           ${excludeCondition}
           AND p.insurance_bin IS NOT NULL
       ),
