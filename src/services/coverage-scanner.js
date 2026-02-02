@@ -27,8 +27,7 @@ const GP_SQL = `COALESCE(
   NULLIF(
     REPLACE(REPLACE(COALESCE(raw_data->>'Price','0'), '$', ''), ',', '')::numeric
     - REPLACE(REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', ''), ',', '')::numeric,
-  0),
-  COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+  0)
 )`;
 
 const DAYS_SUPPLY_EST = `COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)`;

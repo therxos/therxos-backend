@@ -212,16 +212,16 @@ async function findNegativeGPDrugs(thresholds) {
       COUNT(DISTINCT p.pharmacy_id) as pharmacy_count,
       ARRAY_AGG(DISTINCT p.pharmacy_id) as pharmacy_ids,
       ROUND(AVG(
-        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
       )::numeric, 2) as avg_gp,
       ROUND(SUM(
-        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
       )::numeric, 2) as total_loss,
       ROUND(MIN(
-        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
       )::numeric, 2) as worst_gp,
       ROUND(MAX(
-        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
       )::numeric, 2) as best_gp
     FROM prescriptions p
     JOIN pharmacies ph ON ph.pharmacy_id = p.pharmacy_id
@@ -236,10 +236,10 @@ async function findNegativeGPDrugs(thresholds) {
     GROUP BY UPPER(SPLIT_PART(p.drug_name, ' ', 1)), p.drug_name, p.insurance_bin, p.insurance_group
     HAVING COUNT(*) >= $2
       AND AVG(
-        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
       ) <= $3
     ORDER BY SUM(
-      (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+      COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
     ) ASC
     LIMIT 200
   `, [thresholds.lookbackDays, thresholds.minFillsNegative, thresholds.maxAvgGP]);
@@ -257,10 +257,10 @@ async function findPositiveAlternatives(classPattern, bin, group, baseDrugName, 
       COUNT(*) as fill_count,
       COUNT(DISTINCT p.patient_id) as patient_count,
       ROUND(AVG(
-        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
       )::numeric, 2) as avg_gp,
       ROUND(MAX(
-        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
       )::numeric, 2) as max_gp
     FROM prescriptions p
     WHERE p.dispensed_date >= CURRENT_DATE - ($1 || ' days')::INTERVAL
@@ -273,10 +273,10 @@ async function findPositiveAlternatives(classPattern, bin, group, baseDrugName, 
     GROUP BY p.drug_name
     HAVING COUNT(*) >= $6
       AND AVG(
-        (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+        COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
       ) >= $7
     ORDER BY AVG(
-      (COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+      COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric, 0)
     ) DESC
     LIMIT 5
   `, [
@@ -362,9 +362,9 @@ async function enrichWithCoverageData(recommendedDrug, bin, group, loserDrug) {
         ROUND(AVG(COALESCE(patient_pay, 0))::numeric, 2) as avg_patient_pay,
         ROUND(AVG(COALESCE(acquisition_cost, 0))::numeric, 2) as avg_acquisition_cost,
         ROUND(AVG(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0))::numeric, 2) as avg_total_reimbursement,
-        ROUND(AVG(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0))::numeric, 2) as avg_gp,
-        ROUND(MIN(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0))::numeric, 2) as min_gp,
-        ROUND(MAX(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0))::numeric, 2) as max_gp,
+        ROUND(AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0))::numeric, 2) as avg_gp,
+        ROUND(MIN(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0))::numeric, 2) as min_gp,
+        ROUND(MAX(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0))::numeric, 2) as max_gp,
         MAX(dispensed_date) as last_fill_date
       FROM prescriptions
       WHERE LOWER(drug_name) LIKE LOWER($1)
@@ -397,7 +397,7 @@ async function enrichWithCoverageData(recommendedDrug, bin, group, loserDrug) {
         ROUND(AVG(COALESCE(patient_pay, 0))::numeric, 2) as avg_patient_pay,
         ROUND(AVG(COALESCE(acquisition_cost, 0))::numeric, 2) as avg_acquisition_cost,
         ROUND(AVG(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0))::numeric, 2) as avg_total_reimbursement,
-        ROUND(AVG(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0))::numeric, 2) as avg_gp
+        ROUND(AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0))::numeric, 2) as avg_gp
       FROM prescriptions
       WHERE LOWER(drug_name) LIKE LOWER($1)
         AND insurance_bin = $2

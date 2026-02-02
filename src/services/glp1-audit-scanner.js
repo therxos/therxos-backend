@@ -330,7 +330,7 @@ async function createAuditFlag(flag, rx, pharmacyId) {
       rx.quantity_dispensed,
       rx.days_supply,
       rx.daw_code,
-      (parseFloat(rx.patient_pay) || 0) + (parseFloat(rx.insurance_pay) || 0) - (parseFloat(rx.acquisition_cost) || 0),
+      parseFloat(rx.raw_data?.gross_profit || rx.raw_data?.net_profit || rx.raw_data?.['Gross Profit'] || rx.raw_data?.['Net Profit'] || 0),
       flag.violation_message,
       flag.expected_value,
       flag.actual_value,
@@ -370,7 +370,7 @@ export async function runGLP1AuditScan(pharmacyId = null, options = {}) {
         prescription_id, pharmacy_id, patient_id, rx_number,
         drug_name, ndc, quantity_dispensed, days_supply, daw_code,
         dispensed_date, prescriber_name, prescriber_npi,
-        insurance_bin, insurance_group, patient_pay, insurance_pay, acquisition_cost
+        insurance_bin, insurance_group, patient_pay, insurance_pay, acquisition_cost, raw_data
       FROM prescriptions
       WHERE drug_name ~* $1
         ${whereClause}
@@ -486,14 +486,14 @@ export async function getGLP1NegativeMarginByBIN(pharmacyId = null, lookbackDays
     SELECT
       insurance_bin,
       COUNT(*) as claim_count,
-      SUM(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) as total_loss,
-      AVG(COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) as avg_loss,
+      SUM(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as total_loss,
+      AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_loss,
       ARRAY_AGG(DISTINCT drug_name) as drugs
     FROM prescriptions
     WHERE drug_name ~* $${pharmacyId ? 3 : 2}
       ${whereClause}
       AND dispensed_date >= CURRENT_DATE - ($1 || ' days')::INTERVAL
-      AND (COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) < 0
+      AND COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0) < 0
     GROUP BY insurance_bin
     ORDER BY total_loss ASC
   `, [...params, GLP1_PATTERN.source]);

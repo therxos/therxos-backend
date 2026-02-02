@@ -323,7 +323,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
               REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
               - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
             0),
-            COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+            0
           )
         ), 0) as total_gross_profit,
         CASE
@@ -347,7 +347,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
                 REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+              0
             )
           ), 0) / COUNT(*)
           ELSE 0
@@ -395,7 +395,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
               REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
               - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
             0),
-            COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+            COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, (pr.raw_data->>'Gross Profit')::numeric, (pr.raw_data->>'Net Profit')::numeric, 0)
           )
         ), 0) as gross_profit,
         CASE
@@ -419,7 +419,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
                 REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+              COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, (pr.raw_data->>'Gross Profit')::numeric, (pr.raw_data->>'Net Profit')::numeric, 0)
             )
           ), 0) / COUNT(*)
           ELSE 0
@@ -460,7 +460,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
               REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
               - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
             0),
-            COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+            COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, (pr.raw_data->>'Gross Profit')::numeric, (pr.raw_data->>'Net Profit')::numeric, 0)
           )
         ), 0) as gross_profit,
         CASE
@@ -484,7 +484,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
                 REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+              COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, (pr.raw_data->>'Gross Profit')::numeric, (pr.raw_data->>'Net Profit')::numeric, 0)
             )
           ), 0) / COUNT(*)
           ELSE 0
@@ -525,7 +525,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
               REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
               - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
             0),
-            COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+            COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, (pr.raw_data->>'Gross Profit')::numeric, (pr.raw_data->>'Net Profit')::numeric, 0)
           )
         ), 0) as gross_profit,
         CASE
@@ -549,7 +549,7 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
                 REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+              COALESCE((pr.raw_data->>'gross_profit')::numeric, (pr.raw_data->>'net_profit')::numeric, (pr.raw_data->>'Gross Profit')::numeric, (pr.raw_data->>'Net Profit')::numeric, 0)
             )
           ), 0) / COUNT(*)
           ELSE 0
@@ -1248,9 +1248,9 @@ router.get('/glp1/summary', authenticateToken, async (req, res) => {
       SELECT
         COUNT(*) as total_glp1_rx,
         COUNT(DISTINCT patient_id) as glp1_patients,
-        SUM(CASE WHEN (COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) < 0 THEN 1 ELSE 0 END) as negative_margin_count,
-        SUM(CASE WHEN (COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) < 0
-            THEN (COALESCE(patient_pay, 0) + COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) ELSE 0 END) as total_loss
+        SUM(CASE WHEN COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0) < 0 THEN 1 ELSE 0 END) as negative_margin_count,
+        SUM(CASE WHEN COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0) < 0
+            THEN COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0) ELSE 0 END) as total_loss
       FROM prescriptions
       WHERE pharmacy_id = $1
         AND drug_name ~* 'OZEMPIC|WEGOVY|MOUNJARO|ZEPBOUND|TRULICITY|VICTOZA|SAXENDA|RYBELSUS|SEMAGLUTIDE|TIRZEPATIDE|LIRAGLUTIDE|DULAGLUTIDE|EXENATIDE'

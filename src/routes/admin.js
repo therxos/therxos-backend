@@ -1784,7 +1784,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
                 REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+              0
             )
               / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as gp_30day,
             COALESCE(quantity_dispensed, 1)
@@ -1854,7 +1854,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
                 REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+              0
             )
               / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as gp_30day,
             COALESCE(quantity_dispensed, 1)
@@ -2088,7 +2088,7 @@ router.get('/triggers/:id/medicare-data', authenticateToken, requireSuperAdmin, 
                 REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+              0
             )) as avg_gp,
         AVG(COALESCE((raw_data->>'insurance_pay')::numeric, 0)) as avg_insurance_pay,
         MIN(dispensed_date) as first_claim,
@@ -2133,7 +2133,7 @@ router.get('/triggers/:id/medicare-data', authenticateToken, requireSuperAdmin, 
                 REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+              0
             )) as avg_gp,
         AVG(COALESCE((raw_data->>'insurance_pay')::numeric, 0)) as avg_insurance_pay
       FROM prescriptions
@@ -2262,7 +2262,7 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
                 REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+              0
             )) as avg_reimbursement,
           AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
           MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
@@ -2291,7 +2291,7 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
                 REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
                 - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
-              COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+              0
             )) >= $${minMarginIdx}
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
@@ -2497,8 +2497,11 @@ router.post('/triggers/:id/scan', authenticateToken, requireSuperAdmin, async (r
           r.prescription_id, r.patient_id, r.drug_name, r.ndc,
           r.insurance_bin as bin, r.prescriber_name,
           COALESCE(
+            (r.raw_data->>'gross_profit')::numeric,
+            (r.raw_data->>'net_profit')::numeric,
             (r.raw_data->>'Gross Profit')::numeric,
-            COALESCE(r.insurance_pay, 0) + COALESCE(r.patient_pay, 0) - COALESCE(r.acquisition_cost, 0)
+            (r.raw_data->>'Net Profit')::numeric,
+            0
           ) as gross_profit,
           p.primary_insurance_bin
         FROM prescriptions r
@@ -3018,8 +3021,11 @@ router.post('/pharmacies/:id/rescan', authenticateToken, requireSuperAdmin, asyn
         r.dispensed_date, r.insurance_bin as bin, r.insurance_pcn as pcn,
         r.insurance_group as group_number,
         COALESCE(
+          (r.raw_data->>'gross_profit')::numeric,
+          (r.raw_data->>'net_profit')::numeric,
           (r.raw_data->>'Gross Profit')::numeric,
-          COALESCE(r.insurance_pay, 0) + COALESCE(r.patient_pay, 0) - COALESCE(r.acquisition_cost, 0)
+          (r.raw_data->>'Net Profit')::numeric,
+          0
         ) as gross_profit,
         r.daw_code, r.sig, r.prescriber_name,
         p.first_name as patient_first_name, p.last_name as patient_last_name,
@@ -3635,7 +3641,7 @@ router.get('/reimbursement-monitor', authenticateToken, requireSuperAdmin, async
           insurance_bin,
           insurance_group,
           COUNT(*) as rx_count,
-          AVG(COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) as avg_gp,
+          AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_gp,
           AVG(COALESCE(insurance_pay, 0)) as avg_ins_pay,
           MAX(dispensed_date) as last_fill_date
         FROM prescriptions
@@ -3664,7 +3670,7 @@ router.get('/reimbursement-monitor', authenticateToken, requireSuperAdmin, async
       query += `
         GROUP BY insurance_bin, insurance_group
         HAVING COUNT(*) >= 3
-        ORDER BY AVG(COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) DESC
+        ORDER BY AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) DESC
         LIMIT 20
       `;
 
@@ -3732,13 +3738,25 @@ router.post('/pharmacies/:id/scan-reimbursement-changes', authenticateToken, req
           insurance_group,
           COALESCE(insurance_pay, 0) as insurance_pay,
           COALESCE(acquisition_cost, 0) as acquisition_cost,
-          COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0) as gross_profit,
+          COALESCE(
+            (raw_data->>'gross_profit')::numeric,
+            (raw_data->>'net_profit')::numeric,
+            (raw_data->>'Gross Profit')::numeric,
+            (raw_data->>'Net Profit')::numeric,
+            0
+          ) as gross_profit,
           dispensed_date,
           LAG(COALESCE(insurance_pay, 0)) OVER (
             PARTITION BY patient_id, UPPER(TRIM(drug_name))
             ORDER BY dispensed_date
           ) as prev_ins_pay,
-          LAG(COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) OVER (
+          LAG(COALESCE(
+            (raw_data->>'gross_profit')::numeric,
+            (raw_data->>'net_profit')::numeric,
+            (raw_data->>'Gross Profit')::numeric,
+            (raw_data->>'Net Profit')::numeric,
+            0
+          )) OVER (
             PARTITION BY patient_id, UPPER(TRIM(drug_name))
             ORDER BY dispensed_date
           ) as prev_gp,
@@ -3895,7 +3913,7 @@ router.get('/recommended-drug-gp/:bin', authenticateToken, requireSuperAdmin, as
         SELECT
           drug_name,
           COUNT(*) as rx_count,
-          AVG(COALESCE(insurance_pay, 0) - COALESCE(acquisition_cost, 0)) as avg_gp,
+          AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, (raw_data->>'Gross Profit')::numeric, (raw_data->>'Net Profit')::numeric, 0)) as avg_gp,
           AVG(COALESCE(insurance_pay, 0)) as avg_ins_pay,
           MIN(dispensed_date) as first_fill,
           MAX(dispensed_date) as last_fill
@@ -4401,11 +4419,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
             (p.raw_data->>'net_profit')::numeric,
             (p.raw_data->>'Gross Profit')::numeric,
             (p.raw_data->>'Net Profit')::numeric,
-            CASE WHEN p.acquisition_cost IS NOT NULL OR n.nadac_per_unit IS NOT NULL
-              THEN COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0)
-                   - COALESCE(p.acquisition_cost, n.nadac_per_unit * COALESCE(p.quantity_dispensed, 1))
-              ELSE NULL
-            END
+            0
           ) / GREATEST(CEIL(COALESCE(p.days_supply, 30)::numeric / 30.0), 1) as gp,
           p.quantity_dispensed / GREATEST(CEIL(COALESCE(p.days_supply, 30)::numeric / 30.0), 1) as qty,
           p.days_supply
@@ -4677,7 +4691,13 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
         pr.drug_name as current_drug,
         pr.ndc as current_ndc,
         pr.prescriber_name,
-        COALESCE(pr.patient_pay, 0) + COALESCE(pr.insurance_pay, 0) - COALESCE(pr.acquisition_cost, 0) as gross_profit,
+        COALESCE(
+          (pr.raw_data->>'gross_profit')::numeric,
+          (pr.raw_data->>'net_profit')::numeric,
+          (pr.raw_data->>'Gross Profit')::numeric,
+          (pr.raw_data->>'Net Profit')::numeric,
+          0
+        ) as gross_profit,
         pr.quantity_dispensed,
         pr.insurance_bin as bin,
         pr.insurance_group as group_number
@@ -6218,15 +6238,15 @@ router.get('/positive-gp-winners', authenticateToken, requireSuperAdmin, async (
           COUNT(DISTINCT p.pharmacy_id) as pharmacy_count,
           ROUND(AVG(
             COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric,
-              COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+              0)
           )::numeric, 2) as avg_gp,
           ROUND(SUM(
             COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric,
-              COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+              0)
           )::numeric, 2) as total_profit,
           ROUND(MAX(
             COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric,
-              COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+              0)
           )::numeric, 2) as best_gp,
           ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
           ROUND(AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0))::numeric, 2) as avg_reimbursement
@@ -6342,7 +6362,7 @@ router.get('/ndc-optimization', authenticateToken, requireSuperAdmin, async (req
           COUNT(DISTINCT p.patient_id) as patient_count,
           ROUND(AVG(
             COALESCE((p.raw_data->>'gross_profit')::numeric, (p.raw_data->>'net_profit')::numeric, (p.raw_data->>'Gross Profit')::numeric, (p.raw_data->>'Net Profit')::numeric,
-              COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0) - COALESCE(p.acquisition_cost, 0))
+              0)
           )::numeric, 2) as avg_gp,
           ROUND(AVG(COALESCE(p.acquisition_cost, 0))::numeric, 2) as avg_acq_cost,
           ROUND(AVG(COALESCE(p.patient_pay, 0) + COALESCE(p.insurance_pay, 0))::numeric, 2) as avg_reimbursement

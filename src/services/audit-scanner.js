@@ -346,7 +346,7 @@ export async function runFullAuditScan(pharmacyId, options = {}) {
         prescription_id, patient_id, drug_name, ndc,
         quantity_dispensed, days_supply, daw_code, sig,
         dispensed_date, prescriber_name, prescriber_npi,
-        insurance_bin, insurance_group, patient_pay, insurance_pay, acquisition_cost
+        insurance_bin, insurance_group, patient_pay, insurance_pay, acquisition_cost, raw_data
       FROM prescriptions
       WHERE pharmacy_id = $1
         AND dispensed_date >= CURRENT_DATE - ($2 || ' days')::INTERVAL
@@ -375,7 +375,7 @@ export async function runFullAuditScan(pharmacyId, options = {}) {
             days_supply: rx.days_supply,
             daw_code: rx.daw_code,
             dispensed_date: rx.dispensed_date,
-            gross_profit: (parseFloat(rx.patient_pay) || 0) + (parseFloat(rx.insurance_pay) || 0) - (parseFloat(rx.acquisition_cost) || 0),
+            gross_profit: parseFloat(rx.raw_data?.gross_profit || rx.raw_data?.net_profit || rx.raw_data?.['Gross Profit'] || rx.raw_data?.['Net Profit'] || 0),
             ...flag
           });
         }
@@ -567,7 +567,7 @@ export async function runRuleScan(pharmacyId, ruleId, options = {}) {
         prescription_id, patient_id, drug_name, ndc,
         quantity_dispensed, days_supply, daw_code, sig,
         dispensed_date, prescriber_name, prescriber_npi,
-        insurance_bin, insurance_group, patient_pay, insurance_pay, acquisition_cost
+        insurance_bin, insurance_group, patient_pay, insurance_pay, acquisition_cost, raw_data
       FROM prescriptions
       WHERE pharmacy_id = $1
         AND dispensed_date >= CURRENT_DATE - ($2 || ' days')::INTERVAL

@@ -177,8 +177,7 @@ async function buildRecommendedDrugGPCache(pharmacyId, triggers) {
         NULLIF(
           REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
           - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
-        0),
-        COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+        0)
       ) as gp,
       days_supply
     FROM prescriptions
@@ -330,8 +329,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
         NULLIF(
           REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
           - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
-        0),
-        COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+        0)
       ) as profit,
       p.chronic_conditions
     FROM prescriptions pr
