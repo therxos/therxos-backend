@@ -1818,7 +1818,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     // Get trigger info including bin_inclusions
     const triggerResult = await db.query(
-      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name, bin_inclusions, bin_exclusions, group_inclusions, group_exclusions FROM triggers WHERE trigger_id = $1',
+      'SELECT trigger_id, recommended_drug, recommended_ndc, display_name, bin_inclusions, bin_exclusions, group_inclusions, group_exclusions, exclude_keywords, expected_qty, expected_days_supply FROM triggers WHERE trigger_id = $1',
       [triggerId]
     );
 
@@ -1919,25 +1919,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       console.log(`Excluding BINs: ${binExclusions.join(', ')}`);
     }
 
-    if (keywordConditions || trigger.recommended_ndc) {
-      // Keyword-only matching — do NOT use OR ndc to avoid pulling in wrong formulations
-      const minClaimsParamIndex = matchParams.length + 1;
-      matchParams.push(parseInt(minClaims));
-      const daysBackParamIndex = matchParams.length + 1;
-      matchParams.push(parseInt(daysBack));
-      const minMarginParamIndex = matchParams.length + 1;
-      matchParams.push(parseFloat(minMargin));
-
-      const whereClause = keywordConditions ? `(${keywordConditions})` : 'FALSE';
-
-      matchQuery = `
-        WITH raw_claims AS (
-          SELECT
-            insurance_bin as bin,
-            insurance_group as grp,
-            drug_name,
-            ndc,
-            COALESCE(
+    // Build normalization SQL based on trigger's expected_qty/expected_days_supply
+    const DAYS_SUPPLY_EST = `COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)`;
+    const GP_SQL_INLINE = `COALESCE(
               NULLIF(REPLACE(raw_data->>'gross_profit', ',', '')::numeric, 0),
               NULLIF(REPLACE(raw_data->>'Gross Profit', ',', '')::numeric, 0),
               NULLIF(REPLACE(raw_data->>'grossprofit', ',', '')::numeric, 0),
@@ -1957,16 +1941,52 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
                 - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
               0),
               0
-            )
-              / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as gp_30day,
-            COALESCE(quantity_dispensed, 1)
-              / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day,
+            )`;
+
+    let gpNormSQL, qtyNormSQL, daysFilterSQL;
+    if (trigger.expected_qty) {
+      const expectedQty = parseFloat(trigger.expected_qty);
+      gpNormSQL = `${GP_SQL_INLINE} * (${expectedQty} / GREATEST(COALESCE(quantity_dispensed, ${expectedQty})::numeric, 1))`;
+      qtyNormSQL = `${expectedQty}`;
+      const minDays = trigger.expected_days_supply ? Math.floor(trigger.expected_days_supply * 0.8) : 20;
+      daysFilterSQL = `${DAYS_SUPPLY_EST} >= ${minDays}`;
+    } else if (trigger.expected_days_supply) {
+      gpNormSQL = `${GP_SQL_INLINE} * (30.0 / GREATEST(${DAYS_SUPPLY_EST}::numeric, 1))`;
+      qtyNormSQL = `COALESCE(quantity_dispensed, 1) * (30.0 / GREATEST(${DAYS_SUPPLY_EST}::numeric, 1))`;
+      const minDays = Math.floor(trigger.expected_days_supply * 0.8);
+      daysFilterSQL = `${DAYS_SUPPLY_EST} >= ${minDays}`;
+    } else {
+      gpNormSQL = `${GP_SQL_INLINE} / GREATEST(CEIL(${DAYS_SUPPLY_EST}::numeric / 30.0), 1)`;
+      qtyNormSQL = `COALESCE(quantity_dispensed, 1) / GREATEST(CEIL(${DAYS_SUPPLY_EST}::numeric / 30.0), 1)`;
+      daysFilterSQL = `${DAYS_SUPPLY_EST} >= 28`;
+    }
+
+    if (keywordConditions || trigger.recommended_ndc) {
+      // Keyword-only matching — do NOT use OR ndc to avoid pulling in wrong formulations
+      const minClaimsParamIndex = matchParams.length + 1;
+      matchParams.push(parseInt(minClaims));
+      const daysBackParamIndex = matchParams.length + 1;
+      matchParams.push(parseInt(daysBack));
+      const minMarginParamIndex = matchParams.length + 1;
+      matchParams.push(parseFloat(minMargin));
+
+      const whereClause = keywordConditions ? `(${keywordConditions})` : 'FALSE';
+
+      matchQuery = `
+        WITH raw_claims AS (
+          SELECT
+            insurance_bin as bin,
+            insurance_group as grp,
+            drug_name,
+            ndc,
+            ${gpNormSQL} as gp_30day,
+            ${qtyNormSQL} as qty_30day,
             dispensed_date, created_at
           FROM prescriptions
           WHERE ${whereClause}
           ${excludeCondition}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
-          AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
+          AND ${daysFilterSQL}
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         ),
@@ -2007,36 +2027,14 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
             insurance_group as grp,
             drug_name,
             ndc,
-            COALESCE(
-              NULLIF(REPLACE(raw_data->>'gross_profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Gross Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'grossprofit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'GrossProfit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'net_profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Net Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'netprofit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'NetProfit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'adj_profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Adj Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'adjprofit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'AdjProfit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Adjusted Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'adjusted_profit', ',', '')::numeric, 0),
-              NULLIF(
-                REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
-                - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
-              0),
-              0
-            )
-              / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as gp_30day,
-            COALESCE(quantity_dispensed, 1)
-              / GREATEST(CEIL(COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)::numeric / 30.0), 1) as qty_30day,
+            ${gpNormSQL} as gp_30day,
+            ${qtyNormSQL} as qty_30day,
             dispensed_date, created_at
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
           ${excludeCondition}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
-          AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
+          AND ${daysFilterSQL}
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         ),
@@ -4584,9 +4582,36 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
     allParams.push(minMargin);
     const minMarginIdx = paramIndex++;
 
+    // Build normalization SQL based on trigger's expected_qty/expected_days_supply
+    const DAYS_EST = `COALESCE(p.days_supply, CASE WHEN COALESCE(p.quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(p.quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)`;
+    const GP_RAW = `COALESCE(
+            (p.raw_data->>'gross_profit')::numeric,
+            (p.raw_data->>'net_profit')::numeric,
+            (p.raw_data->>'Gross Profit')::numeric,
+            (p.raw_data->>'Net Profit')::numeric,
+            0
+          )`;
+
+    let gpNorm2, qtyNorm2, daysFilter2;
+    if (trigger.expected_qty) {
+      const expectedQty = parseFloat(trigger.expected_qty);
+      gpNorm2 = `${GP_RAW} * (${expectedQty} / GREATEST(COALESCE(p.quantity_dispensed, ${expectedQty})::numeric, 1))`;
+      qtyNorm2 = `${expectedQty}`;
+      const minDays2 = trigger.expected_days_supply ? Math.floor(trigger.expected_days_supply * 0.8) : 20;
+      daysFilter2 = `${DAYS_EST} >= ${minDays2}`;
+    } else if (trigger.expected_days_supply) {
+      gpNorm2 = `${GP_RAW} * (30.0 / GREATEST(${DAYS_EST}::numeric, 1))`;
+      qtyNorm2 = `COALESCE(p.quantity_dispensed, 1) * (30.0 / GREATEST(${DAYS_EST}::numeric, 1))`;
+      const minDays2 = Math.floor(trigger.expected_days_supply * 0.8);
+      daysFilter2 = `${DAYS_EST} >= ${minDays2}`;
+    } else {
+      gpNorm2 = `${GP_RAW} / GREATEST(CEIL(${DAYS_EST}::numeric / 30.0), 1)`;
+      qtyNorm2 = `COALESCE(p.quantity_dispensed, 1) / GREATEST(CEIL(${DAYS_EST}::numeric / 30.0), 1)`;
+      daysFilter2 = `${DAYS_EST} >= 28`;
+    }
+
     // Find BEST reimbursing product per BIN/Group (with drug name + NDC)
-    // GP priority: 1) gross_profit from claims data, 2) raw_data GP, 3) calculated estimate
-    // All GP values normalized to 30-day equivalent (90-day fills divided by 3, etc.)
+    // GP normalized per expected fill unit when expected_qty is set, otherwise per 30 days
     const prescriptionsResult = await db.query(`
       WITH claim_gp AS (
         SELECT
@@ -4594,25 +4619,15 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           p.insurance_group as group_number,
           p.drug_name,
           p.ndc,
-          COALESCE(
-            (p.raw_data->>'gross_profit')::numeric,
-            (p.raw_data->>'net_profit')::numeric,
-            (p.raw_data->>'Gross Profit')::numeric,
-            (p.raw_data->>'Net Profit')::numeric,
-            0
-          ) / GREATEST(CEIL(COALESCE(p.days_supply, 30)::numeric / 30.0), 1) as gp,
-          p.quantity_dispensed / GREATEST(CEIL(COALESCE(p.days_supply, 30)::numeric / 30.0), 1) as qty,
+          ${gpNorm2} as gp,
+          ${qtyNorm2} as qty,
           p.days_supply
         FROM prescriptions p
-        LEFT JOIN LATERAL (
-          SELECT nadac_per_unit FROM nadac_pricing
-          WHERE ndc = p.ndc
-          ORDER BY effective_date DESC LIMIT 1
-        ) n ON true
         WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
           AND (${keywordCondition})
           ${excludeCondition}
           AND p.insurance_bin IS NOT NULL
+          AND ${daysFilter2}
       ),
       ranked_products AS (
         SELECT

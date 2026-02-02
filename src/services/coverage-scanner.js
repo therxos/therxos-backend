@@ -137,16 +137,25 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
     const minMarginParamIndex = matchParams.length + 1;
     matchParams.push(parseFloat(effectiveMinMargin));
 
-    // When expected_days_supply is set, use it for more accurate 30-day normalization
-    // e.g. test strips: 100/25 days → GP * (30/25) gives true 30-day GP
-    // Without it, CEIL(25/30) = 1, so no normalization happens (undercounting)
+    // Normalization strategy:
+    // 1. If expected_qty is set: normalize GP per expected fill unit (e.g. per 112g tube)
+    //    GP * (expected_qty / actual_qty) — most accurate for products with variable fill sizes
+    // 2. If only expected_days_supply is set: normalize via days supply ratio
+    //    GP * (30 / actual_days) — useful for non-standard day supplies
+    // 3. Default: standard 30-day normalization via CEIL (rounds to whole months)
     let gpNorm, qtyNorm, daysFilter;
-    if (trigger.expected_days_supply) {
-      // Accurate normalization: scale raw GP to 30-day equivalent using expected fill cadence
-      // raw_GP * (30 / actual_days) gives the correct 30-day value
+    if (trigger.expected_qty) {
+      // Qty-based normalization: scale GP to per-expected-fill
+      // e.g. Diclofenac cream: expected_qty=112, claim has qty=480 → GP * (112/480)
+      const expectedQty = parseFloat(trigger.expected_qty);
+      gpNorm = `${GP_SQL} * (${expectedQty} / GREATEST(COALESCE(quantity_dispensed, ${expectedQty})::numeric, 1))`;
+      qtyNorm = `${expectedQty}`;
+      const minDays = trigger.expected_days_supply ? Math.floor(trigger.expected_days_supply * 0.8) : 20;
+      daysFilter = `${DAYS_SUPPLY_EST} >= ${minDays}`;
+    } else if (trigger.expected_days_supply) {
+      // Days-based normalization: scale raw GP to 30-day equivalent
       gpNorm = `${GP_SQL} * (30.0 / GREATEST(${DAYS_SUPPLY_EST}::numeric, 1))`;
       qtyNorm = `COALESCE(quantity_dispensed, 1) * (30.0 / GREATEST(${DAYS_SUPPLY_EST}::numeric, 1))`;
-      // Lower the days filter threshold when expected supply is < 28 days
       const minDays = Math.floor(trigger.expected_days_supply * 0.8);
       daysFilter = `${DAYS_SUPPLY_EST} >= ${minDays}`;
     } else {
