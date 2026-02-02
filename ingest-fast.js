@@ -44,6 +44,10 @@ const COLUMN_MAP = {
   'Prescriber Full Name': 'prescriber_name',
   'Prescriber Fax Number': 'prescriber_fax',
 };
+// Case-insensitive lookup version
+const COLUMN_MAP_LOWER = Object.fromEntries(
+  Object.entries(COLUMN_MAP).map(([k, v]) => [k.toLowerCase(), v])
+);
 
 function parseCSVLine(line, delimiter) {
   const result = [];
@@ -78,7 +82,7 @@ function parseCSV(content) {
     const values = parseCSVLine(lines[i], delimiter);
     const row = {};
     headers.forEach((header, index) => {
-      const mappedKey = COLUMN_MAP[header] || header.toLowerCase().replace(/\s+/g, '_');
+      const mappedKey = COLUMN_MAP[header] || COLUMN_MAP_LOWER[header.toLowerCase()] || header.toLowerCase().replace(/\s+/g, '_');
       row[mappedKey] = values[index] || null;
     });
     rows.push(row);

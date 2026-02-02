@@ -569,7 +569,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
     const existing = await db.query(`
       SELECT opportunity_id FROM opportunities
       WHERE pharmacy_id = $1 AND patient_id = $2
-        AND recommended_drug_name = $3
+        AND UPPER(recommended_drug_name) = UPPER($3)
         AND status NOT IN ('Denied', 'Declined')
     `, [pharmacyId, opp.patient_id, opp.recommended_drug_name]);
 

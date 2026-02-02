@@ -94,6 +94,10 @@ const COLUMN_MAP = {
   'PrescriberName': 'prescriber_name',
   'PrescriberID': 'prescriber_npi',
 };
+// Case-insensitive lookup version
+const COLUMN_MAP_LOWER = Object.fromEntries(
+  Object.entries(COLUMN_MAP).map(([k, v]) => [k.toLowerCase(), v])
+);
 
 // Parse CSV (auto-detect delimiter)
 function parseCSV(content) {
@@ -117,7 +121,7 @@ function parseCSV(content) {
     const row = {};
     headers.forEach((header, index) => {
       const cleanHeader = header.trim();
-      const mappedKey = COLUMN_MAP[cleanHeader] || cleanHeader.toLowerCase().replace(/\s+/g, '_');
+      const mappedKey = COLUMN_MAP[cleanHeader] || COLUMN_MAP_LOWER[cleanHeader.toLowerCase()] || cleanHeader.toLowerCase().replace(/\s+/g, '_');
       row[mappedKey] = values[index]?.trim() || null;
     });
     rows.push(row);
