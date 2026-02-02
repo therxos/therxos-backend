@@ -68,10 +68,12 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
     const effectiveMinMargin = isNdcOptimization ? dmeMinMargin : minMargin;
 
     let searchTerms = [];
-    if (isNdcOptimization && trigger.detection_keywords && Array.isArray(trigger.detection_keywords) && trigger.detection_keywords.length > 0) {
-      searchTerms = trigger.detection_keywords;
-    } else if (trigger.recommended_drug) {
+    if (trigger.recommended_drug) {
+      // Primary: use recommended_drug (the drug we're looking for coverage on)
       searchTerms = [trigger.recommended_drug];
+    } else if (trigger.detection_keywords && Array.isArray(trigger.detection_keywords) && trigger.detection_keywords.length > 0) {
+      // Fallback: use detection_keywords if no recommended_drug is set
+      searchTerms = trigger.detection_keywords;
     }
 
     if (searchTerms.length === 0) {
