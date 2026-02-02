@@ -328,6 +328,13 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
         WHERE o.trigger_id = $1
           AND o.status = 'Not Submitted'
       `, [trigger.trigger_id, medianGP]);
+    } else {
+      // No coverage found — auto-disable trigger so admin can identify which need fixing
+      await db.query(`
+        UPDATE triggers SET is_enabled = false, synced_at = NOW()
+        WHERE trigger_id = $1 AND is_enabled = true
+      `, [trigger.trigger_id]);
+      logger.info(`Auto-disabled trigger "${trigger.display_name}" — 0 coverage results`);
     }
 
     // Collect drug variation stats
