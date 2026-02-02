@@ -1317,7 +1317,7 @@ router.post('/triggers/enable-all', authenticateToken, requireSuperAdmin, async 
 // IMPORTANT: Must be defined before /triggers/:id routes to avoid Express matching "scan-all-opportunities" as :id
 router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    const { daysBack = 90 } = req.body;
+    const { daysBack = 90 } = req.body || {};
 
     // Get all enabled triggers
     const triggersResult = await db.query(`
@@ -1830,7 +1830,7 @@ router.get('/bins/:bin/groups', authenticateToken, requireSuperAdmin, async (req
 router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { id: triggerId } = req.params;
-    const { minClaims = 1, daysBack = 365, searchKeywords, minMargin = 10 } = req.body;
+    const { minClaims = 1, daysBack = 365, searchKeywords, minMargin = 10 } = req.body || {};
 
     // Get trigger info including bin_inclusions
     const triggerResult = await db.query(
@@ -2411,7 +2411,7 @@ router.get('/triggers/:id/medicare-data', authenticateToken, requireSuperAdmin, 
 // POST /api/admin/triggers/scan-all - Scan ALL triggers for coverage at once
 router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    const { minClaims = 1, daysBack = 365, minMargin = 0 } = req.body;
+    const { minClaims = 1, daysBack = 365, minMargin = 0 } = req.body || {};
 
     console.log(`=== BULK SCAN ALL TRIGGERS ===`);
     console.log(`minClaims: ${minClaims}, daysBack: ${daysBack}, minMargin: ${minMargin}`);
@@ -4584,7 +4584,7 @@ router.post('/triggers/:triggerId/generate-justification', authenticateToken, re
 router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { triggerId } = req.params;
-    const { minMargin = 10, daysBack = 365 } = req.body;
+    const { minMargin = 10, daysBack = 365 } = req.body || {};
 
     // Get the trigger
     const triggerResult = await db.query(
@@ -4929,7 +4929,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
 router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { triggerId, pharmacyId } = req.params;
-    const { daysBack = 90 } = req.body;
+    const { daysBack = 90 } = req.body || {};
 
     // Get the trigger with exclusions
     const triggerResult = await db.query(
@@ -5123,7 +5123,7 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
 // For other triggers: verifies recommended drug exists with good margin
 router.post('/triggers/verify-all-coverage', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    const { minClaims = 1, daysBack = 365, minMargin = 10, dmeMinMargin = 3 } = req.body;
+    const { minClaims = 1, daysBack = 365, minMargin = 10, dmeMinMargin = 3 } = req.body || {};
 
     const { scanAllTriggerCoverage } = await import('../services/coverage-scanner.js');
     const result = await scanAllTriggerCoverage({ minClaims, daysBack, minMargin, dmeMinMargin });
@@ -5150,7 +5150,7 @@ router.post('/audit-rules/:ruleId/scan-pharmacy/:pharmacyId', authenticateToken,
   return res.json({ success: true, message: 'Audit rules temporarily disabled' });
   try {
     const { ruleId, pharmacyId } = req.params;
-    const { lookbackDays = 90 } = req.body;
+    const { lookbackDays = 90 } = req.body || {};
 
     // Verify rule exists
     const ruleResult = await db.query('SELECT * FROM audit_rules WHERE rule_id = $1', [ruleId]);
