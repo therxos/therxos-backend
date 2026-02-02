@@ -73,12 +73,50 @@ const PMS_COLUMN_MAPPINGS = {
     refills_remaining: ['Refills', 'Refills Remaining', 'RefillsLeft']
   },
   rx30: {
-    // Similar mappings for Rx30
-    rx_number: ['RX_NO', 'Rx No', 'Script Number'],
+    rx_number: ['RX_NO', 'Rx No', 'Script Number', 'RxRefill'],
     ndc: ['NDC_UPC', 'NDC', 'Product'],
-    drug_name: ['DRUG_NAME', 'Drug', 'Med Name'],
-    quantity_dispensed: ['QTY_DISP', 'Quantity', 'Qty'],
-    // ... add more Rx30 specific mappings
+    drug_name: ['DRUG_NAME', 'Drug', 'Med Name', 'Drug Name', 'DrugName'],
+    quantity_dispensed: ['QTY_DISP', 'Quantity', 'Qty', 'Quantity Dispensed'],
+    days_supply: ['DAYS_SUPPLY', 'Days Supply', 'DaysSupply', 'Days'],
+    daw_code: ['DAW', 'DAW Code', 'DEA Class'],
+    prescriber_name: ['Prescriber Name', 'PrescriberName', 'Prescriber'],
+    prescriber_npi: ['Prescriber NPI', 'PrescriberID', 'PrescriberNPI'],
+    patient_full_name: ['Customer Name', 'PatientName', 'Patient Name'],
+    patient_dob: ['Date of Birth', 'PatientBirthdate', 'DOB'],
+    insurance_bin: ['BIN', 'Insurance BIN'],
+    insurance_pcn: ['PCN', 'Insurance PCN'],
+    insurance_group: ['Plan ID', 'GroupNumber', 'Group', 'Group Number', 'Insurance Group'],
+    patient_pay: ['Patient Pay Amount', 'CopayPaid', 'Patient Pay', 'Copay'],
+    insurance_pay: ['Plan Paid Amount - Total', 'ClaimAmountPaid', 'Insurance Pay', 'Ins Pay'],
+    acquisition_cost: ['Actual Cost', 'AdjustedContractCost2', 'Cost', 'Acquisition Cost'],
+    gross_profit: ['Gross Profit', 'AdjProfit3', 'Net Profit', 'Profit'],
+    price: ['Price', 'Revenue', 'Total Paid'],
+    dispensed_date: ['Fill Date', 'TransactionDateKey', 'Dispensed Date', 'Date Filled'],
+    written_date: ['Written Date', 'Date Written'],
+    refill_number: ['Refill Number'],
+    therapeutic_class: ['DrugGroup', 'Drug Class', 'DrugClass', 'FormulationType'],
+    gross_profit_margin: ['AdjGPM', 'GPM', 'Margin']
+  },
+  primerx: {
+    rx_number: ['RXNO', 'Rx Number', 'RxNumber'],
+    ndc: ['NDC'],
+    drug_name: ['DRUGNAME', 'Drug Name', 'DrugName'],
+    quantity_dispensed: ['QUANT', 'Quantity', 'Qty'],
+    days_supply: ['DAYS', 'Days Supply', 'DaysSupply'],
+    daw_code: ['DAW', 'DAW Code'],
+    prescriber_name: ['PRESNAME', 'Prescriber Name'],
+    prescriber_fax: ['PRESFAXNO#', 'PRESFAXNO', 'Prescriber Fax'],
+    patient_full_name: ['PATIENTNAME', 'Patient Name'],
+    patient_dob: ['PATDOB', 'DOB', 'Date of Birth'],
+    insurance_bin: ['PRIINSBINNO', 'BIN', 'Insurance BIN'],
+    insurance_group: ['PRIINSPATGROUP', 'Group', 'Group Number'],
+    insurance_name: ['PRIINS', 'Insurance', 'Plan Name'],
+    insurance_pay: ['TOTALINSPAID', 'Insurance Pay', 'Ins Pay'],
+    acquisition_cost: ['TOTALCOST', 'Cost', 'Acquisition Cost'],
+    therapeutic_class: ['DRUGTHERAPY', 'Therapeutic Class', 'Drug Class'],
+    package_size: ['PACKAGESIZE', 'Package Size'],
+    diag_code: ['DIAGCODE1', 'Diagnosis Code'],
+    dispensed_date: ['DATE FILLED / ORDERED', 'Fill Date', 'Date Filled']
   },
   // Outcomes dispensing report format (from rxinsights_noreply@outcomes.com)
   outcomes: {
@@ -193,14 +231,28 @@ function detectPMSSystem(headers) {
     return 'outcomes';
   }
 
-  // Check for PioneerRx-specific columns
-  if (headerSet.has('rx number') || headerSet.has('rxnumber')) {
-    return 'pioneerrx';
+  // Check for PrimeRx-specific columns
+  // PrimeRx has unique columns like RXNO, PATIENTNAME, PRIINSBINNO, DRUGTHERAPY
+  if (headerSet.has('rxno') || headerSet.has('priinsbinno') ||
+      headerSet.has('priins') || headerSet.has('drugtherapy') ||
+      headerSet.has('presfaxno#') || headerSet.has('priinspatgroup')) {
+    return 'primerx';
   }
 
-  // Check for Rx30-specific columns
-  if (headerSet.has('rx_no') || headerSet.has('script number')) {
+  // Check for Rx30/Aracoma-specific columns
+  // RX30 has QTY_DISP, RX_NO; Aracoma has TransactionDateKey, AdjProfit3, DrugGroup
+  if (headerSet.has('rx_no') || headerSet.has('script number') ||
+      headerSet.has('qty_disp') || headerSet.has('transactiondatekey') ||
+      headerSet.has('adjprofit3') || headerSet.has('rxrefill') ||
+      headerSet.has('druggroup') || headerSet.has('adjustedcontractcost2')) {
     return 'rx30';
+  }
+
+  // Check for PioneerRx-specific columns
+  // Pioneer standard export has "Dispensed Item Name", "Primary Third Party Bin", etc.
+  if (headerSet.has('rx number') || headerSet.has('rxnumber') ||
+      headerSet.has('dispensed item name') || headerSet.has('primary third party bin')) {
+    return 'pioneerrx';
   }
 
   return 'generic';
