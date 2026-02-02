@@ -167,6 +167,30 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       daysFilter = `${DAYS_SUPPLY_EST} >= 28`;
     }
 
+    // Shared filters: exclude claims with qty=0/NULL (garbage data) and require GP > 0
+    const qtyFilter = `AND COALESCE(quantity_dispensed, 0) > 0`;
+    const gpPositiveFilter = `AND ${GP_SQL} > 0`;
+
+    // Fetch excluded BINs for this trigger so we don't include them in results
+    const excludedBinsResult = await db.query(`
+      SELECT insurance_bin, COALESCE(insurance_group, '') as insurance_group
+      FROM trigger_bin_values
+      WHERE trigger_id = $1 AND is_excluded = true
+    `, [trigger.trigger_id]);
+    let binExclusionCondition = '';
+    if (excludedBinsResult.rows.length > 0) {
+      // Sync paramIndex with actual matchParams length (minClaims/daysBack/minMargin were pushed above)
+      paramIndex = matchParams.length + 1;
+      const excludedPairs = excludedBinsResult.rows.map(r => {
+        matchParams.push(r.insurance_bin);
+        const binIdx = paramIndex++;
+        matchParams.push(r.insurance_group);
+        const grpIdx = paramIndex++;
+        return `(insurance_bin = $${binIdx} AND COALESCE(insurance_group, '') = $${grpIdx})`;
+      });
+      binExclusionCondition = `AND NOT (${excludedPairs.join(' OR ')})`;
+    }
+
     if (isNdcOptimization) {
       matchQuery = `
         WITH raw_claims AS (
@@ -177,15 +201,24 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             ${excludeCondition}
             AND insurance_bin IS NOT NULL AND insurance_bin != ''
             AND ${daysFilter}
+            ${qtyFilter}
+            ${gpPositiveFilter}
+            ${binExclusionCondition}
             AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         ),
-        ranked_products AS (
+        per_product AS (
           SELECT bin, grp, drug_name, ndc,
-            COUNT(*) as claim_count, AVG(gp_30day) as avg_margin, AVG(qty_30day) as avg_qty,
-            ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY AVG(gp_30day) DESC) as rank
+            COUNT(*) as claim_count,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) as avg_margin,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty_30day) as avg_qty
           FROM raw_claims
           GROUP BY bin, grp, drug_name, ndc
-          HAVING COUNT(*) >= $${minClaimsParamIndex} AND AVG(gp_30day) >= $${minMarginParamIndex}
+          HAVING COUNT(*) >= $${minClaimsParamIndex}
+            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
+        ),
+        ranked_products AS (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_margin DESC) as rank
+          FROM per_product
         )
         SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc, claim_count, avg_margin, avg_qty
         FROM ranked_products WHERE rank = 1
@@ -201,13 +234,18 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             ${excludeCondition}
             AND insurance_bin IS NOT NULL AND insurance_bin != ''
             AND ${daysFilter}
+            ${qtyFilter}
+            ${gpPositiveFilter}
+            ${binExclusionCondition}
             AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         )
         SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
-          COUNT(*) as claim_count, AVG(gp_30day) as avg_margin, AVG(qty_30day) as avg_qty
+          COUNT(*) as claim_count,
+          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) as avg_margin,
+          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty_30day) as avg_qty
         FROM raw_claims
         GROUP BY bin, grp, drug_name, ndc
-        HAVING COUNT(*) >= $${minClaimsParamIndex} AND AVG(gp_30day) >= $${minMarginParamIndex}
+        HAVING COUNT(*) >= $${minClaimsParamIndex} AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
         ORDER BY avg_margin DESC
       `;
     }
@@ -336,6 +374,17 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
              WHERE rx.prescription_id = o.prescription_id
              LIMIT 1),
             o.recommended_ndc
+          ),
+          recommended_drug = COALESCE(
+            (SELECT tbv.best_drug_name
+             FROM prescriptions rx
+             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+               AND tbv.insurance_bin = rx.insurance_bin
+               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+               AND tbv.is_excluded = false
+             WHERE rx.prescription_id = o.prescription_id
+             LIMIT 1),
+            o.recommended_drug
           ),
           updated_at = NOW()
         WHERE o.trigger_id = $1

@@ -1935,6 +1935,23 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       console.log(`Excluding BINs: ${binExclusions.join(', ')}`);
     }
 
+    // Fetch excluded BIN/GROUP pairs from trigger_bin_values (manually excluded by admin)
+    const excludedBinsResult = await db.query(`
+      SELECT insurance_bin, COALESCE(insurance_group, '') as insurance_group
+      FROM trigger_bin_values
+      WHERE trigger_id = $1 AND is_excluded = true
+    `, [triggerId]);
+    if (excludedBinsResult.rows.length > 0) {
+      const excludedPairs = excludedBinsResult.rows.map(r => {
+        matchParams.push(r.insurance_bin);
+        const binIdx = paramIndex++;
+        matchParams.push(r.insurance_group);
+        const grpIdx = paramIndex++;
+        return `(insurance_bin = $${binIdx} AND COALESCE(insurance_group, '') = $${grpIdx})`;
+      });
+      binRestrictionCondition += ` AND NOT (${excludedPairs.join(' OR ')})`;
+    }
+
     // Build normalization SQL based on trigger's expected_qty/expected_days_supply
     const DAYS_SUPPLY_EST = `COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)`;
     const GP_SQL_INLINE = `COALESCE(
@@ -2003,6 +2020,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           ${excludeCondition}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           AND ${daysFilterSQL}
+          AND COALESCE(quantity_dispensed, 0) > 0
+          AND ${GP_SQL_INLINE} > 0
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         ),
@@ -2010,22 +2029,22 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           SELECT
             bin, grp, drug_name, ndc,
             COUNT(*) as claim_count,
-            AVG(gp_30day) as avg_reimbursement,
-            AVG(qty_30day) as avg_qty,
-            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim,
-            ROW_NUMBER() OVER (
-              PARTITION BY bin, grp
-              ORDER BY AVG(gp_30day) DESC
-            ) as rank
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) as avg_reimbursement,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty_30day) as avg_qty,
+            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
           FROM raw_claims
           GROUP BY bin, grp, drug_name, ndc
           HAVING COUNT(*) >= $${minClaimsParamIndex}
-            AND AVG(gp_30day) >= $${minMarginParamIndex}
+            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
+        ),
+        ranked_products AS (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_reimbursement DESC) as rank
+          FROM per_product
         )
         SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
                SUM(claim_count) OVER (PARTITION BY bin, grp) as claim_count,
                avg_reimbursement, avg_qty, most_recent_claim
-        FROM per_product WHERE rank = 1
+        FROM ranked_products WHERE rank = 1
         ORDER BY avg_reimbursement DESC
       `;
     } else {
@@ -2051,6 +2070,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           ${excludeCondition}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           AND ${daysFilterSQL}
+          AND COALESCE(quantity_dispensed, 0) > 0
+          AND ${GP_SQL_INLINE} > 0
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
         ),
@@ -2058,22 +2079,22 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           SELECT
             bin, grp, drug_name, ndc,
             COUNT(*) as claim_count,
-            AVG(gp_30day) as avg_reimbursement,
-            AVG(qty_30day) as avg_qty,
-            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim,
-            ROW_NUMBER() OVER (
-              PARTITION BY bin, grp
-              ORDER BY AVG(gp_30day) DESC
-            ) as rank
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) as avg_reimbursement,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty_30day) as avg_qty,
+            MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
           FROM raw_claims
           GROUP BY bin, grp, drug_name, ndc
           HAVING COUNT(*) >= $${minClaimsParamIndex}
-            AND AVG(gp_30day) >= $${minMarginParamIndex}
+            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
+        ),
+        ranked_products AS (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_reimbursement DESC) as rank
+          FROM per_product
         )
         SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
                SUM(claim_count) OVER (PARTITION BY bin, grp) as claim_count,
                avg_reimbursement, avg_qty, most_recent_claim
-        FROM per_product WHERE rank = 1
+        FROM ranked_products WHERE rank = 1
         ORDER BY avg_reimbursement DESC
       `;
     }
@@ -2199,6 +2220,17 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
              WHERE rx.prescription_id = o.prescription_id
              LIMIT 1),
             o.recommended_ndc
+          ),
+          recommended_drug = COALESCE(
+            (SELECT tbv.best_drug_name
+             FROM prescriptions rx
+             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+               AND tbv.insurance_bin = rx.insurance_bin
+               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+               AND tbv.is_excluded = false
+             WHERE rx.prescription_id = o.prescription_id
+             LIMIT 1),
+            o.recommended_drug
           ),
           updated_at = NOW()
         WHERE o.trigger_id = $1
@@ -4592,7 +4624,36 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
     // They are for the opportunity scanner (e.g., exclude patients already on ODT).
     // The coverage scan searches for the RECOMMENDED drug, so exclude_keywords would
     // incorrectly filter out the exact drug we're looking for.
-    const excludeCondition = '';
+
+    // Build BIN exclusion conditions from trigger.bin_exclusions AND trigger_bin_values.is_excluded
+    let binRestriction = '';
+    const binExclusions = (trigger.bin_exclusions || []).map(b => String(b).trim()).filter(Boolean);
+    if (binExclusions.length > 0) {
+      allParams.push(binExclusions);
+      binRestriction += ` AND p.insurance_bin != ALL($${paramIndex++})`;
+    }
+    const binInclusions = (trigger.bin_inclusions || []).map(b => String(b).trim()).filter(Boolean);
+    if (binInclusions.length > 0) {
+      allParams.push(binInclusions);
+      binRestriction += ` AND p.insurance_bin = ANY($${paramIndex++})`;
+    }
+
+    // Fetch excluded BIN/GROUP pairs from trigger_bin_values (manually excluded by admin)
+    const excludedBinsResult = await db.query(`
+      SELECT insurance_bin, COALESCE(insurance_group, '') as insurance_group
+      FROM trigger_bin_values
+      WHERE trigger_id = $1 AND is_excluded = true
+    `, [triggerId]);
+    if (excludedBinsResult.rows.length > 0) {
+      const excludedPairs = excludedBinsResult.rows.map(r => {
+        allParams.push(r.insurance_bin);
+        const binIdx = paramIndex++;
+        allParams.push(r.insurance_group);
+        const grpIdx = paramIndex++;
+        return `(p.insurance_bin = $${binIdx} AND COALESCE(p.insurance_group, '') = $${grpIdx})`;
+      });
+      binRestriction += ` AND NOT (${excludedPairs.join(' OR ')})`;
+    }
 
     // minMargin param
     allParams.push(minMargin);
@@ -4628,6 +4689,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
 
     // Find BEST reimbursing product per BIN/Group (with drug name + NDC)
     // GP normalized per expected fill unit when expected_qty is set, otherwise per 30 days
+    // Uses median (PERCENTILE_CONT) instead of AVG to resist outliers
     const prescriptionsResult = await db.query(`
       WITH claim_gp AS (
         SELECT
@@ -4641,23 +4703,25 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
         FROM prescriptions p
         WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
           AND (${keywordCondition})
-          ${excludeCondition}
           AND p.insurance_bin IS NOT NULL
           AND ${daysFilter2}
+          AND COALESCE(p.quantity_dispensed, 0) > 0
+          AND ${GP_RAW} > 0
+          ${binRestriction}
       ),
-      ranked_products AS (
+      per_product AS (
         SELECT
           bin, group_number, drug_name, ndc,
           COUNT(*) as claim_count,
-          AVG(gp) as avg_gp,
-          AVG(qty) as avg_qty,
-          ROW_NUMBER() OVER (
-            PARTITION BY bin, group_number
-            ORDER BY AVG(gp) DESC
-          ) as rank
+          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp) as avg_gp,
+          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty) as avg_qty
         FROM claim_gp
         GROUP BY bin, group_number, drug_name, ndc
-        HAVING AVG(gp) >= $${minMarginIdx}
+        HAVING PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp) >= $${minMarginIdx}
+      ),
+      ranked_products AS (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, group_number ORDER BY avg_gp DESC) as rank
+        FROM per_product
       )
       SELECT bin, group_number, drug_name, ndc, claim_count,
         ROUND(avg_gp::numeric, 2) as avg_gp, ROUND(avg_qty::numeric, 1) as avg_qty
@@ -4766,6 +4830,17 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
              WHERE rx.prescription_id = o.prescription_id
              LIMIT 1),
             o.recommended_ndc
+          ),
+          recommended_drug = COALESCE(
+            (SELECT tbv.best_drug_name
+             FROM prescriptions rx
+             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+               AND tbv.insurance_bin = rx.insurance_bin
+               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+               AND tbv.is_excluded = false
+             WHERE rx.prescription_id = o.prescription_id
+             LIMIT 1),
+            o.recommended_drug
           ),
           updated_at = NOW()
         WHERE o.trigger_id = $1
