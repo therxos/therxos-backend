@@ -209,6 +209,12 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       continue;
     }
 
+    // Clear stale BIN values from previous scans (preserve manually excluded entries)
+    await db.query(`
+      DELETE FROM trigger_bin_values
+      WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL)
+    `, [trigger.trigger_id]);
+
     // Upsert matches into trigger_bin_values
     let verifiedCount = 0;
     for (const match of matches.rows) {

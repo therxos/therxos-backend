@@ -1891,7 +1891,13 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     const matches = await db.query(matchQuery, matchParams);
     console.log(`Found ${matches.rows.length} BIN/Group combinations for "${recommendedDrug}"`);
 
-    // Upsert into trigger_bin_values with verified status and best drug/NDC
+    // Clear stale BIN values from previous scans (preserve manually excluded entries)
+    await db.query(`
+      DELETE FROM trigger_bin_values
+      WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL)
+    `, [triggerId]);
+
+    // Insert into trigger_bin_values with verified status and best drug/NDC
     const verified = [];
     for (const match of matches.rows) {
       const result = await db.query(`
@@ -2289,7 +2295,13 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
       try {
         const matches = await db.query(matchQuery, matchParams);
 
-        // Upsert matches
+        // Clear stale BIN values from previous scans (preserve manually excluded entries)
+        await db.query(`
+          DELETE FROM trigger_bin_values
+          WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL)
+        `, [trigger.trigger_id]);
+
+        // Insert matches
         let verified = 0;
         for (const match of matches.rows) {
           await db.query(`
@@ -4445,16 +4457,22 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       ? binValues.reduce((best, bv) => (bv.gpValue > best.gpValue ? bv : best), binValues[0])
       : null;
 
-    // Auto-update trigger: recommended_ndc from best coverage, default_gp from highest GP
+    // Auto-update trigger: default_gp from highest GP
+    // Do NOT overwrite recommended_ndc — it's admin-configured and may differ from scan results
     const highestGP = bestOverall ? bestOverall.gpValue : null;
     await db.query(`
       UPDATE triggers
       SET synced_at = NOW(),
           updated_at = NOW(),
-          recommended_ndc = COALESCE($2, recommended_ndc),
-          default_gp_value = COALESCE($3, default_gp_value)
+          default_gp_value = COALESCE($2, default_gp_value)
       WHERE trigger_id = $1
-    `, [triggerId, bestOverall?.bestNdc || null, highestGP]);
+    `, [triggerId, highestGP]);
+
+    // Clear stale BIN values from previous scans (preserve manually excluded entries)
+    await db.query(`
+      DELETE FROM trigger_bin_values
+      WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL)
+    `, [triggerId]);
 
     // Store bin values in trigger_bin_values table (with best drug name + NDC)
     for (const bv of binValues) {
