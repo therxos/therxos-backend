@@ -216,12 +216,8 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
 
     if (matches.rows.length === 0) {
       noMatches.push({ triggerId: trigger.trigger_id, triggerName: trigger.display_name, reason: `No claims found with margin >= $${effectiveMinMargin}` });
-      // Auto-disable trigger so admin can identify which ones need fixing
-      await db.query(`
-        UPDATE triggers SET is_enabled = false, synced_at = NOW()
-        WHERE trigger_id = $1 AND is_enabled = true
-      `, [trigger.trigger_id]);
-      logger.info(`Auto-disabled trigger "${trigger.display_name}" — 0 coverage results`);
+      // Just update synced_at so admin can see it was scanned — don't auto-disable
+      await db.query(`UPDATE triggers SET synced_at = NOW() WHERE trigger_id = $1`, [trigger.trigger_id]);
       continue;
     }
 

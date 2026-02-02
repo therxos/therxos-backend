@@ -4760,13 +4760,9 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
 
     console.log(`Found ${binValues.length} BIN/Groups for trigger: ${trigger.display_name}`);
 
-    // Auto-disable trigger if no coverage results found
+    // If no coverage found, just log it — don't auto-disable
     if (binValues.length === 0) {
-      await db.query(`
-        UPDATE triggers SET is_enabled = false, synced_at = NOW()
-        WHERE trigger_id = $1 AND is_enabled = true
-      `, [triggerId]);
-      console.log(`Auto-disabled trigger "${trigger.display_name}" — 0 coverage results`);
+      console.log(`No coverage results for trigger "${trigger.display_name}" — trigger remains enabled`);
     }
 
     // Find all drug name variations matching the search terms
