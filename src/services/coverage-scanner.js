@@ -10,23 +10,23 @@ import db from '../database/index.js';
 import { logger } from '../utils/logger.js';
 
 const GP_SQL = `COALESCE(
-  NULLIF((raw_data->>'gross_profit')::numeric, 0),
-  NULLIF((raw_data->>'Gross Profit')::numeric, 0),
-  NULLIF((raw_data->>'grossprofit')::numeric, 0),
-  NULLIF((raw_data->>'GrossProfit')::numeric, 0),
-  NULLIF((raw_data->>'net_profit')::numeric, 0),
-  NULLIF((raw_data->>'Net Profit')::numeric, 0),
-  NULLIF((raw_data->>'netprofit')::numeric, 0),
-  NULLIF((raw_data->>'NetProfit')::numeric, 0),
-  NULLIF((raw_data->>'adj_profit')::numeric, 0),
-  NULLIF((raw_data->>'Adj Profit')::numeric, 0),
-  NULLIF((raw_data->>'adjprofit')::numeric, 0),
-  NULLIF((raw_data->>'AdjProfit')::numeric, 0),
-  NULLIF((raw_data->>'Adjusted Profit')::numeric, 0),
-  NULLIF((raw_data->>'adjusted_profit')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'gross_profit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'Gross Profit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'grossprofit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'GrossProfit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'net_profit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'Net Profit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'netprofit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'NetProfit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'adj_profit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'Adj Profit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'adjprofit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'AdjProfit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'Adjusted Profit', ',', '')::numeric, 0),
+  NULLIF(REPLACE(raw_data->>'adjusted_profit', ',', '')::numeric, 0),
   NULLIF(
-    REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
-    - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
+    REPLACE(REPLACE(COALESCE(raw_data->>'Price','0'), '$', ''), ',', '')::numeric
+    - REPLACE(REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', ''), ',', '')::numeric,
   0),
   COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
 )`;
