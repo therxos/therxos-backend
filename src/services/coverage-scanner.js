@@ -140,18 +140,19 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
     matchParams.push(parseFloat(effectiveMinMargin));
 
     // Normalization strategy:
-    // 1. If expected_qty is set: normalize GP per expected fill unit (e.g. per 112g tube)
-    //    GP * (expected_qty / actual_qty) — most accurate for products with variable fill sizes
+    // 1. If expected_qty is set: normalize GP per fill by dividing by whole-number fill multiples
+    //    GP / ROUND(actual_qty / expected_qty) — e.g. qty 90 with expected 30 → GP/3
+    //    Only divides by whole numbers (1, 2, 3...) to avoid fractional fill artifacts
     // 2. If only expected_days_supply is set: normalize via days supply ratio
     //    GP * (30 / actual_days) — useful for non-standard day supplies
     // 3. Default: standard 30-day normalization via CEIL (rounds to whole months)
     let gpNorm, qtyNorm, daysFilter;
     if (trigger.expected_qty) {
-      // Qty-based normalization: scale GP to per-expected-fill
-      // e.g. Diclofenac cream: expected_qty=112, claim has qty=480 → GP * (112/480)
+      // Qty-based normalization: divide GP by whole-number fill multiples
+      // e.g. expected_qty=30: qty 90 → 3 fills → GP/3, qty 36 → 1 fill → GP/1
       const expectedQty = parseFloat(trigger.expected_qty);
-      gpNorm = `${GP_SQL} * (${expectedQty} / GREATEST(COALESCE(quantity_dispensed, ${expectedQty})::numeric, 1))`;
-      qtyNorm = `${expectedQty}`;
+      gpNorm = `${GP_SQL} / GREATEST(ROUND(COALESCE(quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
+      qtyNorm = `COALESCE(quantity_dispensed, ${expectedQty})::numeric / GREATEST(ROUND(COALESCE(quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
       const minDays = trigger.expected_days_supply ? Math.floor(trigger.expected_days_supply * 0.8) : 20;
       daysFilter = `${DAYS_SUPPLY_EST} >= ${minDays}`;
     } else if (trigger.expected_days_supply) {
@@ -233,6 +234,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
         ORDER BY avg_margin DESC
       `;
     } else {
+      // Same ranked_products approach as NDC path — pick best product per BIN/GROUP
       matchQuery = `
         WITH raw_claims AS (
           SELECT insurance_bin as bin, insurance_group as grp, drug_name, ndc,
@@ -246,14 +248,22 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             ${gpPositiveFilter}
             ${binExclusionCondition}
             AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+        ),
+        per_product AS (
+          SELECT bin, grp, drug_name, ndc,
+            COUNT(*) as claim_count,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) as avg_margin,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty_30day) as avg_qty
+          FROM raw_claims
+          GROUP BY bin, grp, drug_name, ndc
+          HAVING COUNT(*) >= $${minClaimsParamIndex}
+        ),
+        ranked_products AS (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_margin DESC) as rank
+          FROM per_product
         )
-        SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
-          COUNT(*) as claim_count,
-          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) as avg_margin,
-          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty_30day) as avg_qty
-        FROM raw_claims
-        GROUP BY bin, grp, drug_name, ndc
-        HAVING COUNT(*) >= $${minClaimsParamIndex} AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
+        SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc, claim_count, avg_margin, avg_qty
+        FROM ranked_products WHERE rank = 1
         ORDER BY avg_margin DESC
       `;
     }
@@ -306,18 +316,24 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       verifiedCount++;
     }
 
-    // Auto-update trigger's default_gp_value from median coverage GP
+    // Auto-update trigger's default_gp_value from claim-count-weighted median
     if (matches.rows.length > 0) {
-      // Use median GP across all BIN/Groups (not max) to keep estimates reasonable
-      const gpValues = matches.rows
-        .map(m => parseFloat(m.avg_margin) || 0)
-        .filter(gp => gp > 0)
-        .sort((a, b) => a - b);
-      const medianGP = gpValues.length > 0
-        ? gpValues.length % 2 === 0
-          ? (gpValues[gpValues.length / 2 - 1] + gpValues[gpValues.length / 2]) / 2
-          : gpValues[Math.floor(gpValues.length / 2)]
-        : 0;
+      // Weighted median: BIN/GROUPs with more claims have more influence on the default
+      // This prevents a single outlier BIN with 1 claim from skewing the default
+      const entries = matches.rows
+        .map(m => ({ gp: parseFloat(m.avg_margin) || 0, weight: parseInt(m.claim_count) || 1 }))
+        .filter(e => e.gp > 0)
+        .sort((a, b) => a.gp - b.gp);
+      const totalWeight = entries.reduce((sum, e) => sum + e.weight, 0);
+      let medianGP = 0;
+      if (entries.length > 0) {
+        let cumWeight = 0;
+        for (const entry of entries) {
+          cumWeight += entry.weight;
+          if (cumWeight >= totalWeight / 2) { medianGP = entry.gp; break; }
+        }
+      }
+      console.log(`Default GP for ${trigger.display_name}: weighted median=$${medianGP.toFixed(2)} from ${entries.length} BIN/GROUPs (${totalWeight} total claims)`);
 
       // Only update default_gp_value and synced_at — do NOT overwrite recommended_ndc
       // The trigger's recommended_ndc is admin-configured and should not be auto-replaced

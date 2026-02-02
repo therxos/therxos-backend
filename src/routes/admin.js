@@ -1979,8 +1979,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     let gpNormSQL, qtyNormSQL, daysFilterSQL;
     if (trigger.expected_qty) {
       const expectedQty = parseFloat(trigger.expected_qty);
-      gpNormSQL = `${GP_SQL_INLINE} * (${expectedQty} / GREATEST(COALESCE(quantity_dispensed, ${expectedQty})::numeric, 1))`;
-      qtyNormSQL = `${expectedQty}`;
+      // Divide GP by whole-number fill multiples: qty 90 with expected 30 → GP/3
+      gpNormSQL = `${GP_SQL_INLINE} / GREATEST(ROUND(COALESCE(quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
+      qtyNormSQL = `COALESCE(quantity_dispensed, ${expectedQty})::numeric / GREATEST(ROUND(COALESCE(quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
       const minDays = trigger.expected_days_supply ? Math.floor(trigger.expected_days_supply * 0.8) : 20;
       daysFilterSQL = `${DAYS_SUPPLY_EST} >= ${minDays}`;
     } else if (trigger.expected_days_supply) {
@@ -2144,17 +2145,23 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     console.log(`Verified ${verified.length} BIN/Group combinations for trigger ${trigger.display_name}`);
 
-    // Auto-update trigger's default_gp_value to median GP (not max) for reasonable estimates
+    // Auto-update trigger's default_gp_value to claim-count-weighted median
     if (verified.length > 0) {
-      const gpValues = verified
-        .map(v => parseFloat(v.gp_value) || 0)
-        .filter(gp => gp > 0)
-        .sort((a, b) => a - b);
-      const medianGP = gpValues.length > 0
-        ? gpValues.length % 2 === 0
-          ? (gpValues[gpValues.length / 2 - 1] + gpValues[gpValues.length / 2]) / 2
-          : gpValues[Math.floor(gpValues.length / 2)]
-        : 0;
+      // Weighted median: BIN/GROUPs with more claims have more influence on the default
+      const entries = verified
+        .map(v => ({ gp: parseFloat(v.gp_value) || 0, weight: parseInt(v.verified_claim_count) || 1 }))
+        .filter(e => e.gp > 0)
+        .sort((a, b) => a.gp - b.gp);
+      const totalWeight = entries.reduce((sum, e) => sum + e.weight, 0);
+      let medianGP = 0;
+      if (entries.length > 0) {
+        let cumWeight = 0;
+        for (const entry of entries) {
+          cumWeight += entry.weight;
+          if (cumWeight >= totalWeight / 2) { medianGP = entry.gp; break; }
+        }
+      }
+      console.log(`Default GP for ${trigger.display_name}: weighted median=$${medianGP.toFixed(2)} from ${entries.length} BIN/GROUPs (${totalWeight} total claims)`);
       const bestEntry = verified.reduce((best, v) => (parseFloat(v.gp_value) || 0) > (parseFloat(best.gp_value) || 0) ? v : best, verified[0]);
 
       await db.query(`
@@ -4672,8 +4679,9 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
     let gpNorm2, qtyNorm2, daysFilter2;
     if (trigger.expected_qty) {
       const expectedQty = parseFloat(trigger.expected_qty);
-      gpNorm2 = `${GP_RAW} * (${expectedQty} / GREATEST(COALESCE(p.quantity_dispensed, ${expectedQty})::numeric, 1))`;
-      qtyNorm2 = `${expectedQty}`;
+      // Divide GP by whole-number fill multiples: qty 90 with expected 30 → GP/3
+      gpNorm2 = `${GP_RAW} / GREATEST(ROUND(COALESCE(p.quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
+      qtyNorm2 = `COALESCE(p.quantity_dispensed, ${expectedQty})::numeric / GREATEST(ROUND(COALESCE(p.quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
       const minDays2 = trigger.expected_days_supply ? Math.floor(trigger.expected_days_supply * 0.8) : 20;
       daysFilter2 = `${DAYS_EST} >= ${minDays2}`;
     } else if (trigger.expected_days_supply) {
@@ -4717,7 +4725,6 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty) as avg_qty
         FROM claim_gp
         GROUP BY bin, group_number, drug_name, ndc
-        HAVING PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp) >= $${minMarginIdx}
       ),
       ranked_products AS (
         SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, group_number ORDER BY avg_gp DESC) as rank
@@ -4742,16 +4749,23 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       verifiedAt: new Date().toISOString()
     }));
 
-    // Auto-update trigger: default_gp from median GP (not max) for reasonable estimates
-    const gpValues = binValues
-      .map(bv => bv.gpValue)
-      .filter(gp => gp > 0)
-      .sort((a, b) => a - b);
-    const medianGP = gpValues.length > 0
-      ? gpValues.length % 2 === 0
-        ? (gpValues[gpValues.length / 2 - 1] + gpValues[gpValues.length / 2]) / 2
-        : gpValues[Math.floor(gpValues.length / 2)]
-      : null;
+    // Auto-update trigger: default_gp from claim-count-weighted median
+    // BIN/GROUPs with more claims have more influence on the default
+    // Only entries above minMargin contribute to the default GP (but all entries are shown for verification)
+    const gpEntries = binValues
+      .map(bv => ({ gp: bv.gpValue, weight: bv.claimCount }))
+      .filter(e => e.gp >= minMargin)
+      .sort((a, b) => a.gp - b.gp);
+    const totalClaimWeight = gpEntries.reduce((sum, e) => sum + e.weight, 0);
+    let medianGP = null;
+    if (gpEntries.length > 0) {
+      let cumWeight = 0;
+      for (const entry of gpEntries) {
+        cumWeight += entry.weight;
+        if (cumWeight >= totalClaimWeight / 2) { medianGP = entry.gp; break; }
+      }
+    }
+    console.log(`Default GP for ${trigger.display_name}: weighted median=$${medianGP?.toFixed(2) || 'null'} from ${gpEntries.length} BIN/GROUPs (${totalClaimWeight} total claims)`);
     await db.query(`
       UPDATE triggers
       SET synced_at = NOW(),
@@ -4886,13 +4900,22 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       console.error('Error fetching drug variations:', varError.message);
     }
 
+    // Log entries missing drug names for debugging
+    const missingDrugNames = binValues.filter(bv => !bv.bestDrugName);
+    if (missingDrugNames.length > 0) {
+      console.log(`WARNING: ${missingDrugNames.length} BIN/GROUP entries missing drug name:`, missingDrugNames.map(bv => `${bv.bin}/${bv.group}`).join(', '));
+    }
+
     res.json({
       success: true,
       triggerId,
       triggerName: trigger.display_name,
       binCount: binValues.length,
       prescriptionCount: binValues.reduce((sum, b) => sum + b.claimCount, 0),
-      binValues: binValues.slice(0, 20),
+      defaultGp: medianGP,
+      expectedQty: trigger.expected_qty ? parseFloat(trigger.expected_qty) : null,
+      expectedDaysSupply: trigger.expected_days_supply || null,
+      binValues,
       drugVariations
     });
     invalidateCache('trigger-coverage:');
