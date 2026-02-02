@@ -4558,11 +4558,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
         varParams.push(word);
         return `POSITION($${varParamIdx++} IN UPPER(p.drug_name)) > 0`;
       });
-      let varCondition = varConditions.length > 0 ? `(${varConditions.join(' AND ')})` : 'FALSE';
-      if (recommendedNdc) {
-        varParams.push(recommendedNdc);
-        varCondition = `(${varCondition} OR p.ndc = $${varParamIdx++})`;
-      }
+      const varCondition = varConditions.length > 0 ? `(${varConditions.join(' AND ')})` : 'FALSE';
       const varResult = await db.query(`
         SELECT UPPER(p.drug_name) as drug_name, COUNT(*) as claim_count, COUNT(DISTINCT p.ndc) as ndc_count,
                array_agg(DISTINCT p.ndc) as ndcs
