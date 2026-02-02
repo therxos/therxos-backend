@@ -4662,9 +4662,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       binRestriction += ` AND NOT (${excludedPairs.join(' OR ')})`;
     }
 
-    // minMargin param
-    allParams.push(minMargin);
-    const minMarginIdx = paramIndex++;
+    // minMargin is applied in JS weighted median, not in SQL (so all entries are visible for verification)
 
     // Build normalization SQL based on trigger's expected_qty/expected_days_supply
     const DAYS_EST = `COALESCE(p.days_supply, CASE WHEN COALESCE(p.quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(p.quantity_dispensed,0) > 34 THEN 60 ELSE 30 END)`;
@@ -4727,14 +4725,14 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
         GROUP BY bin, group_number, drug_name, ndc
       ),
       ranked_products AS (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, group_number ORDER BY avg_gp DESC) as rank
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, group_number ORDER BY avg_gp DESC NULLS LAST) as rank
         FROM per_product
       )
       SELECT bin, group_number, drug_name, ndc, claim_count,
         ROUND(avg_gp::numeric, 2) as avg_gp, ROUND(avg_qty::numeric, 1) as avg_qty
       FROM ranked_products
       WHERE rank = 1
-      ORDER BY avg_gp DESC
+      ORDER BY avg_gp DESC NULLS LAST
     `, allParams);
 
     const binValues = prescriptionsResult.rows.map(row => ({
