@@ -51,7 +51,8 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
   logger.info(`Starting bulk coverage verification (minMargin: $${minMargin}, dmeMinMargin: $${dmeMinMargin}, minClaims: ${minClaims}, daysBack: ${daysBack})`);
 
   const triggersResult = await db.query(`
-    SELECT trigger_id, recommended_drug, recommended_ndc, display_name, detection_keywords, trigger_type, pharmacy_inclusions
+    SELECT trigger_id, recommended_drug, recommended_ndc, display_name, detection_keywords, exclude_keywords, trigger_type, pharmacy_inclusions,
+           expected_qty, expected_days_supply
     FROM triggers
     WHERE is_enabled = true
     ORDER BY display_name
@@ -109,6 +110,25 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       continue;
     }
 
+    // Build exclude_keywords conditions
+    let excludeCondition = '';
+    const excludeKeywords = trigger.exclude_keywords || [];
+    if (excludeKeywords.length > 0) {
+      const excludeParts = excludeKeywords.map(kw => {
+        const excludeWords = kw.split(/[\s,.\-\(\)\[\]]+/)
+          .map(w => w.trim().toUpperCase())
+          .filter(w => w.length >= 2);
+        if (excludeWords.length === 0) return null;
+        return '(' + excludeWords.map(word => {
+          matchParams.push(word);
+          return `POSITION($${paramIndex++} IN UPPER(drug_name)) > 0`;
+        }).join(' AND ') + ')';
+      }).filter(Boolean);
+      if (excludeParts.length > 0) {
+        excludeCondition = `AND NOT (${excludeParts.join(' OR ')})`;
+      }
+    }
+
     // Build query
     let matchQuery;
     const minClaimsParamIndex = matchParams.length + 1;
@@ -129,6 +149,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             ${gpNorm} as gp_30day, ${qtyNorm} as qty_30day
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
+            ${excludeCondition}
             AND insurance_bin IS NOT NULL AND insurance_bin != ''
             AND ${daysFilter}
             AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
@@ -152,6 +173,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             ${gpNorm} as gp_30day, ${qtyNorm} as qty_30day
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
+            ${excludeCondition}
             AND insurance_bin IS NOT NULL AND insurance_bin != ''
             AND ${daysFilter}
             AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}

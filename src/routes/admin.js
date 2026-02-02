@@ -1692,7 +1692,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       if (words.length > 0) {
         const groupConditions = words.map(word => {
           matchParams.push(word);
-          return `UPPER(drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+          return `POSITION($${paramIndex++} IN UPPER(drug_name)) > 0`;
         });
         searchGroups.push(`(${groupConditions.join(' AND ')})`);
       }
@@ -1702,9 +1702,24 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
 
     const keywordConditions = searchGroups.length > 0 ? searchGroups.join(' OR ') : null;
 
-    // Calculate margin as: (insurance_pay + patient_pay) - acquisition_cost
-    // matchParams already contains the keyword params from the loop above
-    // minMargin defaults to 10 but can be set to 0 for DME items like monitors
+    // Build exclude_keywords conditions
+    let excludeCondition = '';
+    const excludeKeywords = trigger.exclude_keywords || [];
+    if (excludeKeywords.length > 0) {
+      const excludeParts = excludeKeywords.map(kw => {
+        const exWords = kw.split(/[\s,.\-\(\)\[\]]+/)
+          .map(w => w.trim().toUpperCase())
+          .filter(w => w.length >= 2);
+        if (exWords.length === 0) return null;
+        return '(' + exWords.map(word => {
+          matchParams.push(word);
+          return `POSITION($${paramIndex++} IN UPPER(drug_name)) > 0`;
+        }).join(' AND ') + ')';
+      }).filter(Boolean);
+      if (excludeParts.length > 0) {
+        excludeCondition = `AND NOT (${excludeParts.join(' OR ')})`;
+      }
+    }
 
     // Build BIN inclusion/exclusion conditions
     let binRestrictionCondition = '';
@@ -1721,9 +1736,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       console.log(`Excluding BINs: ${binExclusions.join(', ')}`);
     }
 
-    if (trigger.recommended_ndc) {
-      const ndcParamIndex = matchParams.length + 1;
-      matchParams.push(trigger.recommended_ndc);
+    if (keywordConditions || trigger.recommended_ndc) {
+      // Keyword-only matching — do NOT use OR ndc to avoid pulling in wrong formulations
       const minClaimsParamIndex = matchParams.length + 1;
       matchParams.push(parseInt(minClaims));
       const daysBackParamIndex = matchParams.length + 1;
@@ -1731,11 +1745,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       const minMarginParamIndex = matchParams.length + 1;
       matchParams.push(parseFloat(minMargin));
 
-      // Use keywords OR NDC to find all matching claims (finds best NDCs across all variants)
-      // Falls back to NDC-only if no keyword conditions exist
-      const whereClause = keywordConditions
-        ? `((${keywordConditions}) OR ndc = $${ndcParamIndex})`
-        : `ndc = $${ndcParamIndex}`;
+      const whereClause = keywordConditions ? `(${keywordConditions})` : 'FALSE';
 
       matchQuery = `
         WITH raw_claims AS (
@@ -1771,6 +1781,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
             dispensed_date, created_at
           FROM prescriptions
           WHERE ${whereClause}
+          ${excludeCondition}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
           ${binRestrictionCondition}
@@ -1840,6 +1851,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
             dispensed_date, created_at
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
+          ${excludeCondition}
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           AND COALESCE(days_supply, CASE WHEN COALESCE(quantity_dispensed,0) > 60 THEN 90 WHEN COALESCE(quantity_dispensed,0) > 34 THEN 60 ELSE 30 END) >= 28
           ${binRestrictionCondition}
@@ -2030,7 +2042,7 @@ router.get('/triggers/:id/medicare-data', authenticateToken, requireSuperAdmin, 
     }
 
     // Build search conditions
-    const conditions = words.map((w, i) => `UPPER(drug_name) LIKE '%' || $${i + 1} || '%'`);
+    const conditions = words.map((w, i) => `POSITION($${i + 1} IN UPPER(drug_name)) > 0`);
     let params = [...words];
 
     // Find Medicare claims (BINs starting with 610 are typically Medicare Part D)
@@ -2193,17 +2205,14 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
       let paramIndex = 1;
       const conditions = words.map(word => {
         matchParams.push(word);
-        return `UPPER(drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+        return `POSITION($${paramIndex++} IN UPPER(drug_name)) > 0`;
       });
 
       const keywordCondition = conditions.length > 0 ? `(${conditions.join(' AND ')})` : 'FALSE';
 
-      // Add NDC condition if present
+      // Do NOT add OR ndc condition — keyword matching only
+      // The recommended_ndc can point to the wrong formulation (e.g., oral tablet vs cream)
       let ndcCondition = '';
-      if (trigger.recommended_ndc) {
-        matchParams.push(trigger.recommended_ndc);
-        ndcCondition = ` OR ndc = $${paramIndex++}`;
-      }
 
       matchParams.push(parseInt(minClaims));
       const minClaimsIdx = paramIndex++;
@@ -3625,7 +3634,7 @@ router.get('/reimbursement-monitor', authenticateToken, requireSuperAdmin, async
       // Match by keywords
       const keywordConditions = keywords.map(kw => {
         params.push(kw);
-        return `UPPER(drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+        return `POSITION($${paramIndex++} IN UPPER(drug_name)) > 0`;
       }).join(' OR ');
       query += ` AND (${keywordConditions})`;
 
@@ -3880,7 +3889,7 @@ router.get('/recommended-drug-gp/:bin', authenticateToken, requireSuperAdmin, as
 
       const keywordConditions = keywords.map(kw => {
         params.push(kw);
-        return `UPPER(drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+        return `POSITION($${paramIndex++} IN UPPER(drug_name)) > 0`;
       }).join(' OR ');
       query += ` AND (${keywordConditions})`;
       query += ` GROUP BY drug_name ORDER BY COUNT(*) DESC LIMIT 5`;
@@ -4336,7 +4345,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
     let paramIndex = 1;
     const wordConditions = words.map(word => {
       allParams.push(word);
-      return `UPPER(p.drug_name) LIKE '%' || $${paramIndex++} || '%'`;
+      return `POSITION($${paramIndex++} IN UPPER(p.drug_name)) > 0`;
     });
     let keywordCondition = wordConditions.length > 0 ? `(${wordConditions.join(' AND ')})` : 'FALSE';
 
@@ -4521,7 +4530,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       let varParamIdx = 1;
       const varConditions = words.map(word => {
         varParams.push(word);
-        return `UPPER(p.drug_name) LIKE '%' || $${varParamIdx++} || '%'`;
+        return `POSITION($${varParamIdx++} IN UPPER(p.drug_name)) > 0`;
       });
       let varCondition = varConditions.length > 0 ? `(${varConditions.join(' AND ')})` : 'FALSE';
       if (recommendedNdc) {
