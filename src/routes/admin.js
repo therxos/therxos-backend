@@ -1286,6 +1286,7 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
       }
     }
 
+    invalidateCache('trigger-coverage:');
     res.json({ trigger: result.rows[0], triggerId });
   } catch (error) {
     console.error('Error creating trigger:', error);
@@ -1422,6 +1423,7 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
       console.log(`Backfilled ${backfillResult.rowCount} opportunities after trigger update (annual_fills: ${updatedTrigger.annual_fills}, default_gp: ${updatedTrigger.default_gp_value})`);
     }
 
+    invalidateCache('trigger-coverage:');
     res.json({ trigger: updatedTrigger });
   } catch (error) {
     console.error('Error updating trigger:', error);
@@ -1476,6 +1478,7 @@ router.delete('/triggers/:id', authenticateToken, requireSuperAdmin, async (req,
       DELETE FROM triggers WHERE trigger_id = $1 RETURNING trigger_id
     `, [id]);
 
+    invalidateCache('trigger-coverage:');
     res.json({
       success: true,
       deletedId: id,
@@ -1504,6 +1507,7 @@ router.post('/triggers/:id/toggle', authenticateToken, requireSuperAdmin, async 
       return res.status(404).json({ error: 'Trigger not found' });
     }
 
+    invalidateCache('trigger-coverage:');
     res.json({ triggerId: id, isEnabled: result.rows[0].is_enabled });
   } catch (error) {
     console.error('Error toggling trigger:', error);
@@ -4591,6 +4595,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       binValues: binValues.slice(0, 20),
       drugVariations
     });
+    invalidateCache('trigger-coverage:');
   } catch (error) {
     console.error('Scan trigger coverage error:', error);
     res.status(500).json({ error: 'Failed to scan coverage: ' + error.message });
