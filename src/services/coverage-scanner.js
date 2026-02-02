@@ -214,6 +214,12 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
 
     if (matches.rows.length === 0) {
       noMatches.push({ triggerId: trigger.trigger_id, triggerName: trigger.display_name, reason: `No claims found with margin >= $${effectiveMinMargin}` });
+      // Auto-disable trigger so admin can identify which ones need fixing
+      await db.query(`
+        UPDATE triggers SET is_enabled = false, synced_at = NOW()
+        WHERE trigger_id = $1 AND is_enabled = true
+      `, [trigger.trigger_id]);
+      logger.info(`Auto-disabled trigger "${trigger.display_name}" — 0 coverage results`);
       continue;
     }
 
@@ -337,13 +343,6 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
         WHERE o.trigger_id = $1
           AND o.status = 'Not Submitted'
       `, [trigger.trigger_id, medianGP]);
-    } else {
-      // No coverage found — auto-disable trigger so admin can identify which need fixing
-      await db.query(`
-        UPDATE triggers SET is_enabled = false, synced_at = NOW()
-        WHERE trigger_id = $1 AND is_enabled = true
-      `, [trigger.trigger_id]);
-      logger.info(`Auto-disabled trigger "${trigger.display_name}" — 0 coverage results`);
     }
 
     // Collect drug variation stats
