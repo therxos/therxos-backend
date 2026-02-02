@@ -138,9 +138,24 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
     const minMarginParamIndex = matchParams.length + 1;
     matchParams.push(parseFloat(effectiveMinMargin));
 
-    const gpNorm = `${GP_SQL} / GREATEST(CEIL(${DAYS_SUPPLY_EST}::numeric / 30.0), 1)`;
-    const qtyNorm = `COALESCE(quantity_dispensed, 1) / GREATEST(CEIL(${DAYS_SUPPLY_EST}::numeric / 30.0), 1)`;
-    const daysFilter = `${DAYS_SUPPLY_EST} >= 28`;
+    // When expected_days_supply is set, use it for more accurate 30-day normalization
+    // e.g. test strips: 100/25 days → GP * (30/25) gives true 30-day GP
+    // Without it, CEIL(25/30) = 1, so no normalization happens (undercounting)
+    let gpNorm, qtyNorm, daysFilter;
+    if (trigger.expected_days_supply) {
+      // Accurate normalization: scale raw GP to 30-day equivalent using expected fill cadence
+      // raw_GP * (30 / actual_days) gives the correct 30-day value
+      gpNorm = `${GP_SQL} * (30.0 / GREATEST(${DAYS_SUPPLY_EST}::numeric, 1))`;
+      qtyNorm = `COALESCE(quantity_dispensed, 1) * (30.0 / GREATEST(${DAYS_SUPPLY_EST}::numeric, 1))`;
+      // Lower the days filter threshold when expected supply is < 28 days
+      const minDays = Math.floor(trigger.expected_days_supply * 0.8);
+      daysFilter = `${DAYS_SUPPLY_EST} >= ${minDays}`;
+    } else {
+      // Default: standard 30-day normalization via CEIL (rounds to whole months)
+      gpNorm = `${GP_SQL} / GREATEST(CEIL(${DAYS_SUPPLY_EST}::numeric / 30.0), 1)`;
+      qtyNorm = `COALESCE(quantity_dispensed, 1) / GREATEST(CEIL(${DAYS_SUPPLY_EST}::numeric / 30.0), 1)`;
+      daysFilter = `${DAYS_SUPPLY_EST} >= 28`;
+    }
 
     if (isNdcOptimization) {
       matchQuery = `

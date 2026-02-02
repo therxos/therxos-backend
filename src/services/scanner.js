@@ -508,9 +508,13 @@ async function scanAdminTriggers(pharmacyId, batchId) {
       if (!gpValue || gpValue <= 0) continue;
 
       // Normalize GP to 30-day equivalent
-      // Coverage scan is supposed to normalize, but fails when days_supply is NULL on claims
-      // If avg_qty > 34 from bin_values, the data wasn't normalized — fix it here
-      if (binMatch?.avg_qty && binMatch.avg_qty > 34) {
+      // When expected_days_supply is set on the trigger, coverage scanner already
+      // normalized accurately using (30 / actual_days) — don't re-normalize
+      if (trigger.expected_days_supply) {
+        // Coverage scanner already handled normalization correctly
+        // For non-coverage paths (default GP), assume it's already per-30-day
+      } else if (binMatch?.avg_qty && binMatch.avg_qty > 34) {
+        // Coverage scan may not have normalized — fix here
         const months = Math.ceil(binMatch.avg_qty / 30);
         gpValue = gpValue / months;
       } else if (!binMatch && daysSupply > 34) {

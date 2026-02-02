@@ -1222,6 +1222,8 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
     const contractPrefixExclusions = body.contractPrefixExclusions || body.contract_prefix_exclusions;
     const keywordMatchMode = body.keywordMatchMode || body.keyword_match_mode || 'any';
     const pharmacyInclusions = body.pharmacyInclusions || body.pharmacy_inclusions || [];
+    const expectedQty = body.expectedQty || body.expected_qty || null;
+    const expectedDaysSupply = body.expectedDaysSupply || body.expected_days_supply || null;
 
     // Auto-generate clinical justification for therapeutic interchanges if not provided
     if (!clinicalRationale && triggerType === 'therapeutic_interchange' && recommendedDrug) {
@@ -1249,8 +1251,8 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
         recommended_drug, recommended_ndc, action_instructions, clinical_rationale,
         priority, annual_fills, default_gp_value, is_enabled, bin_inclusions,
         bin_exclusions, group_inclusions, group_exclusions, contract_prefix_exclusions,
-        keyword_match_mode, pharmacy_inclusions
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+        keyword_match_mode, pharmacy_inclusions, expected_qty, expected_days_supply
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       RETURNING *
     `, [
       triggerCode, displayName, triggerType, category,
@@ -1258,7 +1260,8 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
       recommendedDrug, recommendedNdc, actionInstructions, clinicalRationale,
       priority, annualFills, defaultGpValue, isEnabled, binInclusions || null,
       binExclusions || null, groupInclusions || null, groupExclusions || null,
-      contractPrefixExclusions || null, keywordMatchMode, pharmacyInclusions.length > 0 ? pharmacyInclusions : null
+      contractPrefixExclusions || null, keywordMatchMode, pharmacyInclusions.length > 0 ? pharmacyInclusions : null,
+      expectedQty, expectedDaysSupply
     ]);
 
     const triggerId = result.rows[0].trigger_id;
@@ -1324,6 +1327,8 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
     const contractPrefixExclusions = body.contractPrefixExclusions || body.contract_prefix_exclusions;
     const keywordMatchMode = body.keywordMatchMode || body.keyword_match_mode;
     const pharmacyInclusions = body.pharmacyInclusions || body.pharmacy_inclusions;
+    const expectedQty = body.expectedQty !== undefined ? body.expectedQty : body.expected_qty;
+    const expectedDaysSupply = body.expectedDaysSupply !== undefined ? body.expectedDaysSupply : body.expected_days_supply;
 
     // Update trigger
     const result = await db.query(`
@@ -1351,6 +1356,8 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
         contract_prefix_exclusions = $21,
         keyword_match_mode = COALESCE($22, keyword_match_mode),
         pharmacy_inclusions = COALESCE($24, pharmacy_inclusions),
+        expected_qty = $25,
+        expected_days_supply = $26,
         updated_at = NOW()
       WHERE trigger_id = $23
       RETURNING *
@@ -1361,7 +1368,7 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
       priority, annualFills, defaultGpValue, isEnabled, binInclusions || null,
       binExclusions || null, groupInclusions || null, groupExclusions || null,
       contractPrefixExclusions || null, keywordMatchMode, id,
-      pharmacyInclusions || null
+      pharmacyInclusions || null, expectedQty || null, expectedDaysSupply || null
     ]);
 
     if (result.rows.length === 0) {

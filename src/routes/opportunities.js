@@ -69,7 +69,9 @@ router.get('/', authenticateToken, async (req, res) => {
         END as coverage_confidence,
         COALESCE(tbv.verified_claim_count, tbv_bin.verified_claim_count, 0) as verified_claim_count,
         COALESCE(tbv.avg_reimbursement, tbv_bin.avg_reimbursement) as avg_reimbursement,
-        t.category as trigger_category
+        t.category as trigger_category,
+        t.expected_qty,
+        t.expected_days_supply
       FROM opportunities o
       LEFT JOIN patients p ON p.patient_id = o.patient_id
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
