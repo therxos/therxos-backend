@@ -1139,7 +1139,7 @@ router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) =
     res.json(data);
   } catch (error) {
     console.error('Error fetching triggers:', error);
-    res.status(500).json({ error: 'Failed to fetch triggers' });
+    res.status(500).json({ error: 'Failed to fetch triggers', detail: error.message });
   }
 });
 
@@ -1292,7 +1292,7 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
     if (error.code === '23505') {
       return res.status(400).json({ error: 'Trigger code already exists' });
     }
-    res.status(500).json({ error: 'Failed to create trigger' });
+    res.status(500).json({ error: 'Failed to create trigger', detail: error.message });
   }
 });
 
@@ -1425,7 +1425,7 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
     res.json({ trigger: updatedTrigger });
   } catch (error) {
     console.error('Error updating trigger:', error);
-    res.status(500).json({ error: 'Failed to update trigger' });
+    res.status(500).json({ error: 'Failed to update trigger', detail: error.message });
   }
 });
 
