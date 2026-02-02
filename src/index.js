@@ -614,6 +614,36 @@ cron.schedule('0 3 * * *', async () => {
   timezone: 'America/New_York'
 });
 
+// Schedule nightly trigger coverage scanner (2 AM daily)
+// Scans all triggers to find best-reimbursing products per BIN/Group,
+// updates trigger_bin_values, and backfills opportunity margins
+cron.schedule('0 2 * * *', async () => {
+  logger.info('Starting nightly trigger coverage scan');
+  try {
+    const { scanAllTriggerCoverage } = await import('./services/coverage-scanner.js');
+    const result = await scanAllTriggerCoverage({
+      minClaims: 1,
+      daysBack: 365,
+      minMargin: 10,
+      dmeMinMargin: 3
+    });
+
+    // Invalidate trigger coverage cache so fresh data is served
+    const { invalidate } = await import('./utils/cache.js');
+    invalidate('trigger-coverage:');
+
+    logger.info('Nightly trigger coverage scan completed', {
+      triggersWithMatches: result.summary.triggersWithMatches,
+      triggersWithNoMatches: result.summary.triggersWithNoMatches,
+      duration: result.summary.duration
+    });
+  } catch (error) {
+    logger.error('Nightly trigger coverage scan failed', { error: error.message, stack: error.stack });
+  }
+}, {
+  timezone: 'America/New_York'
+});
+
 // Schedule coverage intelligence scan (8 AM daily - after nightly scan)
 cron.schedule('0 8 * * *', async () => {
   logger.info('Starting scheduled coverage intelligence scan');

@@ -58,9 +58,18 @@ Do NOT automatically push to production after staging. The user needs time to te
 - [ ] Prescriber response tracking
 - [ ] Patient communication log
 
+### Opportunity Table - Confidence Tag Details
+- [ ] **Verified** tag: show the date of the paid claim used for the GP value
+- [ ] **Likely** tag: show the BIN and GROUP the claim went through
+- [ ] **Unknown** tag: show "No known sold claims for this BIN"
+
 ### Triggers & Scanning
 - [x] Negative GP opportunity discovery scanner (2026-01-29)
 - [x] Auto-rescan on new data upload (built into onboarding upload + auto-upload tool)
+- [ ] Finish developing audit rules system (temporarily disabled - all endpoints return empty, code preserved)
+- [ ] Add expected_qty and expected_days_supply fields to triggers for accurate GP normalization (e.g., diabetic supplies = 100/25 days, diclofenac cream = 112)
+- [ ] Coverage scanner: exclude aberrant/audit-flagged NDCs from best-product ranking
+- [ ] Coverage scanner: auto-cleanup stale BIN values when trigger detection keywords change
 
 ### Admin Tools
 - [ ] Bulk client email (send updates to all active clients)
@@ -107,6 +116,11 @@ Do NOT automatically push to production after staging. The user needs time to te
 - [x] Email service with attachments (2026-01-17)
 - [x] CMS Medicare formulary integration (2026-01-18)
 - [x] Coverage scanner fixes (2026-01-18)
+- [x] GP calculation fix: all queries now extract from raw_data JSONB (14 field variations) with Price-Cost and column fallback (2026-02-02)
+- [x] Nightly coverage scanner cron (2 AM ET): auto-scans all triggers, updates BIN values, backfills opportunity margins (2026-02-02)
+- [x] 24-hour cache on trigger list endpoint to reduce load (2026-02-02)
+- [x] Audit rules temporarily disabled on client and admin dashboards (2026-02-02)
+- [x] Extracted verify-all-coverage into reusable service (src/services/coverage-scanner.js) (2026-02-02)
 
 ---
 

@@ -76,7 +76,27 @@ async function runCoverageScan() {
         insurance_bin as bin,
         insurance_group as "group",
         COUNT(*) as claim_count,
-        AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) as avg_reimbursement,
+        AVG(COALESCE(
+            NULLIF((raw_data->>'gross_profit')::numeric, 0),
+            NULLIF((raw_data->>'Gross Profit')::numeric, 0),
+            NULLIF((raw_data->>'grossprofit')::numeric, 0),
+            NULLIF((raw_data->>'GrossProfit')::numeric, 0),
+            NULLIF((raw_data->>'net_profit')::numeric, 0),
+            NULLIF((raw_data->>'Net Profit')::numeric, 0),
+            NULLIF((raw_data->>'netprofit')::numeric, 0),
+            NULLIF((raw_data->>'NetProfit')::numeric, 0),
+            NULLIF((raw_data->>'adj_profit')::numeric, 0),
+            NULLIF((raw_data->>'Adj Profit')::numeric, 0),
+            NULLIF((raw_data->>'adjprofit')::numeric, 0),
+            NULLIF((raw_data->>'AdjProfit')::numeric, 0),
+            NULLIF((raw_data->>'Adjusted Profit')::numeric, 0),
+            NULLIF((raw_data->>'adjusted_profit')::numeric, 0),
+            NULLIF(
+              REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
+              - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
+            0),
+            COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+          )) as avg_reimbursement,
         AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
         MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
       FROM prescriptions
@@ -85,7 +105,27 @@ async function runCoverageScan() {
       AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackIdx}
       GROUP BY insurance_bin, insurance_group
       HAVING COUNT(*) >= $${minClaimsIdx}
-        AND AVG(COALESCE((raw_data->>'gross_profit')::numeric, (raw_data->>'net_profit')::numeric, 0)) >= $${minMarginIdx}
+        AND AVG(COALESCE(
+            NULLIF((raw_data->>'gross_profit')::numeric, 0),
+            NULLIF((raw_data->>'Gross Profit')::numeric, 0),
+            NULLIF((raw_data->>'grossprofit')::numeric, 0),
+            NULLIF((raw_data->>'GrossProfit')::numeric, 0),
+            NULLIF((raw_data->>'net_profit')::numeric, 0),
+            NULLIF((raw_data->>'Net Profit')::numeric, 0),
+            NULLIF((raw_data->>'netprofit')::numeric, 0),
+            NULLIF((raw_data->>'NetProfit')::numeric, 0),
+            NULLIF((raw_data->>'adj_profit')::numeric, 0),
+            NULLIF((raw_data->>'Adj Profit')::numeric, 0),
+            NULLIF((raw_data->>'adjprofit')::numeric, 0),
+            NULLIF((raw_data->>'AdjProfit')::numeric, 0),
+            NULLIF((raw_data->>'Adjusted Profit')::numeric, 0),
+            NULLIF((raw_data->>'adjusted_profit')::numeric, 0),
+            NULLIF(
+              REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
+              - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
+            0),
+            COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+          )) >= $${minMarginIdx}
       ORDER BY avg_reimbursement DESC, claim_count DESC
     `;
 

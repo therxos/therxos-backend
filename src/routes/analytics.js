@@ -303,10 +303,54 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
     const pharmacyWide = await db.query(`
       SELECT
         COUNT(*) as total_rx_count,
-        COALESCE(SUM(insurance_pay + patient_pay), 0) as total_gross_profit,
-        CASE 
-          WHEN COUNT(*) > 0 THEN COALESCE(SUM(insurance_pay + patient_pay), 0) / COUNT(*)
-          ELSE 0 
+        COALESCE(SUM(
+          COALESCE(
+            NULLIF((raw_data->>'gross_profit')::numeric, 0),
+            NULLIF((raw_data->>'Gross Profit')::numeric, 0),
+            NULLIF((raw_data->>'grossprofit')::numeric, 0),
+            NULLIF((raw_data->>'GrossProfit')::numeric, 0),
+            NULLIF((raw_data->>'net_profit')::numeric, 0),
+            NULLIF((raw_data->>'Net Profit')::numeric, 0),
+            NULLIF((raw_data->>'netprofit')::numeric, 0),
+            NULLIF((raw_data->>'NetProfit')::numeric, 0),
+            NULLIF((raw_data->>'adj_profit')::numeric, 0),
+            NULLIF((raw_data->>'Adj Profit')::numeric, 0),
+            NULLIF((raw_data->>'adjprofit')::numeric, 0),
+            NULLIF((raw_data->>'AdjProfit')::numeric, 0),
+            NULLIF((raw_data->>'Adjusted Profit')::numeric, 0),
+            NULLIF((raw_data->>'adjusted_profit')::numeric, 0),
+            NULLIF(
+              REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
+              - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
+            0),
+            COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+          )
+        ), 0) as total_gross_profit,
+        CASE
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(
+            COALESCE(
+              NULLIF((raw_data->>'gross_profit')::numeric, 0),
+              NULLIF((raw_data->>'Gross Profit')::numeric, 0),
+              NULLIF((raw_data->>'grossprofit')::numeric, 0),
+              NULLIF((raw_data->>'GrossProfit')::numeric, 0),
+              NULLIF((raw_data->>'net_profit')::numeric, 0),
+              NULLIF((raw_data->>'Net Profit')::numeric, 0),
+              NULLIF((raw_data->>'netprofit')::numeric, 0),
+              NULLIF((raw_data->>'NetProfit')::numeric, 0),
+              NULLIF((raw_data->>'adj_profit')::numeric, 0),
+              NULLIF((raw_data->>'Adj Profit')::numeric, 0),
+              NULLIF((raw_data->>'adjprofit')::numeric, 0),
+              NULLIF((raw_data->>'AdjProfit')::numeric, 0),
+              NULLIF((raw_data->>'Adjusted Profit')::numeric, 0),
+              NULLIF((raw_data->>'adjusted_profit')::numeric, 0),
+              NULLIF(
+                REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
+                - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
+              0),
+              COALESCE(insurance_pay,0) + COALESCE(patient_pay,0) - COALESCE(acquisition_cost,0)
+            )
+          ), 0) / COUNT(*)
+          ELSE 0
         END as gp_per_rx
       FROM prescriptions
       WHERE pharmacy_id = $1
@@ -331,10 +375,54 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
       SELECT
         COALESCE(pr.insurance_bin, 'Unknown') as bin,
         COUNT(*) as rx_count,
-        COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) as gross_profit,
-        CASE 
-          WHEN COUNT(*) > 0 THEN COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) / COUNT(*)
-          ELSE 0 
+        COALESCE(SUM(
+          COALESCE(
+            NULLIF((pr.raw_data->>'gross_profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Gross Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'grossprofit')::numeric, 0),
+            NULLIF((pr.raw_data->>'GrossProfit')::numeric, 0),
+            NULLIF((pr.raw_data->>'net_profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Net Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'netprofit')::numeric, 0),
+            NULLIF((pr.raw_data->>'NetProfit')::numeric, 0),
+            NULLIF((pr.raw_data->>'adj_profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Adj Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'adjprofit')::numeric, 0),
+            NULLIF((pr.raw_data->>'AdjProfit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Adjusted Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'adjusted_profit')::numeric, 0),
+            NULLIF(
+              REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
+              - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
+            0),
+            COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+          )
+        ), 0) as gross_profit,
+        CASE
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(
+            COALESCE(
+              NULLIF((pr.raw_data->>'gross_profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Gross Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'grossprofit')::numeric, 0),
+              NULLIF((pr.raw_data->>'GrossProfit')::numeric, 0),
+              NULLIF((pr.raw_data->>'net_profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Net Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'netprofit')::numeric, 0),
+              NULLIF((pr.raw_data->>'NetProfit')::numeric, 0),
+              NULLIF((pr.raw_data->>'adj_profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Adj Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'adjprofit')::numeric, 0),
+              NULLIF((pr.raw_data->>'AdjProfit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Adjusted Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'adjusted_profit')::numeric, 0),
+              NULLIF(
+                REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
+                - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
+              0),
+              COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+            )
+          ), 0) / COUNT(*)
+          ELSE 0
         END as gp_per_rx,
         COUNT(DISTINCT o.opportunity_id) as opportunity_count,
         COALESCE(SUM(DISTINCT o.annual_margin_gain), 0) as opportunity_value
@@ -352,10 +440,54 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
         COALESCE(pr.insurance_bin, 'Unknown') as bin,
         COALESCE(pr.insurance_group, 'Unknown') as "group",
         COUNT(*) as rx_count,
-        COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) as gross_profit,
-        CASE 
-          WHEN COUNT(*) > 0 THEN COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) / COUNT(*)
-          ELSE 0 
+        COALESCE(SUM(
+          COALESCE(
+            NULLIF((pr.raw_data->>'gross_profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Gross Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'grossprofit')::numeric, 0),
+            NULLIF((pr.raw_data->>'GrossProfit')::numeric, 0),
+            NULLIF((pr.raw_data->>'net_profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Net Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'netprofit')::numeric, 0),
+            NULLIF((pr.raw_data->>'NetProfit')::numeric, 0),
+            NULLIF((pr.raw_data->>'adj_profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Adj Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'adjprofit')::numeric, 0),
+            NULLIF((pr.raw_data->>'AdjProfit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Adjusted Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'adjusted_profit')::numeric, 0),
+            NULLIF(
+              REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
+              - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
+            0),
+            COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+          )
+        ), 0) as gross_profit,
+        CASE
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(
+            COALESCE(
+              NULLIF((pr.raw_data->>'gross_profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Gross Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'grossprofit')::numeric, 0),
+              NULLIF((pr.raw_data->>'GrossProfit')::numeric, 0),
+              NULLIF((pr.raw_data->>'net_profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Net Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'netprofit')::numeric, 0),
+              NULLIF((pr.raw_data->>'NetProfit')::numeric, 0),
+              NULLIF((pr.raw_data->>'adj_profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Adj Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'adjprofit')::numeric, 0),
+              NULLIF((pr.raw_data->>'AdjProfit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Adjusted Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'adjusted_profit')::numeric, 0),
+              NULLIF(
+                REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
+                - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
+              0),
+              COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+            )
+          ), 0) / COUNT(*)
+          ELSE 0
         END as gp_per_rx,
         COUNT(DISTINCT o.opportunity_id) as opportunity_count,
         COALESCE(SUM(DISTINCT o.annual_margin_gain), 0) as opportunity_value
@@ -373,10 +505,54 @@ router.get('/gp-metrics', authenticateToken, async (req, res) => {
       SELECT
         COALESCE(pr.prescriber_name, 'Unknown') as prescriber_name,
         COUNT(*) as rx_count,
-        COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) as gross_profit,
-        CASE 
-          WHEN COUNT(*) > 0 THEN COALESCE(SUM(pr.insurance_pay + pr.patient_pay), 0) / COUNT(*)
-          ELSE 0 
+        COALESCE(SUM(
+          COALESCE(
+            NULLIF((pr.raw_data->>'gross_profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Gross Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'grossprofit')::numeric, 0),
+            NULLIF((pr.raw_data->>'GrossProfit')::numeric, 0),
+            NULLIF((pr.raw_data->>'net_profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Net Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'netprofit')::numeric, 0),
+            NULLIF((pr.raw_data->>'NetProfit')::numeric, 0),
+            NULLIF((pr.raw_data->>'adj_profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Adj Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'adjprofit')::numeric, 0),
+            NULLIF((pr.raw_data->>'AdjProfit')::numeric, 0),
+            NULLIF((pr.raw_data->>'Adjusted Profit')::numeric, 0),
+            NULLIF((pr.raw_data->>'adjusted_profit')::numeric, 0),
+            NULLIF(
+              REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
+              - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
+            0),
+            COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+          )
+        ), 0) as gross_profit,
+        CASE
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(
+            COALESCE(
+              NULLIF((pr.raw_data->>'gross_profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Gross Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'grossprofit')::numeric, 0),
+              NULLIF((pr.raw_data->>'GrossProfit')::numeric, 0),
+              NULLIF((pr.raw_data->>'net_profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Net Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'netprofit')::numeric, 0),
+              NULLIF((pr.raw_data->>'NetProfit')::numeric, 0),
+              NULLIF((pr.raw_data->>'adj_profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Adj Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'adjprofit')::numeric, 0),
+              NULLIF((pr.raw_data->>'AdjProfit')::numeric, 0),
+              NULLIF((pr.raw_data->>'Adjusted Profit')::numeric, 0),
+              NULLIF((pr.raw_data->>'adjusted_profit')::numeric, 0),
+              NULLIF(
+                REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
+                - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
+              0),
+              COALESCE(pr.insurance_pay,0) + COALESCE(pr.patient_pay,0) - COALESCE(pr.acquisition_cost,0)
+            )
+          ), 0) / COUNT(*)
+          ELSE 0
         END as gp_per_rx,
         COUNT(DISTINCT o.opportunity_id) as opportunity_count,
         COALESCE(SUM(DISTINCT o.annual_margin_gain), 0) as opportunity_value
@@ -716,6 +892,8 @@ router.get('/monthly/export', authenticateToken, async (req, res) => {
 
 // Audit flags for pharmacy
 router.get('/audit-flags', authenticateToken, async (req, res) => {
+  // TEMPORARILY DISABLED - audit rules not yet fully developed (see TODO.md)
+  return res.json({ flags: [], total: 0, message: 'Audit rules temporarily disabled' });
   try {
     const { status, severity, limit = 100, offset = 0 } = req.query;
 
@@ -1025,6 +1203,8 @@ router.get('/recommended-drug-stats', authenticateToken, async (req, res) => {
 
 // Update audit flag status
 router.put('/audit-flags/:flagId', authenticateToken, async (req, res) => {
+  // TEMPORARILY DISABLED - audit rules not yet fully developed (see TODO.md)
+  return res.json({ success: true, message: 'Audit rules temporarily disabled' });
   try {
     const { flagId } = req.params;
     const { status, resolution_notes } = req.body;
@@ -1057,6 +1237,8 @@ router.put('/audit-flags/:flagId', authenticateToken, async (req, res) => {
 
 // GET /api/analytics/glp1/summary - GLP-1 audit summary
 router.get('/glp1/summary', authenticateToken, async (req, res) => {
+  // TEMPORARILY DISABLED - audit rules not yet fully developed (see TODO.md)
+  return res.json({ totalRx: 0, uniquePatients: 0, totalCost: 0, avgCost: 0, auditFlags: { open: 0, resolved: 0, byType: {} }, negativeMargin: { count: 0, totalLoss: 0 } });
   try {
     const pharmacyId = req.user.pharmacyId;
     const { days = 30 } = req.query;
@@ -1106,6 +1288,8 @@ router.get('/glp1/summary', authenticateToken, async (req, res) => {
 
 // GET /api/analytics/glp1/audit-flags - GLP-1 specific audit flags
 router.get('/glp1/audit-flags', authenticateToken, async (req, res) => {
+  // TEMPORARILY DISABLED - audit rules not yet fully developed (see TODO.md)
+  return res.json({ flags: [], total: 0, message: 'Audit rules temporarily disabled' });
   try {
     const pharmacyId = req.user.pharmacyId;
     const { status = 'open', severity, limit = 100, offset = 0 } = req.query;
@@ -1177,6 +1361,8 @@ router.get('/glp1/audit-flags', authenticateToken, async (req, res) => {
 
 // POST /api/analytics/glp1/scan - Run GLP-1 audit scan
 router.post('/glp1/scan', authenticateToken, async (req, res) => {
+  // TEMPORARILY DISABLED - audit rules not yet fully developed (see TODO.md)
+  return res.json({ success: true, message: 'Audit rules temporarily disabled', results: {} });
   try {
     const pharmacyId = req.user.pharmacyId;
     const { lookbackDays = 30, createFlags = true } = req.body;
