@@ -1297,6 +1297,22 @@ router.post('/triggers', authenticateToken, requireSuperAdmin, async (req, res) 
   }
 });
 
+// POST /api/admin/triggers/enable-all - Re-enable all disabled triggers
+router.post('/triggers/enable-all', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await db.query(`
+      UPDATE triggers SET is_enabled = true, updated_at = NOW()
+      WHERE is_enabled = false
+      RETURNING trigger_id, display_name
+    `);
+    invalidateCache('trigger-coverage:');
+    res.json({ enabled: result.rowCount, triggers: result.rows.map(r => r.display_name) });
+  } catch (error) {
+    console.error('Error enabling all triggers:', error);
+    res.status(500).json({ error: 'Failed to enable triggers' });
+  }
+});
+
 // POST /api/admin/triggers/scan-all-opportunities - Scan ALL pharmacies for opportunities across ALL enabled triggers
 // IMPORTANT: Must be defined before /triggers/:id routes to avoid Express matching "scan-all-opportunities" as :id
 router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperAdmin, async (req, res) => {
