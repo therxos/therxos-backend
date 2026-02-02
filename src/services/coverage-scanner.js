@@ -193,11 +193,17 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       binExclusionCondition = `AND NOT (${excludedPairs.join(' OR ')})`;
     }
 
+    // Claims with qty=0 count toward coverage presence (claim_count) but
+    // their GP/qty are NULLed out so they don't skew the median estimates.
+    // PERCENTILE_CONT ignores NULLs automatically.
+    const gpCol = `CASE WHEN COALESCE(quantity_dispensed, 0) > 0 THEN ${gpNorm} ELSE NULL END`;
+    const qtyCol = `CASE WHEN COALESCE(quantity_dispensed, 0) > 0 THEN ${qtyNorm} ELSE NULL END`;
+
     if (isNdcOptimization) {
       matchQuery = `
         WITH raw_claims AS (
           SELECT insurance_bin as bin, insurance_group as grp, drug_name, ndc,
-            ${gpNorm} as gp_30day, ${qtyNorm} as qty_30day
+            ${gpCol} as gp_30day, ${qtyCol} as qty_30day
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
             ${excludeCondition}
@@ -230,7 +236,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       matchQuery = `
         WITH raw_claims AS (
           SELECT insurance_bin as bin, insurance_group as grp, drug_name, ndc,
-            ${gpNorm} as gp_30day, ${qtyNorm} as qty_30day
+            ${gpCol} as gp_30day, ${qtyCol} as qty_30day
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
             ${excludeCondition}

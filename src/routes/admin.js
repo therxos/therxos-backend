@@ -2012,8 +2012,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
             insurance_group as grp,
             drug_name,
             ndc,
-            ${gpNormSQL} as gp_30day,
-            ${qtyNormSQL} as qty_30day,
+            CASE WHEN COALESCE(quantity_dispensed, 0) > 0 THEN ${gpNormSQL} ELSE NULL END as gp_30day,
+            CASE WHEN COALESCE(quantity_dispensed, 0) > 0 THEN ${qtyNormSQL} ELSE NULL END as qty_30day,
             dispensed_date, created_at
           FROM prescriptions
           WHERE ${whereClause}
@@ -2062,8 +2062,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
             insurance_group as grp,
             drug_name,
             ndc,
-            ${gpNormSQL} as gp_30day,
-            ${qtyNormSQL} as qty_30day,
+            CASE WHEN COALESCE(quantity_dispensed, 0) > 0 THEN ${gpNormSQL} ELSE NULL END as gp_30day,
+            CASE WHEN COALESCE(quantity_dispensed, 0) > 0 THEN ${qtyNormSQL} ELSE NULL END as qty_30day,
             dispensed_date, created_at
           FROM prescriptions
           WHERE ${keywordConditions ? `(${keywordConditions})` : 'FALSE'}
@@ -4697,8 +4697,8 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
           p.insurance_group as group_number,
           p.drug_name,
           p.ndc,
-          ${gpNorm2} as gp,
-          ${qtyNorm2} as qty,
+          CASE WHEN COALESCE(p.quantity_dispensed, 0) > 0 THEN ${gpNorm2} ELSE NULL END as gp,
+          CASE WHEN COALESCE(p.quantity_dispensed, 0) > 0 THEN ${qtyNorm2} ELSE NULL END as qty,
           p.days_supply
         FROM prescriptions p
         WHERE p.dispensed_date >= NOW() - INTERVAL '${daysBack} days'
