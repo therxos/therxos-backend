@@ -218,7 +218,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             ${dataQualityFilter}
             ${gpPositiveFilter}
             ${binExclusionCondition}
-            AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+            AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}::integer
         ),
         per_product AS (
           SELECT bin, grp, drug_name, ndc,
@@ -227,8 +227,8 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty_30day) as avg_qty
           FROM raw_claims
           GROUP BY bin, grp, drug_name, ndc
-          HAVING COUNT(*) >= $${minClaimsParamIndex}
-            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
+          HAVING COUNT(*) >= $${minClaimsParamIndex}::integer
+            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}::numeric
         ),
         ranked_products AS (
           SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_margin DESC) as rank
@@ -252,7 +252,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             ${dataQualityFilter}
             ${gpPositiveFilter}
             ${binExclusionCondition}
-            AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+            AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}::integer
         ),
         per_product AS (
           SELECT bin, grp, drug_name, ndc,
@@ -261,7 +261,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY qty_30day) as avg_qty
           FROM raw_claims
           GROUP BY bin, grp, drug_name, ndc
-          HAVING COUNT(*) >= $${minClaimsParamIndex}
+          HAVING COUNT(*) >= $${minClaimsParamIndex}::integer
         ),
         ranked_products AS (
           SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_margin DESC NULLS LAST) as rank

@@ -2035,7 +2035,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           AND drug_name IS NOT NULL AND TRIM(drug_name) != ''
           AND ${GP_SQL_INLINE} > 0
           ${binRestrictionCondition}
-          AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+          AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}::integer
         ),
         per_product AS (
           SELECT
@@ -2046,8 +2046,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
             MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
           FROM raw_claims
           GROUP BY bin, grp, drug_name, ndc
-          HAVING COUNT(*) >= $${minClaimsParamIndex}
-            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
+          HAVING COUNT(*) >= $${minClaimsParamIndex}::integer
+            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}::numeric
         ),
         ranked_products AS (
           SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_reimbursement DESC) as rank
@@ -2085,7 +2085,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           AND drug_name IS NOT NULL AND TRIM(drug_name) != ''
           AND ${GP_SQL_INLINE} > 0
           ${binRestrictionCondition}
-          AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}
+          AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}::integer
         ),
         per_product AS (
           SELECT
@@ -2096,8 +2096,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
             MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
           FROM raw_claims
           GROUP BY bin, grp, drug_name, ndc
-          HAVING COUNT(*) >= $${minClaimsParamIndex}
-            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
+          HAVING COUNT(*) >= $${minClaimsParamIndex}::integer
+            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}::numeric
         ),
         ranked_products AS (
           SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_reimbursement DESC) as rank
@@ -2504,9 +2504,9 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
         FROM prescriptions
         WHERE (${keywordCondition}${ndcCondition})
         AND insurance_bin IS NOT NULL AND insurance_bin != ''
-        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackIdx}
+        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackIdx}::integer
         GROUP BY insurance_bin, insurance_group
-        HAVING COUNT(*) >= $${minClaimsIdx}
+        HAVING COUNT(*) >= $${minClaimsIdx}::integer
           AND AVG(COALESCE(
               NULLIF(REPLACE(raw_data->>'gross_profit', ',', '')::numeric, 0),
               NULLIF(REPLACE(raw_data->>'Gross Profit', ',', '')::numeric, 0),
