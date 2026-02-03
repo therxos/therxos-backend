@@ -257,9 +257,10 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
           FROM raw_claims
           GROUP BY bin, grp, drug_name, ndc
           HAVING COUNT(*) >= $${minClaimsParamIndex}
+            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
         ),
         ranked_products AS (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_margin DESC) as rank
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_margin DESC NULLS LAST) as rank
           FROM per_product
         )
         SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc, claim_count, avg_margin, avg_qty
