@@ -565,16 +565,66 @@ async function scanAdminTriggers(pharmacyId, batchId) {
   }
 
   // Filter to best-only and check DB for existing opps
+  // CRITICAL: A patient should NEVER have multiple ACTIVE opps for the same recommended drug
+  // - If no existing opp: create new one
+  // - If existing 'Not Submitted' opp: update it with better values (always keep best)
+  // - If existing 'Denied'/'Declined' opp: create new (they said no before, but new option may work)
+  // - If existing actioned opp (Submitted, Completed, Approved, etc.): skip (work already done)
   for (const opp of bestOppsMap.values()) {
     const existing = await db.query(`
-      SELECT opportunity_id FROM opportunities
+      SELECT opportunity_id, status, annual_margin_gain
+      FROM opportunities
       WHERE pharmacy_id = $1 AND patient_id = $2
-        AND UPPER(recommended_drug_name) = UPPER($3)
-        AND status NOT IN ('Denied', 'Declined')
+        AND UPPER(COALESCE(recommended_drug_name, '')) = UPPER(COALESCE($3, ''))
+      ORDER BY
+        CASE
+          WHEN status IN ('Submitted', 'Pending', 'Approved', 'Completed', 'Flagged', 'Didn''t Work') THEN 0
+          WHEN status = 'Not Submitted' THEN 1
+          ELSE 2  -- Denied, Declined
+        END,
+        created_at DESC
+      LIMIT 1
     `, [pharmacyId, opp.patient_id, opp.recommended_drug_name]);
 
     if (existing.rows.length === 0) {
+      // No existing opp - create new
       opportunities.push(opp);
+    } else {
+      const ex = existing.rows[0];
+
+      if (ex.status === 'Not Submitted') {
+        // Update existing Not Submitted with best values (higher margin or better NDC)
+        if (opp.annual_margin_gain > (ex.annual_margin_gain || 0) || opp.recommended_ndc) {
+          await db.query(`
+            UPDATE opportunities SET
+              recommended_ndc = COALESCE($1, recommended_ndc),
+              avg_dispensed_qty = COALESCE($2, avg_dispensed_qty),
+              potential_margin_gain = GREATEST($3, potential_margin_gain),
+              annual_margin_gain = GREATEST($4, annual_margin_gain),
+              trigger_id = COALESCE($5, trigger_id),
+              prescription_id = COALESCE($6, prescription_id),
+              current_ndc = COALESCE($7, current_ndc),
+              current_drug_name = COALESCE($8, current_drug_name),
+              updated_at = NOW()
+            WHERE opportunity_id = $9
+          `, [
+            opp.recommended_ndc,
+            opp.avg_dispensed_qty,
+            opp.potential_margin_gain,
+            opp.annual_margin_gain,
+            opp.trigger_id,
+            opp.prescription_id,
+            opp.current_ndc,
+            opp.current_drug_name,
+            ex.opportunity_id
+          ]);
+          logger.debug(`Updated opp ${ex.opportunity_id} with better data: margin $${ex.annual_margin_gain} → $${opp.annual_margin_gain}`);
+        }
+      } else if (ex.status === 'Denied' || ex.status === 'Declined') {
+        // Previous was denied - create new opp (maybe new option will work)
+        opportunities.push(opp);
+      }
+      // If actioned (Submitted, Completed, etc.) - skip, work was already done
     }
   }
 

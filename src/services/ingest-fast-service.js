@@ -90,8 +90,17 @@ function parseCSV(content) {
   return { rows, delimiter, columnCount: headers.length };
 }
 
+// Clean patient name: remove (BP), (RX), etc. and normalize spacing/case
+function cleanPatientName(name) {
+  return (name || '')
+    .replace(/\([^)]*\)/g, '')  // Remove parenthetical like (BP)
+    .replace(/\*+/g, '')        // Remove asterisks
+    .replace(/\s+/g, ' ')       // Normalize whitespace
+    .trim();
+}
+
 function generatePatientHash(name, dob) {
-  const cleanName = (name || '').replace(/\([^)]*\)/g, '').trim();
+  const cleanName = cleanPatientName(name);
   return createHash('sha256').update(`${cleanName}|${dob}`.toLowerCase()).digest('hex');
 }
 
@@ -210,7 +219,9 @@ async function runIngestion(jobId, pharmacyId, csvContent) {
     const rxDate = parseDate(row.date_written) || '1900-01-01';
 
     if (!patientMap.has(hash)) {
-      const nameParts = (row.patient_name || '').split(',').map(s => s.trim());
+      // Clean and parse name - remove (BP), asterisks, etc.
+      const cleanedName = cleanPatientName(row.patient_name);
+      const nameParts = cleanedName.split(',').map(s => s.trim());
       const lastName = nameParts[0] || '';
       const firstName = nameParts[1] || '';
 
