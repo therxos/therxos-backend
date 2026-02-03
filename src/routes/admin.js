@@ -1405,11 +1405,15 @@ router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperA
         `, [pharmacy.pharmacy_id, ...keywordPatterns, ...exclusionParams]);
 
         for (const patient of patientsResult.rows) {
-          // Check if opportunity already exists
+          // Check if opportunity already exists — match by trigger_id OR recommended_drug_name
+          // Skip any status except Denied/Declined (don't create duplicates for actioned opps)
           const existing = await db.query(`
             SELECT 1 FROM opportunities
-            WHERE patient_id = $1 AND trigger_id = $2 AND status = 'Not Submitted'
-          `, [patient.patient_id, trigger.trigger_id]);
+            WHERE patient_id = $1
+              AND (trigger_id = $2 OR UPPER(recommended_drug_name) = UPPER($3))
+              AND status NOT IN ('Denied', 'Declined')
+            LIMIT 1
+          `, [patient.patient_id, trigger.trigger_id, trigger.recommended_drug]);
 
           if (existing.rows.length > 0) {
             totalSkipped++;
@@ -5035,15 +5039,18 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
     for (const patient of patientsResult.rows) {
       patientsMatched.add(patient.patient_id);
 
-      // Check if opportunity already exists for this exact recommendation
+      // Check if opportunity already exists — match by trigger_id OR recommended_drug_name
+      // Skip any status except Denied/Declined (don't create duplicates for actioned opps)
       const existing = await db.query(`
         SELECT 1 FROM opportunities
         WHERE patient_id = $1
-          AND recommended_drug_name = $2
-          AND status = 'Not Submitted'
-      `, [patient.patient_id, trigger.recommended_drug]);
+          AND (trigger_id = $2 OR UPPER(recommended_drug_name) = UPPER($3))
+          AND status NOT IN ('Denied', 'Declined')
+        LIMIT 1
+      `, [patient.patient_id, trigger.trigger_id, trigger.recommended_drug]);
 
       if (existing.rows.length > 0) {
+        skippedDuplicates++;
         continue;
       }
 
@@ -5055,7 +5062,7 @@ router.post('/triggers/:triggerId/scan-pharmacy/:pharmacyId', authenticateToken,
           FROM opportunities o
           JOIN triggers t ON t.recommended_drug = o.recommended_drug_name
           WHERE o.patient_id = $1
-            AND o.status = 'Not Submitted'
+            AND o.status NOT IN ('Denied', 'Declined')
             AND t.trigger_group = $2
             AND o.annual_margin_gain >= $3
           LIMIT 1
