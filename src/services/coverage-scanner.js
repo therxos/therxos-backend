@@ -294,16 +294,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
           best_drug_name, best_ndc, avg_qty
         )
         VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $5, $6, $7, $8)
-        ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
-        DO UPDATE SET
-          coverage_status = 'verified',
-          verified_at = NOW(),
-          verified_claim_count = $4,
-          avg_reimbursement = $5,
-          gp_value = $5,
-          best_drug_name = $6,
-          best_ndc = $7,
-          avg_qty = $8
+        ON CONFLICT DO NOTHING
       `, [
         trigger.trigger_id,
         match.bin,

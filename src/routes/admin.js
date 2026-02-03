@@ -1721,17 +1721,24 @@ router.post('/triggers/:id/bin-values', authenticateToken, requireSuperAdmin, as
       status = 'works';
     }
 
-    const result = await db.query(`
-      INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, is_excluded, coverage_status)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
-      DO UPDATE SET
-        gp_value = $4,
-        is_excluded = $5,
-        coverage_status = $6,
-        updated_at = NOW()
-      RETURNING *
-    `, [id, bin, group || null, gpValue, isExcluded || false, status]);
+    // Upsert: check for existing row then insert or update
+    const existing = await db.query(`
+      SELECT id FROM trigger_bin_values
+      WHERE trigger_id = $1 AND insurance_bin = $2 AND COALESCE(insurance_group, '') = COALESCE($3, '')
+    `, [id, bin, group || null]);
+
+    let result;
+    if (existing.rows.length > 0) {
+      result = await db.query(`
+        UPDATE trigger_bin_values SET gp_value = $2, is_excluded = $3, coverage_status = $4, updated_at = NOW()
+        WHERE id = $1 RETURNING *
+      `, [existing.rows[0].id, gpValue, isExcluded || false, status]);
+    } else {
+      result = await db.query(`
+        INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, is_excluded, coverage_status)
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
+      `, [id, bin, group || null, gpValue, isExcluded || false, status]);
+    }
 
     res.json({ binValue: result.rows[0] });
   } catch (error) {
@@ -2123,16 +2130,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           best_drug_name, best_ndc
         )
         VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $6, $5, $7, $8)
-        ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
-        DO UPDATE SET
-          coverage_status = 'verified',
-          verified_at = NOW(),
-          verified_claim_count = $4,
-          avg_reimbursement = $5,
-          avg_qty = $6,
-          gp_value = $5,
-          best_drug_name = $7,
-          best_ndc = $8
+        ON CONFLICT DO NOTHING
         RETURNING *
       `, [
         triggerId,
@@ -2551,14 +2549,7 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
               verified_at, verified_claim_count, avg_reimbursement, avg_qty, gp_value
             )
             VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $6, $5)
-            ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
-            DO UPDATE SET
-              coverage_status = 'verified',
-              verified_at = NOW(),
-              verified_claim_count = $4,
-              avg_reimbursement = $5,
-              avg_qty = $6,
-              gp_value = GREATEST(trigger_bin_values.gp_value, $5)
+            ON CONFLICT DO NOTHING
           `, [
             trigger.trigger_id,
             match.bin,
@@ -2630,18 +2621,27 @@ router.put('/triggers/:id/bin-values/bulk', authenticateToken, requireSuperAdmin
         continue; // Skip entries without BIN
       }
 
-      const result = await db.query(`
-        INSERT INTO trigger_bin_values (
-          trigger_id, insurance_bin, insurance_group, gp_value, coverage_status, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, NOW())
-        ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
-        DO UPDATE SET
-          gp_value = COALESCE($4, trigger_bin_values.gp_value),
-          coverage_status = COALESCE($5, trigger_bin_values.coverage_status),
-          updated_at = NOW()
-        RETURNING *
-      `, [triggerId, bin, group || null, gpValue, coverageStatus || 'unknown']);
+      // Upsert: check for existing row then insert or update
+      const existingRow = await db.query(`
+        SELECT id FROM trigger_bin_values
+        WHERE trigger_id = $1 AND insurance_bin = $2 AND COALESCE(insurance_group, '') = COALESCE($3, '')
+      `, [triggerId, bin, group || null]);
+
+      let result;
+      if (existingRow.rows.length > 0) {
+        result = await db.query(`
+          UPDATE trigger_bin_values SET
+            gp_value = COALESCE($2, gp_value),
+            coverage_status = COALESCE($3, coverage_status),
+            updated_at = NOW()
+          WHERE id = $1 RETURNING *
+        `, [existingRow.rows[0].id, gpValue, coverageStatus || 'unknown']);
+      } else {
+        result = await db.query(`
+          INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, coverage_status, updated_at)
+          VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *
+        `, [triggerId, bin, group || null, gpValue, coverageStatus || 'unknown']);
+      }
 
       results.push(result.rows[0]);
     }
@@ -4787,8 +4787,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       await db.query(`
         INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, avg_qty, verified_claim_count, coverage_status, verified_at, best_drug_name, best_ndc)
         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9)
-        ON CONFLICT (trigger_id, insurance_bin, COALESCE(insurance_group, ''))
-        DO UPDATE SET gp_value = $4, avg_qty = $5, verified_claim_count = $6, coverage_status = $7, verified_at = NOW(), best_drug_name = $8, best_ndc = $9
+        ON CONFLICT DO NOTHING
       `, [triggerId, bv.bin, bv.group, bv.gpValue, bv.avgQty, bv.claimCount, bv.coverageStatus, bv.bestDrugName, bv.bestNdc]);
     }
 
