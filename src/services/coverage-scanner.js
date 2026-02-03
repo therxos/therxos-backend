@@ -173,11 +173,12 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       daysFilter = `${DAYS_SUPPLY_EST} >= 28`;
     }
 
-    // Shared filters: require valid drug name and GP > 0
+    // Shared filters: require valid drug name and GP >= $10
+    // Claims under $10 GP are excluded — they're not worth pursuing and can skew averages
     // Don't require qty > 0 — some PMS exports (e.g. Aracoma/RX30) lack quantity columns
     // but still have valid GP data. Claims without qty normalize using days_supply estimate.
     const dataQualityFilter = `AND drug_name IS NOT NULL AND TRIM(drug_name) != ''`;
-    const gpPositiveFilter = `AND ${GP_SQL} > 0`;
+    const gpMinFilter = `AND ${GP_SQL} >= 10`;
 
     // Fetch excluded BINs for this trigger so we don't include them in results
     const excludedBinsResult = await db.query(`
@@ -216,7 +217,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             AND insurance_bin IS NOT NULL AND insurance_bin != ''
             AND ${daysFilter}
             ${dataQualityFilter}
-            ${gpPositiveFilter}
+            ${gpMinFilter}
             ${binExclusionCondition}
             AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}::integer
         ),
@@ -250,7 +251,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
             AND insurance_bin IS NOT NULL AND insurance_bin != ''
             AND ${daysFilter}
             ${dataQualityFilter}
-            ${gpPositiveFilter}
+            ${gpMinFilter}
             ${binExclusionCondition}
             AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}::integer
         ),
@@ -316,9 +317,10 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
     if (matches.rows.length > 0) {
       // Weighted median: BIN/GROUPs with more claims have more influence on the default
       // This prevents a single outlier BIN with 1 claim from skewing the default
+      // Only include BINs with GP >= $10 in the median calculation
       const entries = matches.rows
         .map(m => ({ gp: parseFloat(m.avg_margin) || 0, weight: parseInt(m.claim_count) || 1 }))
-        .filter(e => e.gp > 0)
+        .filter(e => e.gp >= 10)
         .sort((a, b) => a.gp - b.gp);
       const totalWeight = entries.reduce((sum, e) => sum + e.weight, 0);
       let medianGP = 0;
@@ -329,24 +331,58 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
           if (cumWeight >= totalWeight / 2) { medianGP = entry.gp; break; }
         }
       }
-      console.log(`Default GP for ${trigger.display_name}: weighted median=$${medianGP.toFixed(2)} from ${entries.length} BIN/GROUPs (${totalWeight} total claims)`);
+      // Don't set default GP below $25 — not worth pursuing
+      if (medianGP < 25) {
+        console.log(`Default GP for ${trigger.display_name}: weighted median=$${medianGP.toFixed(2)} is below $25 threshold, keeping existing default`);
+        // Still update synced_at to show we scanned it
+        await db.query(`UPDATE triggers SET synced_at = NOW() WHERE trigger_id = $1`, [trigger.trigger_id]);
+      } else {
+        console.log(`Default GP for ${trigger.display_name}: weighted median=$${medianGP.toFixed(2)} from ${entries.length} BIN/GROUPs (${totalWeight} total claims)`);
 
-      // Only update default_gp_value and synced_at — do NOT overwrite recommended_ndc
-      // The trigger's recommended_ndc is admin-configured and should not be auto-replaced
-      // by whatever the scanner finds as highest GP (which could be a different formulation)
-      await db.query(`
-        UPDATE triggers SET
-          default_gp_value = $1,
-          synced_at = NOW()
-        WHERE trigger_id = $2
-      `, [medianGP, trigger.trigger_id]);
+        // Only update default_gp_value and synced_at — do NOT overwrite recommended_ndc
+        // The trigger's recommended_ndc is admin-configured and should not be auto-replaced
+        // by whatever the scanner finds as highest GP (which could be a different formulation)
+        await db.query(`
+          UPDATE triggers SET
+            default_gp_value = $1,
+            synced_at = NOW()
+          WHERE trigger_id = $2
+        `, [medianGP, trigger.trigger_id]);
 
-      // Backfill "Not Submitted" opportunities with updated GP values, qty, and NDC
-      await db.query(`
-        UPDATE opportunities o SET
-          potential_margin_gain = ROUND(
-            COALESCE(
-              (SELECT tbv.gp_value
+        // Backfill "Not Submitted" opportunities with updated GP values, qty, and NDC
+        await db.query(`
+          UPDATE opportunities o SET
+            potential_margin_gain = ROUND(
+              COALESCE(
+                (SELECT tbv.gp_value
+                 FROM prescriptions rx
+                 JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                   AND tbv.insurance_bin = rx.insurance_bin
+                   AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                   AND tbv.is_excluded = false
+                 WHERE rx.prescription_id = o.prescription_id
+                 LIMIT 1),
+                $2
+              ), 2
+            ),
+            annual_margin_gain = ROUND(
+              COALESCE(
+                (SELECT tbv.gp_value
+                 FROM prescriptions rx
+                 JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                   AND tbv.insurance_bin = rx.insurance_bin
+                   AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                   AND tbv.is_excluded = false
+                 WHERE rx.prescription_id = o.prescription_id
+                 LIMIT 1),
+                $2
+              ) * COALESCE(
+                (SELECT t.annual_fills FROM triggers t WHERE t.trigger_id = o.trigger_id),
+                12
+              ), 2
+            ),
+            avg_dispensed_qty = COALESCE(
+              (SELECT tbv.avg_qty
                FROM prescriptions rx
                JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
                  AND tbv.insurance_bin = rx.insurance_bin
@@ -354,12 +390,10 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
                  AND tbv.is_excluded = false
                WHERE rx.prescription_id = o.prescription_id
                LIMIT 1),
-              $2
-            ), 2
-          ),
-          annual_margin_gain = ROUND(
-            COALESCE(
-              (SELECT tbv.gp_value
+              o.avg_dispensed_qty
+            ),
+            recommended_ndc = COALESCE(
+              (SELECT tbv.best_ndc
                FROM prescriptions rx
                JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
                  AND tbv.insurance_bin = rx.insurance_bin
@@ -367,49 +401,24 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
                  AND tbv.is_excluded = false
                WHERE rx.prescription_id = o.prescription_id
                LIMIT 1),
-              $2
-            ) * COALESCE(
-              (SELECT t.annual_fills FROM triggers t WHERE t.trigger_id = o.trigger_id),
-              12
-            ), 2
-          ),
-          avg_dispensed_qty = COALESCE(
-            (SELECT tbv.avg_qty
-             FROM prescriptions rx
-             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
-               AND tbv.insurance_bin = rx.insurance_bin
-               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
-               AND tbv.is_excluded = false
-             WHERE rx.prescription_id = o.prescription_id
-             LIMIT 1),
-            o.avg_dispensed_qty
-          ),
-          recommended_ndc = COALESCE(
-            (SELECT tbv.best_ndc
-             FROM prescriptions rx
-             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
-               AND tbv.insurance_bin = rx.insurance_bin
-               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
-               AND tbv.is_excluded = false
-             WHERE rx.prescription_id = o.prescription_id
-             LIMIT 1),
-            o.recommended_ndc
-          ),
-          recommended_drug = COALESCE(
-            (SELECT tbv.best_drug_name
-             FROM prescriptions rx
-             JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
-               AND tbv.insurance_bin = rx.insurance_bin
-               AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
-               AND tbv.is_excluded = false
-             WHERE rx.prescription_id = o.prescription_id
-             LIMIT 1),
-            o.recommended_drug
-          ),
-          updated_at = NOW()
-        WHERE o.trigger_id = $1
-          AND o.status = 'Not Submitted'
-      `, [trigger.trigger_id, medianGP]);
+              o.recommended_ndc
+            ),
+            recommended_drug = COALESCE(
+              (SELECT tbv.best_drug_name
+               FROM prescriptions rx
+               JOIN trigger_bin_values tbv ON tbv.trigger_id = o.trigger_id
+                 AND tbv.insurance_bin = rx.insurance_bin
+                 AND COALESCE(tbv.insurance_group, '') = COALESCE(rx.insurance_group, '')
+                 AND tbv.is_excluded = false
+               WHERE rx.prescription_id = o.prescription_id
+               LIMIT 1),
+              o.recommended_drug
+            ),
+            updated_at = NOW()
+          WHERE o.trigger_id = $1
+            AND o.status = 'Not Submitted'
+        `, [trigger.trigger_id, medianGP]);
+      }
     }
 
     // Collect drug variation stats

@@ -2071,7 +2071,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           AND ${daysFilterSQL}
           AND drug_name IS NOT NULL AND TRIM(drug_name) != ''
-          AND ${GP_SQL_INLINE} > 0
+          AND ${GP_SQL_INLINE} >= 10
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}::integer
         ),
@@ -2121,7 +2121,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
           AND insurance_bin IS NOT NULL AND insurance_bin != ''
           AND ${daysFilterSQL}
           AND drug_name IS NOT NULL AND TRIM(drug_name) != ''
-          AND ${GP_SQL_INLINE} > 0
+          AND ${GP_SQL_INLINE} >= 10
           ${binRestrictionCondition}
           AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackParamIndex}::integer
         ),
