@@ -136,8 +136,13 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
     matchParams.push(parseInt(minClaims));
     const daysBackParamIndex = matchParams.length + 1;
     matchParams.push(parseInt(daysBack));
-    const minMarginParamIndex = matchParams.length + 1;
-    matchParams.push(parseFloat(effectiveMinMargin));
+    // Only push minMargin for NDC optimization triggers (they filter by it in HAVING)
+    // Non-NDC triggers store all coverage with GP > 0, no minMargin filter
+    let minMarginParamIndex = null;
+    if (isNdcOptimization) {
+      minMarginParamIndex = matchParams.length + 1;
+      matchParams.push(parseFloat(effectiveMinMargin));
+    }
 
     // Normalization strategy:
     // 1. If expected_qty is set: normalize GP per fill by dividing by whole-number fill multiples
@@ -257,7 +262,6 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
           FROM raw_claims
           GROUP BY bin, grp, drug_name, ndc
           HAVING COUNT(*) >= $${minClaimsParamIndex}
-            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_30day) >= $${minMarginParamIndex}
         ),
         ranked_products AS (
           SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_margin DESC NULLS LAST) as rank
