@@ -10,6 +10,30 @@ All notable changes to the platform are documented here. Client-visible changes 
 
 ---
 
+## 2026-02-02
+
+### Fixed
+- **Coverage Scanner Drug Matching** - Switched from LIKE to POSITION() to prevent SQL wildcard issues (e.g., "2%" matching "25MG")
+- **PgBouncer Parameter Type Errors** - Added explicit `::integer` and `::numeric` casts to all parameterized INTERVAL, HAVING, and PERCENTILE_CONT clauses in coverage-scanner.js and admin.js
+- **SKIP_WORDS Stripping Drug Ingredients** - Removed 'potassium' and 'sodium' from SKIP_WORDS so triggers like "Potassium Liquid" match correctly
+- **52/53 Triggers Now Match** - Fixed recommended_drug values on ~10 triggers for accurate keyword matching:
+  - Amlodipine-Atorvastatin: truncated to match data ("Atorvast" not "Atorvastatin")
+  - Comfort EZ Syringes: "SYR" not "SYRINGE" (data abbreviation)
+  - Sucralfate: "Sucralfate 10ml" to match liquid only
+  - Pure Comfort Lancets: brand-specific singular "Lancet" to avoid matching all brands
+  - Tribenzor/Exforge HCT: expanded HCTZ to Hydrochlorothiazide
+  - Dorzolamide-Timolol: removed "PF" from recommended_drug
+- **Staging DATABASE_URL** - Fixed staging Railway service to use production Supabase database (was pointing to separate empty database)
+- **exclude_keywords Support** - Coverage scanner now applies exclude_keywords to filter unwanted drug matches
+- **Non-NDC Triggers No Longer Require minMargin** - Only NDC optimization triggers filter by minimum GP threshold
+
+### Changed
+- Coverage scanner uses POSITION() instead of LIKE for all drug name matching
+- Staging and production now share one Supabase data warehouse
+- Added post-compaction rules to CLAUDE.md (re-read rules + changelog, wait for user confirmation)
+
+---
+
 ## 2026-01-30
 
 ### Added

@@ -2,6 +2,21 @@
 
 ---
 
+## CRITICAL: POST-COMPACTION RULE
+
+**After every context compaction (conversation summary), Claude MUST:**
+1. Re-read this entire CLAUDE.md file
+2. Re-read CHANGELOG.md for recent context
+3. Tell the user: "I have re-read the project rules and changelog."
+4. **STOP and WAIT** for the user to say "continue" before doing ANY work
+5. Do NOT proceed with any tasks, code changes, or deployments until the user explicitly says to continue
+
+> **This is non-negotiable.** If Claude fails to do this, the session should not proceed. The user will confirm when it's safe to continue.
+
+**Additionally:** Update CHANGELOG.md every compaction with what was accomplished in the session so far. This prevents lost context and repeated work.
+
+---
+
 ## CRITICAL: STAGING-FIRST DEPLOYMENT WORKFLOW
 
 **ALWAYS deploy to staging first, then STOP and WAIT for user approval before deploying to production.**
