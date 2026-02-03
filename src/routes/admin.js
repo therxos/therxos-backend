@@ -1452,7 +1452,7 @@ router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperA
           SELECT mp.*,
             COALESCE(tbv.gp_value, $${defaultGpIdx}::numeric) as gp_value,
             tbv.avg_qty,
-            COALESCE(tbv.best_ndc, $${recNdcIdx}) as best_ndc
+            COALESCE(tbv.best_ndc, $${recNdcIdx}::text) as best_ndc
           FROM matching_patients mp
           LEFT JOIN existing_opps eo ON eo.patient_id = mp.patient_id
           LEFT JOIN LATERAL (
@@ -1474,13 +1474,13 @@ router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperA
         )
         SELECT
           gen_random_uuid(), np.pharmacy_id, np.patient_id,
-          $${triggerTypeIdx}, $${triggerGroupIdx},
+          $${triggerTypeIdx}::text, $${triggerGroupIdx}::text,
           np.current_drug, np.current_ndc,
-          $${recDrugIdx}, np.best_ndc,
+          $${recDrugIdx}::text, np.best_ndc,
           ROUND(np.gp_value, 2),
           ROUND((np.gp_value * $${annualFillsIdx}::numeric), 2),
           np.avg_qty,
-          np.prescriber_name, $2, $${rationaleIdx},
+          np.prescriber_name, $2, $${rationaleIdx}::text,
           'Not Submitted', NOW()
         FROM new_patients np
       `, queryParams);
