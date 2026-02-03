@@ -1981,7 +1981,7 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
       const expectedQty = parseFloat(trigger.expected_qty);
       // Divide GP by whole-number fill multiples: qty 90 with expected 30 → GP/3
       gpNormSQL = `${GP_SQL_INLINE} / GREATEST(ROUND(COALESCE(quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
-      qtyNormSQL = `COALESCE(quantity_dispensed, ${expectedQty})::numeric / GREATEST(ROUND(COALESCE(quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
+      qtyNormSQL = `${expectedQty}`;
       const minDays = trigger.expected_days_supply ? Math.floor(trigger.expected_days_supply * 0.8) : 20;
       daysFilterSQL = `${DAYS_SUPPLY_EST} >= ${minDays}`;
     } else if (trigger.expected_days_supply) {
@@ -4679,7 +4679,7 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       const expectedQty = parseFloat(trigger.expected_qty);
       // Divide GP by whole-number fill multiples: qty 90 with expected 30 → GP/3
       gpNorm2 = `${GP_RAW} / GREATEST(ROUND(COALESCE(p.quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
-      qtyNorm2 = `COALESCE(p.quantity_dispensed, ${expectedQty})::numeric / GREATEST(ROUND(COALESCE(p.quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
+      qtyNorm2 = `${expectedQty}`;
       const minDays2 = trigger.expected_days_supply ? Math.floor(trigger.expected_days_supply * 0.8) : 20;
       daysFilter2 = `${DAYS_EST} >= ${minDays2}`;
     } else if (trigger.expected_days_supply) {

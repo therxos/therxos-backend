@@ -152,7 +152,7 @@ export async function scanAllTriggerCoverage({ minClaims = 1, daysBack = 365, mi
       // e.g. expected_qty=30: qty 90 → 3 fills → GP/3, qty 36 → 1 fill → GP/1
       const expectedQty = parseFloat(trigger.expected_qty);
       gpNorm = `${GP_SQL} / GREATEST(ROUND(COALESCE(quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
-      qtyNorm = `COALESCE(quantity_dispensed, ${expectedQty})::numeric / GREATEST(ROUND(COALESCE(quantity_dispensed, ${expectedQty})::numeric / ${expectedQty}), 1)`;
+      qtyNorm = `${expectedQty}`;
       const minDays = trigger.expected_days_supply ? Math.floor(trigger.expected_days_supply * 0.8) : 20;
       daysFilter = `${DAYS_SUPPLY_EST} >= ${minDays}`;
     } else if (trigger.expected_days_supply) {
