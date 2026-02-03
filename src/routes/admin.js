@@ -1313,16 +1313,29 @@ router.post('/triggers/enable-all', authenticateToken, requireSuperAdmin, async 
   }
 });
 
+// In-memory job tracker for async scan operations
+const scanJobs = new Map();
+
+// GET /api/admin/triggers/scan-job/:jobId - Poll scan job status
+// IMPORTANT: Must be defined before /triggers/:id routes
+router.get('/triggers/scan-job/:jobId', authenticateToken, requireSuperAdmin, (req, res) => {
+  const job = scanJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json(job);
+});
+
 // POST /api/admin/triggers/scan-all-opportunities - Scan ALL pharmacies for opportunities across ALL enabled triggers
 // IMPORTANT: Must be defined before /triggers/:id routes to avoid Express matching "scan-all-opportunities" as :id
 router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperAdmin, async (req, res) => {
-  // Extend timeout — this endpoint scans all triggers × all pharmacies
-  req.setTimeout(600000); // 10 minutes
-  if (res.setTimeout) res.setTimeout(600000);
+  const { daysBack = 90 } = req.body || {};
+  const jobId = uuidv4();
 
+  // Return immediately with job ID
+  scanJobs.set(jobId, { status: 'running', progress: 'Starting scan...', totalCreated: 0, totalSkipped: 0 });
+  res.json({ success: true, jobId, message: 'Scan started in background' });
+
+  // Run scan in background
   try {
-    const { daysBack = 90 } = req.body || {};
-
     // Get all enabled triggers
     const triggersResult = await db.query(`
       SELECT * FROM triggers WHERE is_enabled = true ORDER BY display_name
@@ -1343,6 +1356,7 @@ router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperA
     let totalCreated = 0;
     let totalSkipped = 0;
     const triggerResults = [];
+    let triggersProcessed = 0;
 
     for (const trigger of triggers) {
       const keywords = trigger.detection_keywords || [];
@@ -1473,44 +1487,43 @@ router.post('/triggers/scan-all-opportunities', authenticateToken, requireSuperA
 
       const created = result.rowCount || 0;
       totalCreated += created;
-
-      // Count skipped (matched patients minus created)
-      const matchedResult = await db.query(`
-        SELECT COUNT(DISTINCT p.patient_id) as cnt
-        FROM patients p
-        JOIN prescriptions pr ON pr.patient_id = p.patient_id
-        WHERE p.pharmacy_id = ANY($1::uuid[])
-          AND pr.dispensed_date >= NOW() - INTERVAL '${parseInt(daysBack)} days'
-          AND (${keywordConditions})
-          ${exclusionSQL}
-          ${excludeSQL}
-      `, queryParams.slice(0, paramIdx - 7)); // Only need params up to exclude keywords
-      const matched = parseInt(matchedResult.rows[0]?.cnt || 0);
-      totalSkipped += (matched - created);
+      triggersProcessed++;
 
       triggerResults.push({
         triggerName: trigger.display_name,
         pharmaciesScanned: targetPharmacyIds.length,
-        opportunitiesCreated: created,
-        patientsMatched: matched
+        opportunitiesCreated: created
+      });
+
+      // Update job progress
+      scanJobs.set(jobId, {
+        status: 'running',
+        progress: `${triggersProcessed}/${triggers.length} triggers scanned`,
+        totalCreated,
+        triggersProcessed,
+        totalTriggers: triggers.length
       });
     }
 
-    console.log(`=== SCAN COMPLETE: ${totalCreated} opportunities created, ${totalSkipped} duplicates skipped ===`);
+    console.log(`=== SCAN COMPLETE: ${totalCreated} opportunities created ===`);
     invalidateCache('trigger-coverage:');
 
-    res.json({
-      success: true,
+    // Store final result
+    scanJobs.set(jobId, {
+      status: 'complete',
       triggersScanned: triggers.length,
       pharmaciesScanned: pharmacies.length,
       totalCreated,
-      totalSkipped,
-      totalPatientsMatched: triggerResults.reduce((sum, r) => sum + r.patientsMatched, 0),
+      totalPatientsMatched: triggerResults.reduce((sum, r) => sum + (r.patientsMatched || 0), 0),
       triggerResults
     });
+
+    // Clean up job after 10 minutes
+    setTimeout(() => scanJobs.delete(jobId), 600000);
   } catch (error) {
     console.error('Scan all opportunities error:', error);
-    res.status(500).json({ error: 'Failed to scan opportunities: ' + error.message });
+    scanJobs.set(jobId, { status: 'error', error: error.message });
+    setTimeout(() => scanJobs.delete(jobId), 600000);
   }
 });
 
