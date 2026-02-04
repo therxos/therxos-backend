@@ -505,12 +505,14 @@ export async function pollForSPPReports(options = {}) {
       processedIds
     });
 
-    // Filter emails by subject if pharmacy has an SPP report name configured
+    // Filter emails by body content if pharmacy has an SPP report name configured
+    // The report name appears in the email body (e.g., "Daily List - Daily List2" for Bravo)
+    // not in the subject line (which is just "SPP Export Scheduled Delivery")
     let emailsToProcess = emails;
     if (sppReportName && emails.length > 0) {
       emailsToProcess = [];
       for (const email of emails) {
-        // Fetch just the subject header (lightweight metadata request)
+        // Fetch the email snippet (body preview) to check for report name
         const msg = await gmail.users.messages.get({
           userId: 'me',
           id: email.id,
@@ -518,12 +520,15 @@ export async function pollForSPPReports(options = {}) {
           metadataHeaders: ['Subject']
         });
         const subject = msg.data.payload?.headers?.find(h => h.name === 'Subject')?.value || '';
+        const snippet = msg.data.snippet || '';
 
-        if (subject.toLowerCase().includes(sppReportName.toLowerCase())) {
+        // Check both subject and snippet (body preview) for the report name
+        const searchText = `${subject} ${snippet}`.toLowerCase();
+        if (searchText.includes(sppReportName.toLowerCase())) {
           emailsToProcess.push(email);
-          logger.info('Email matches pharmacy filter', { runId, messageId: email.id, subject, filter: sppReportName });
+          logger.info('Email matches pharmacy filter', { runId, messageId: email.id, subject, snippet: snippet.substring(0, 100), filter: sppReportName });
         } else {
-          logger.info('Email skipped - does not match pharmacy filter', { runId, messageId: email.id, subject, filter: sppReportName });
+          logger.info('Email skipped - does not match pharmacy filter', { runId, messageId: email.id, subject, snippet: snippet.substring(0, 100), filter: sppReportName });
         }
       }
     }
