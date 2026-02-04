@@ -73,7 +73,26 @@ router.get('/:patientId', authenticateToken, async (req, res) => {
     }
 
     const medications = await db.query(`
-      SELECT pr.*, nr.therapeutic_class, nr.is_brand, nr.is_controlled
+      SELECT
+        pr.prescription_id,
+        pr.rx_number,
+        pr.drug_name,
+        pr.ndc,
+        pr.dispensed_date,
+        pr.prescriber_name,
+        pr.prescriber_npi,
+        pr.quantity_dispensed,
+        pr.days_supply,
+        pr.insurance_bin,
+        pr.insurance_pcn,
+        pr.insurance_group,
+        COALESCE(pr.insurance_pay, 0) as insurance_pay,
+        COALESCE(pr.patient_pay, 0) as patient_pay,
+        COALESCE(pr.acquisition_cost, 0) as acquisition_cost,
+        COALESCE(pr.insurance_pay, 0) + COALESCE(pr.patient_pay, 0) - COALESCE(pr.acquisition_cost, 0) as gross_profit,
+        nr.therapeutic_class,
+        nr.is_brand,
+        nr.is_controlled
       FROM prescriptions pr
       LEFT JOIN ndc_reference nr ON nr.ndc = pr.ndc
       WHERE pr.patient_id = $1
@@ -81,8 +100,21 @@ router.get('/:patientId', authenticateToken, async (req, res) => {
     `, [patientId]);
 
     const opportunities = await db.query(`
-      SELECT * FROM opportunities WHERE patient_id = $1 AND status IN ('new', 'reviewed')
-      ORDER BY potential_margin_gain DESC
+      SELECT
+        opportunity_id,
+        current_drug_name,
+        recommended_drug_name,
+        potential_margin_gain,
+        potential_margin_gain * 12 as annual_margin_gain,
+        status,
+        opportunity_type,
+        created_at,
+        actioned_at
+      FROM opportunities
+      WHERE patient_id = $1
+      ORDER BY
+        CASE WHEN status = 'Not Submitted' THEN 0 ELSE 1 END,
+        potential_margin_gain DESC
     `, [patientId]);
 
     const drugClasses = [...new Set(medications.rows.map(m => m.therapeutic_class).filter(Boolean))];
