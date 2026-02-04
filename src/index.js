@@ -32,6 +32,7 @@ import intakeRoutes from './routes/intake.js';
 import opportunityApprovalRoutes from './routes/opportunity-approval.js';
 import faxRoutes from './routes/fax.js';
 import onboardingRoutes from './routes/onboarding.js';
+import ndcReferenceRoutes from './routes/ndc-reference.js';
 import { sendWelcomeEmail } from './services/emailService.js';
 import { ingestSync } from './services/ingest-fast-service.js';
 
@@ -135,6 +136,7 @@ app.use('/api/intake', intakeRoutes);
 app.use('/api/opportunity-approval', opportunityApprovalRoutes);
 app.use('/api/fax', faxRoutes);
 app.use('/api/onboarding', onboardingRoutes);
+app.use('/api/ndc-reference', ndcReferenceRoutes);
 
 // Microsoft OAuth callback (separate route for redirect URI)
 app.get('/api/microsoft/callback', async (req, res) => {
