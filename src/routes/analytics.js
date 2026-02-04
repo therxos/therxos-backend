@@ -626,23 +626,22 @@ router.get('/monthly', authenticateToken, async (req, res) => {
     // CRITICAL: Monthly reports show ALL historical data - NEVER filter worked opportunities
     // Data quality filter only applies to the active opportunity queue, not historical reports
 
-    // Overall stats for the month
+    // Overall stats for the month - use actioned_at for status changes
     const statsResult = await db.query(`
       SELECT
-        COUNT(*) as total_opportunities,
+        COUNT(*) FILTER (WHERE created_at >= $2 AND created_at <= $3) as total_opportunities,
         COUNT(*) FILTER (WHERE created_at >= $2 AND created_at <= $3) as new_opportunities,
-        COUNT(*) FILTER (WHERE status IN ('Submitted', 'Pending', 'Approved', 'Completed') AND updated_at >= $2 AND updated_at <= $3) as submitted,
-        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed') AND updated_at >= $2 AND updated_at <= $3) as captured,
-        COUNT(*) FILTER (WHERE status = 'Completed' AND updated_at >= $2 AND updated_at <= $3) as completed,
-        COUNT(*) FILTER (WHERE status = 'Approved' AND updated_at >= $2 AND updated_at <= $3) as approved,
-        COUNT(*) FILTER (WHERE status IN ('Rejected', 'Declined', 'Denied') AND updated_at >= $2 AND updated_at <= $3) as rejected,
-        COALESCE(SUM(potential_margin_gain), 0) * 12 as total_value,
-        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status IN ('Approved', 'Completed')), 0) * 12 as captured_value,
-        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status = 'Completed'), 0) * 12 as completed_value,
-        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status = 'Approved'), 0) * 12 as approved_value
+        COUNT(*) FILTER (WHERE status IN ('Submitted', 'Pending', 'Approved', 'Completed') AND actioned_at >= $2 AND actioned_at <= $3) as submitted,
+        COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed') AND actioned_at >= $2 AND actioned_at <= $3) as captured,
+        COUNT(*) FILTER (WHERE status = 'Completed' AND actioned_at >= $2 AND actioned_at <= $3) as completed,
+        COUNT(*) FILTER (WHERE status = 'Approved' AND actioned_at >= $2 AND actioned_at <= $3) as approved,
+        COUNT(*) FILTER (WHERE status IN ('Rejected', 'Declined', 'Denied') AND actioned_at >= $2 AND actioned_at <= $3) as rejected,
+        COALESCE(SUM(potential_margin_gain) FILTER (WHERE created_at >= $2 AND created_at <= $3), 0) * 12 as total_value,
+        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status IN ('Approved', 'Completed') AND actioned_at >= $2 AND actioned_at <= $3), 0) * 12 as captured_value,
+        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status = 'Completed' AND actioned_at >= $2 AND actioned_at <= $3), 0) * 12 as completed_value,
+        COALESCE(SUM(potential_margin_gain) FILTER (WHERE status = 'Approved' AND actioned_at >= $2 AND actioned_at <= $3), 0) * 12 as approved_value
       FROM opportunities
       WHERE pharmacy_id = $1
-        AND ((created_at >= $2 AND created_at <= $3) OR (updated_at >= $2 AND updated_at <= $3))
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
     
     const stats = statsResult.rows[0];
@@ -659,7 +658,7 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       ? stats.captured / totalActed
       : 0;
     
-    // By status - NO data quality filter on historical reports
+    // By status - show opportunities actioned in this month
     const byStatusResult = await db.query(`
       SELECT
         status,
@@ -667,12 +666,13 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         COALESCE(SUM(potential_margin_gain), 0) * 12 as value
       FROM opportunities
       WHERE pharmacy_id = $1
-        AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
+        AND actioned_at >= $2 AND actioned_at <= $3
+        AND status != 'Not Submitted'
       GROUP BY status
       ORDER BY count DESC
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
     
-    // By type - NO data quality filter on historical reports
+    // By type - show opportunities actioned in this month
     const byTypeResult = await db.query(`
       SELECT
         COALESCE(opportunity_type, 'Other') as type,
@@ -681,27 +681,29 @@ router.get('/monthly', authenticateToken, async (req, res) => {
         COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed')) as captured
       FROM opportunities
       WHERE pharmacy_id = $1
-        AND (created_at >= $2 AND created_at <= $3 OR updated_at >= $2 AND updated_at <= $3)
+        AND actioned_at >= $2 AND actioned_at <= $3
+        AND status != 'Not Submitted'
       GROUP BY opportunity_type
       ORDER BY count DESC
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
     
-    // Daily activity - NO data quality filter on historical reports
+    // Daily activity - use actioned_at for when work was done
     const dailyResult = await db.query(`
       SELECT
-        DATE(updated_at) as date,
+        DATE(actioned_at) as date,
         COUNT(*) FILTER (WHERE status IN ('Submitted', 'Pending')) as submitted,
         COUNT(*) FILTER (WHERE status IN ('Approved', 'Completed')) as captured,
         COUNT(*) FILTER (WHERE status = 'Completed') as completed,
         COUNT(*) FILTER (WHERE status = 'Approved') as approved
       FROM opportunities
       WHERE pharmacy_id = $1
-        AND updated_at >= $2 AND updated_at <= $3
-      GROUP BY DATE(updated_at)
+        AND actioned_at >= $2 AND actioned_at <= $3
+        AND status != 'Not Submitted'
+      GROUP BY DATE(actioned_at)
       ORDER BY date
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
 
-    // By BIN - NO data quality filter on historical reports
+    // By BIN - show opportunities actioned in this month
     const byBinResult = await db.query(`
       SELECT
         COALESCE(pr.insurance_bin, 'Unknown') as bin,
@@ -712,7 +714,8 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       FROM opportunities o
       LEFT JOIN prescriptions pr ON pr.prescription_id = o.prescription_id
       WHERE o.pharmacy_id = $1
-        AND (o.created_at >= $2 AND o.created_at <= $3 OR o.updated_at >= $2 AND o.updated_at <= $3)
+        AND o.actioned_at >= $2 AND o.actioned_at <= $3
+        AND o.status != 'Not Submitted'
       GROUP BY COALESCE(pr.insurance_bin, 'Unknown')
       ORDER BY count DESC
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
@@ -731,9 +734,7 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       ORDER BY week_start
     `, [pharmacyId, startDate, endDate + ' 23:59:59']);
 
-    // Staff performance - who completed/actioned opportunities
-    // Look at ALL actioned opportunities for the pharmacy, not limited by date
-    // This gives a full picture of staff performance
+    // Staff performance - who completed/actioned opportunities THIS MONTH
     const staffResult = await db.query(`
       SELECT
         u.user_id,
@@ -752,9 +753,10 @@ router.get('/monthly', authenticateToken, async (req, res) => {
       JOIN users u ON u.user_id = o.actioned_by
       WHERE o.pharmacy_id = $1
         AND o.actioned_by IS NOT NULL
+        AND o.actioned_at >= $2 AND o.actioned_at <= $3
       GROUP BY u.user_id, u.first_name, u.last_name, u.role
       ORDER BY completed_count DESC, captured_value DESC
-    `, [pharmacyId]);
+    `, [pharmacyId, startDate, endDate + ' 23:59:59']);
 
     res.json({
       month: monthNum,
