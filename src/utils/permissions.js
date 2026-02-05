@@ -177,17 +177,24 @@ export function requirePermission(permission) {
 // Check fax limits
 export function checkFaxLimits(pharmacySettings, prescriberHistory) {
   const limits = pharmacySettings?.fax_limits || DEFAULT_PHARMACY_SETTINGS.fax_limits;
-  
+
   const today = new Date().toISOString().split('T')[0];
-  const faxesToday = prescriberHistory.filter(f => f.sent_date?.startsWith(today)).length;
-  
+  const faxesToday = prescriberHistory.filter(f => {
+    if (!f.sent_date) return false;
+    // Handle both Date objects and strings
+    const dateStr = f.sent_date instanceof Date
+      ? f.sent_date.toISOString().split('T')[0]
+      : String(f.sent_date).split('T')[0];
+    return dateStr === today;
+  }).length;
+
   if (faxesToday >= limits.max_per_day) {
-    return { 
-      allowed: false, 
-      reason: `Daily fax limit reached (${limits.max_per_day}/day)` 
+    return {
+      allowed: false,
+      reason: `Daily fax limit reached (${limits.max_per_day}/day)`
     };
   }
-  
+
   return { allowed: true };
 }
 
