@@ -126,7 +126,12 @@ router.post('/send', authenticateToken, async (req, res) => {
     const prescriberNpi = req.body.prescriberNpi || opp.prescriber_npi;
     const prescriberName = opp.prescriber_name || 'Prescriber';
 
-    // Generate the PDF
+    // Use edited content from request, or fall back to opportunity data
+    const currentDrugName = req.body.currentDrugName || opp.current_drug_name;
+    const recommendedDrugName = req.body.recommendedDrugName || opp.recommended_drug_name;
+    const clinicalRationale = req.body.clinicalRationale || opp.clinical_rationale || opp.trigger_rationale || '';
+
+    // Generate the PDF with potentially edited content
     const pdfBuffer = await generateFaxDocument({
       pharmacy,
       prescriber: {
@@ -140,10 +145,10 @@ router.post('/send', authenticateToken, async (req, res) => {
         date_of_birth: opp.patient_dob
       },
       opportunity: {
-        current_drug_name: opp.current_drug_name,
-        recommended_drug_name: opp.recommended_drug_name,
+        current_drug_name: currentDrugName,
+        recommended_drug_name: recommendedDrugName,
         opportunity_type: opp.opportunity_type,
-        clinical_rationale: opp.clinical_rationale || opp.trigger_rationale || ''
+        clinical_rationale: clinicalRationale
       }
     });
 
