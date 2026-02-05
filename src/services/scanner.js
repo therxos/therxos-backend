@@ -175,8 +175,8 @@ async function buildRecommendedDrugGPCache(pharmacyId, triggers) {
         NULLIF(REPLACE(raw_data->>'Adjusted Profit', ',', '')::numeric, 0),
         NULLIF(REPLACE(raw_data->>'adjusted_profit', ',', '')::numeric, 0),
         NULLIF(
-          REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
-          - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
+          REPLACE(REPLACE(COALESCE(raw_data->>'Price','0'), ',', ''), '$', '')::numeric
+          - REPLACE(REPLACE(COALESCE(raw_data->>'Actual Cost','0'), ',', ''), '$', '')::numeric,
         0)
       ) as gp,
       days_supply
