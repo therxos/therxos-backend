@@ -45,6 +45,8 @@ const COLUMN_MAP = {
   'Prescriber Full Name': 'prescriber_name',
   'Prescriber Full Name First then Last': 'prescriber_name',
   'Prescriber Fax Number': 'prescriber_fax',
+  'Prescriber NPI': 'prescriber_npi',
+  'Primary Third Party PCN': 'pcn',
 };
 // Case-insensitive lookup version
 const COLUMN_MAP_LOWER = Object.fromEntries(
@@ -350,17 +352,20 @@ async function runIngestion(jobId, pharmacyId, csvContent) {
       dispensed_date: parseDate(row.date_written) || new Date().toISOString().split('T')[0],
       insurance_bin: row.insurance_bin,
       insurance_group: row.group_number,
+      insurance_pcn: row.pcn || null,
       contract_id: contractId,
       plan_name: planName,
       patient_pay: parseAmount(row.patient_pay),
       insurance_pay: parseAmount(row.insurance_pay),
       prescriber_name: row.prescriber_name,
+      prescriber_npi: row.prescriber_npi || null,
       daw_code: normalizeDawCode(row.daw_code),
       raw_data: JSON.stringify({
         therapeutic_class: row.therapeutic_class,
         pdc: row.pdc,
         awp: parseAmount(row.awp),
         net_profit: parseAmount(row.net_profit),
+        prescriber_fax: row.prescriber_fax || null,
       })
     });
   }
@@ -394,8 +399,8 @@ async function runIngestion(jobId, pharmacyId, csvContent) {
 
   for (const batch of rxBatches) {
     const values = batch.map((rx, i) => {
-      const o = i * 18;
-      return `($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9},$${o+10},$${o+11},$${o+12},$${o+13},$${o+14},$${o+15},$${o+16},$${o+17},$${o+18})`;
+      const o = i * 20;
+      return `($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9},$${o+10},$${o+11},$${o+12},$${o+13},$${o+14},$${o+15},$${o+16},$${o+17},$${o+18},$${o+19},$${o+20})`;
     }).join(', ');
 
     const params = batch.flatMap(rx => [
@@ -410,11 +415,13 @@ async function runIngestion(jobId, pharmacyId, csvContent) {
       rx.dispensed_date,
       rx.insurance_bin,
       rx.insurance_group,
+      rx.insurance_pcn,
       rx.contract_id,
       rx.plan_name,
       rx.patient_pay,
       rx.insurance_pay,
       rx.prescriber_name,
+      rx.prescriber_npi,
       rx.daw_code,
       rx.raw_data
     ]);
@@ -424,12 +431,15 @@ async function runIngestion(jobId, pharmacyId, csvContent) {
         INSERT INTO prescriptions (
           prescription_id, pharmacy_id, patient_id, rx_number, ndc, drug_name,
           quantity_dispensed, days_supply, dispensed_date, insurance_bin, insurance_group,
-          contract_id, plan_name, patient_pay, insurance_pay, prescriber_name, daw_code, raw_data
+          insurance_pcn, contract_id, plan_name, patient_pay, insurance_pay, prescriber_name,
+          prescriber_npi, daw_code, raw_data
         ) VALUES ${values}
         ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO UPDATE SET
           drug_name = EXCLUDED.drug_name,
           contract_id = EXCLUDED.contract_id,
           plan_name = EXCLUDED.plan_name,
+          prescriber_npi = COALESCE(EXCLUDED.prescriber_npi, prescriptions.prescriber_npi),
+          insurance_pcn = COALESCE(EXCLUDED.insurance_pcn, prescriptions.insurance_pcn),
           raw_data = EXCLUDED.raw_data
       `, params);
       rxInserted += batch.length;
