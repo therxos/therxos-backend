@@ -129,7 +129,12 @@ router.post('/send', authenticateToken, async (req, res) => {
     // Use edited content from request, or fall back to opportunity data
     const currentDrugName = req.body.currentDrugName || opp.current_drug_name;
     const recommendedDrugName = req.body.recommendedDrugName || opp.recommended_drug_name;
-    const clinicalRationale = req.body.clinicalRationale || opp.clinical_rationale || opp.trigger_rationale || '';
+
+    // Generate default rationale for missing_therapy/combo_therapy if none provided
+    let clinicalRationale = req.body.clinicalRationale || opp.clinical_rationale || opp.trigger_rationale || '';
+    if (!clinicalRationale && ['missing_therapy', 'combo_therapy'].includes(opp.opportunity_type)) {
+      clinicalRationale = `Patient is currently prescribed ${currentDrugName} but does not have a prescription for ${recommendedDrugName} on file. Please prescribe if clinically appropriate, or complete and return this form to the pharmacy. Thank you.`;
+    }
 
     // Generate the PDF with potentially edited content
     const pdfBuffer = await generateFaxDocument({
