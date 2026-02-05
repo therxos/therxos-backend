@@ -223,9 +223,8 @@ export async function sendFax({
     // The SDK uploads documents first, then sends
     notifyreResult = await client.submitFax({
       documents: [{
-        fileName: `therapeutic-recommendation-${opportunityId.slice(0, 8)}.pdf`,
         contentType: 'application/pdf',
-        content: pdfBuffer.toString('base64')
+        base64Str: pdfBuffer.toString('base64')
       }],
       recipients: [{
         type: 'fax_number',
