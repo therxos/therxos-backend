@@ -2518,61 +2518,65 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
       matchParams.push(parseFloat(minMargin));
       const minMarginIdx = paramIndex++;
 
+      // GP calculation SQL
+      const GP_SQL = `COALESCE(
+        NULLIF(REPLACE(raw_data->>'gross_profit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'Gross Profit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'grossprofit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'GrossProfit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'net_profit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'Net Profit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'netprofit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'NetProfit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'adj_profit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'Adj Profit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'adjprofit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'AdjProfit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'Adjusted Profit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(raw_data->>'adjusted_profit', ',', '')::numeric, 0),
+        NULLIF(
+          REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
+          - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
+        0),
+        0
+      )`;
+
       const matchQuery = `
-        SELECT
-          insurance_bin as bin,
-          insurance_group as "group",
-          COUNT(*) as claim_count,
-          AVG(COALESCE(
-              NULLIF(REPLACE(raw_data->>'gross_profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Gross Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'grossprofit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'GrossProfit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'net_profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Net Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'netprofit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'NetProfit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'adj_profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Adj Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'adjprofit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'AdjProfit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Adjusted Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'adjusted_profit', ',', '')::numeric, 0),
-              NULLIF(
-                REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
-                - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
-              0),
-              0
-            )) as avg_reimbursement,
-          AVG(COALESCE(quantity_dispensed, 1)) as avg_qty,
-          MAX(COALESCE(dispensed_date, created_at)) as most_recent_claim
-        FROM prescriptions
-        WHERE (${keywordCondition}${ndcCondition})
-        AND insurance_bin IS NOT NULL AND insurance_bin != ''
-        AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackIdx}::integer
-        GROUP BY insurance_bin, insurance_group
-        HAVING COUNT(*) >= $${minClaimsIdx}::integer
-          AND AVG(COALESCE(
-              NULLIF(REPLACE(raw_data->>'gross_profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Gross Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'grossprofit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'GrossProfit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'net_profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Net Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'netprofit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'NetProfit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'adj_profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Adj Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'adjprofit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'AdjProfit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'Adjusted Profit', ',', '')::numeric, 0),
-              NULLIF(REPLACE(raw_data->>'adjusted_profit', ',', '')::numeric, 0),
-              NULLIF(
-                REPLACE(COALESCE(raw_data->>'Price','0'), '$', '')::numeric
-                - REPLACE(COALESCE(raw_data->>'Actual Cost','0'), '$', '')::numeric,
-              0),
-              0
-            )) >= $${minMarginIdx}
+        WITH raw_claims AS (
+          SELECT
+            insurance_bin as bin,
+            insurance_group as grp,
+            drug_name,
+            ndc,
+            ${GP_SQL} as gp_value,
+            COALESCE(quantity_dispensed, 1) as qty,
+            COALESCE(dispensed_date, created_at) as claim_date
+          FROM prescriptions
+          WHERE (${keywordCondition}${ndcCondition})
+          AND insurance_bin IS NOT NULL AND insurance_bin != ''
+          AND ${GP_SQL} >= 10
+          AND COALESCE(dispensed_date, created_at) >= NOW() - INTERVAL '1 day' * $${daysBackIdx}::integer
+        ),
+        per_product AS (
+          SELECT
+            bin, grp, drug_name, ndc,
+            COUNT(*) as claim_count,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_value) as avg_reimbursement,
+            AVG(qty) as avg_qty,
+            MAX(claim_date) as most_recent_claim
+          FROM raw_claims
+          GROUP BY bin, grp, drug_name, ndc
+          HAVING COUNT(*) >= $${minClaimsIdx}::integer
+            AND PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY gp_value) >= $${minMarginIdx}
+        ),
+        ranked_products AS (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY bin, grp ORDER BY avg_reimbursement DESC) as rank
+          FROM per_product
+        )
+        SELECT bin, grp as "group", drug_name as best_drug, ndc as best_ndc,
+               SUM(claim_count) OVER (PARTITION BY bin, grp) as claim_count,
+               avg_reimbursement, avg_qty, most_recent_claim
+        FROM ranked_products WHERE rank = 1
         ORDER BY avg_reimbursement DESC, claim_count DESC
       `;
 
@@ -2585,15 +2589,16 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
           WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL)
         `, [trigger.trigger_id]);
 
-        // Insert matches
+        // Insert matches with best drug name and NDC
         let verified = 0;
         for (const match of matches.rows) {
           await db.query(`
             INSERT INTO trigger_bin_values (
               trigger_id, insurance_bin, insurance_group, coverage_status,
-              verified_at, verified_claim_count, avg_reimbursement, avg_qty, gp_value
+              verified_at, verified_claim_count, avg_reimbursement, avg_qty, gp_value,
+              best_drug_name, best_ndc, most_recent_claim
             )
-            VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $6, $5)
+            VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $6, $5, $7, $8, $9)
             ON CONFLICT DO NOTHING
           `, [
             trigger.trigger_id,
@@ -2601,7 +2606,10 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
             match.group || null,
             parseInt(match.claim_count),
             parseFloat(match.avg_reimbursement) || 0,
-            parseFloat(match.avg_qty) || 1
+            parseFloat(match.avg_qty) || 1,
+            match.best_drug || null,
+            match.best_ndc || null,
+            match.most_recent_claim || null
           ]);
           verified++;
         }
