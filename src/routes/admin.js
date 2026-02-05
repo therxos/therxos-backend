@@ -31,48 +31,57 @@ router.get('/pharmacies', authenticateToken, requireSuperAdmin, async (req, res)
   try {
     // Check if we should include demo pharmacies
     const includeDemo = req.query.includeDemo === 'true';
+    const demoFilter = includeDemo ? '' : "AND p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%'";
 
+    // Use pre-aggregated stats for better performance
     const result = await db.query(`
+      WITH pharmacy_stats AS (
+        SELECT
+          pharmacy_id,
+          COUNT(*) as opportunity_count,
+          COALESCE(SUM(potential_margin_gain), 0) * 12 as total_value,
+          COALESCE(SUM(potential_margin_gain) FILTER (WHERE status IN ('Completed', 'Approved')), 0) * 12 as captured_value,
+          MAX(updated_at) as last_activity
+        FROM opportunities
+        GROUP BY pharmacy_id
+      ),
+      user_counts AS (
+        SELECT pharmacy_id, COUNT(*) as user_count FROM users GROUP BY pharmacy_id
+      ),
+      patient_counts AS (
+        SELECT pharmacy_id, COUNT(*) as patient_count FROM patients GROUP BY pharmacy_id
+      ),
+      last_polls AS (
+        SELECT DISTINCT ON (pharmacy_id)
+          pharmacy_id,
+          json_build_object('run_type', run_type, 'completed_at', completed_at, 'status', status, 'summary', summary) as last_poll
+        FROM poll_runs
+        ORDER BY pharmacy_id, completed_at DESC NULLS LAST
+      ),
+      last_rx AS (
+        SELECT pharmacy_id, MAX(created_at) as last_data_received FROM prescriptions GROUP BY pharmacy_id
+      )
       SELECT
-        p.pharmacy_id,
-        p.client_id,
-        p.pharmacy_name,
-        p.pharmacy_npi,
-        p.ncpdp,
-        p.state,
-        p.address,
-        p.city,
-        p.zip,
-        p.phone,
-        p.fax,
-        p.pms_system,
-        p.settings,
-        p.created_at,
-        p.baa_signed_at,
-        p.service_agreement_signed_at,
-        c.client_name,
-        c.submitter_email,
-        c.status,
-        c.stripe_customer_id,
-        (SELECT COUNT(*) FROM users WHERE pharmacy_id = p.pharmacy_id) as user_count,
-        (SELECT COUNT(*) FROM patients WHERE pharmacy_id = p.pharmacy_id) as patient_count,
-        (SELECT COUNT(*) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as opportunity_count,
-        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as total_value,
-        (SELECT COALESCE(SUM(potential_margin_gain), 0) * 12 FROM opportunities WHERE pharmacy_id = p.pharmacy_id AND status IN ('Completed', 'Approved')) as captured_value,
-        (SELECT MAX(updated_at) FROM opportunities WHERE pharmacy_id = p.pharmacy_id) as last_activity,
-        (SELECT json_build_object(
-          'run_type', pr.run_type,
-          'completed_at', pr.completed_at,
-          'status', pr.status,
-          'summary', pr.summary
-        ) FROM poll_runs pr
-        WHERE pr.pharmacy_id = p.pharmacy_id
-        ORDER BY pr.completed_at DESC NULLS LAST
-        LIMIT 1) as last_poll,
-        (SELECT MAX(rx.created_at) FROM prescriptions rx WHERE rx.pharmacy_id = p.pharmacy_id) as last_data_received
+        p.pharmacy_id, p.client_id, p.pharmacy_name, p.pharmacy_npi, p.ncpdp,
+        p.state, p.address, p.city, p.zip, p.phone, p.fax, p.pms_system,
+        p.settings, p.created_at, p.baa_signed_at, p.service_agreement_signed_at,
+        c.client_name, c.submitter_email, c.status, c.stripe_customer_id,
+        COALESCE(uc.user_count, 0) as user_count,
+        COALESCE(pc.patient_count, 0) as patient_count,
+        COALESCE(ps.opportunity_count, 0) as opportunity_count,
+        COALESCE(ps.total_value, 0) as total_value,
+        COALESCE(ps.captured_value, 0) as captured_value,
+        ps.last_activity,
+        lp.last_poll,
+        lr.last_data_received
       FROM pharmacies p
       JOIN clients c ON c.client_id = p.client_id
-      ${includeDemo ? '' : "WHERE p.pharmacy_name NOT ILIKE '%hero%' AND p.pharmacy_name NOT ILIKE '%demo%' AND p.pharmacy_name NOT ILIKE '%marvel%'"}
+      LEFT JOIN pharmacy_stats ps ON ps.pharmacy_id = p.pharmacy_id
+      LEFT JOIN user_counts uc ON uc.pharmacy_id = p.pharmacy_id
+      LEFT JOIN patient_counts pc ON pc.pharmacy_id = p.pharmacy_id
+      LEFT JOIN last_polls lp ON lp.pharmacy_id = p.pharmacy_id
+      LEFT JOIN last_rx lr ON lr.pharmacy_id = p.pharmacy_id
+      WHERE 1=1 ${demoFilter}
       ORDER BY p.created_at DESC
     `);
 
