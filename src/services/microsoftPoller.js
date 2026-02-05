@@ -134,10 +134,26 @@ export async function handleMicrosoftOAuthCallback(code) {
     redirectUri: redirectUri
   });
 
+  // Log full response for debugging
+  logger.info('Microsoft OAuth token response', {
+    hasAccessToken: !!tokenResponse.accessToken,
+    hasRefreshToken: !!tokenResponse.refreshToken,
+    hasIdToken: !!tokenResponse.idToken,
+    expiresOn: tokenResponse.expiresOn,
+    account: tokenResponse.account?.username,
+    responseKeys: Object.keys(tokenResponse)
+  });
+
+  // CRITICAL: Ensure refresh token is captured
+  if (!tokenResponse.refreshToken) {
+    logger.warn('No refresh token in OAuth response! Token will expire and cannot auto-refresh.');
+  }
+
   // Store tokens in database
   const tokens = {
     accessToken: tokenResponse.accessToken,
-    refreshToken: tokenResponse.refreshToken,
+    refreshToken: tokenResponse.refreshToken || null,
+    idToken: tokenResponse.idToken || null,
     expiresOn: tokenResponse.expiresOn.toISOString(),
     account: tokenResponse.account
   };

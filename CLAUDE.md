@@ -641,6 +641,20 @@ Statuses from V1 are stored in `v1_status` and `v1_notes` columns. The main `sta
 ### DATABASE PROTECTION (Enforced by Trigger)
 **The database has a trigger `protect_actioned_opportunities` that PREVENTS deletion of any opportunity with status != 'Not Submitted'. This is a hard enforcement - the delete will fail with an error.**
 
+### VERIFICATION BEFORE MOVING ON
+**After completing ANY feature or fix, Claude MUST:**
+1. Verify it actually works by testing/querying the result
+2. Tell the user what else should be done to ensure it works properly
+3. DO NOT move on to other tasks until current work is verified complete
+4. If something could break later (tokens expiring, cron timing, etc.) - warn the user immediately
+
+### BUILDING FOR SCALE
+**We are building for 1500+ pharmacies. Every action must consider:**
+1. How will this work with 1500 stores vs the current 7?
+2. Will this query/process scale?
+3. Are there race conditions or conflicts with multi-tenant data?
+4. Don't create one-off solutions - build reusable, scalable systems
+
 ### Rules
 
 1. **MAINTAIN PERMANENT HISTORY** - All actioned opportunities must have a permanent audit trail. Every status change must be logged.
