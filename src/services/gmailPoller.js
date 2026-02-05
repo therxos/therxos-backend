@@ -478,14 +478,40 @@ export async function pollForSPPReports(options = {}) {
   logger.info('Starting SPP email poll', { runId, pharmacyId, daysBack });
 
   try {
+    // CRITICAL GUARDRAIL: Verify pharmacy has gmail_polling_enabled BEFORE processing ANY emails
+    // This prevents cross-contamination of patient data between pharmacies
+    const pharmResult = await db.query(
+      "SELECT pharmacy_name, settings FROM pharmacies WHERE pharmacy_id = $1",
+      [pharmacyId]
+    );
+
+    if (pharmResult.rows.length === 0) {
+      throw new Error(`Pharmacy not found: ${pharmacyId}`);
+    }
+
+    const pharmacyName = pharmResult.rows[0].pharmacy_name;
+    const settings = pharmResult.rows[0].settings || {};
+    const gmailPollingEnabled = settings.gmail_polling_enabled === true;
+
+    if (!gmailPollingEnabled) {
+      logger.warn('BLOCKED: Gmail polling not enabled for pharmacy', {
+        pharmacyId,
+        pharmacyName,
+        reason: 'gmail_polling_enabled is not true in pharmacy settings'
+      });
+      return {
+        success: false,
+        error: 'Gmail polling not enabled for this pharmacy',
+        pharmacyName
+      };
+    }
+
+    logger.info('Gmail polling authorized for pharmacy', { pharmacyId, pharmacyName });
+
     const gmail = await getGmailClient();
 
     // Get pharmacy's SPP report identifier for email filtering
-    const pharmResult = await db.query(
-      "SELECT settings FROM pharmacies WHERE pharmacy_id = $1",
-      [pharmacyId]
-    );
-    const sppReportName = pharmResult.rows[0]?.settings?.spp_report_name;
+    const sppReportName = settings.spp_report_name;
 
     // Get already processed email IDs FOR THIS PHARMACY (not globally)
     const intervalDays = parseInt(daysBack) + 1;

@@ -505,26 +505,40 @@ app.use((req, res) => {
 });
 
 // Schedule nightly Gmail poll (6 AM daily - before scan)
+// CRITICAL: Only poll pharmacies that have gmail_polling_enabled = true in settings
+// This prevents cross-contamination of patient data between pharmacies
 cron.schedule('0 6 * * *', async () => {
   logger.info('Starting scheduled Gmail poll');
   try {
-    // Get all active pharmacies
+    // GUARDRAIL: Only poll pharmacies with gmail_polling_enabled = true
+    // This prevents data from being sent to wrong pharmacies
     const pharmacies = await db.query(`
-      SELECT p.pharmacy_id FROM pharmacies p
+      SELECT p.pharmacy_id, p.pharmacy_name FROM pharmacies p
       JOIN clients c ON c.client_id = p.client_id
       WHERE c.status = 'active'
       AND p.pharmacy_name NOT ILIKE '%hero%'
       AND p.pharmacy_name NOT ILIKE '%demo%'
+      AND (p.settings->>'gmail_polling_enabled')::boolean = true
     `);
+
+    if (pharmacies.rows.length === 0) {
+      logger.info('No pharmacies have gmail_polling_enabled, skipping Gmail poll');
+      return;
+    }
+
+    logger.info('Gmail-enabled pharmacies found', {
+      count: pharmacies.rows.length,
+      pharmacies: pharmacies.rows.map(p => p.pharmacy_name)
+    });
 
     const { pollForSPPReports } = await import('./services/gmailPoller.js');
 
     for (const pharmacy of pharmacies.rows) {
       try {
-        logger.info('Polling SPP reports for pharmacy', { pharmacyId: pharmacy.pharmacy_id });
+        logger.info('Polling SPP reports for pharmacy', { pharmacyId: pharmacy.pharmacy_id, name: pharmacy.pharmacy_name });
         await pollForSPPReports({ pharmacyId: pharmacy.pharmacy_id, daysBack: 1 });
       } catch (err) {
-        logger.error('Gmail poll failed for pharmacy', { pharmacyId: pharmacy.pharmacy_id, error: err.message });
+        logger.error('Gmail poll failed for pharmacy', { pharmacyId: pharmacy.pharmacy_id, name: pharmacy.pharmacy_name, error: err.message });
       }
     }
     logger.info('Scheduled Gmail poll completed');
