@@ -2165,9 +2165,9 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         INSERT INTO trigger_bin_values (
           trigger_id, insurance_bin, insurance_group, coverage_status,
           verified_at, verified_claim_count, avg_reimbursement, avg_qty, gp_value,
-          best_drug_name, best_ndc
+          best_drug_name, best_ndc, most_recent_claim
         )
-        VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $6, $5, $7, $8)
+        VALUES ($1, $2, $3, 'verified', NOW(), $4, $5, $6, $5, $7, $8, $9)
         ON CONFLICT DO NOTHING
         RETURNING *
       `, [
@@ -2178,7 +2178,8 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
         parseFloat(match.avg_reimbursement) || 0,
         parseFloat(match.avg_qty) || 1,
         match.best_drug || null,
-        match.best_ndc || null
+        match.best_ndc || null,
+        match.most_recent_claim || null
       ]);
       verified.push(result.rows[0]);
     }
