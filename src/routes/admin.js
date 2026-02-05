@@ -6863,6 +6863,54 @@ router.patch('/pharmacies/:id/fax-settings', authenticateToken, requireSuperAdmi
   }
 });
 
+// PATCH /api/admin/pharmacies/:id/settings - Update pharmacy settings (polling, etc.)
+router.patch('/pharmacies/:id/settings', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { gmail_polling_enabled, microsoft_polling_enabled, spp_report_name } = req.body;
+
+    // Build the settings update object (only include provided fields)
+    // CRITICAL: These settings control which pharmacies receive polled data
+    // Enabling the wrong pharmacy can cause HIPAA-level data leakage
+    const pollingSettings = {};
+    if (gmail_polling_enabled !== undefined) pollingSettings.gmail_polling_enabled = gmail_polling_enabled;
+    if (microsoft_polling_enabled !== undefined) pollingSettings.microsoft_polling_enabled = microsoft_polling_enabled;
+    if (spp_report_name !== undefined) pollingSettings.spp_report_name = spp_report_name;
+
+    if (Object.keys(pollingSettings).length === 0) {
+      return res.status(400).json({ error: 'No valid settings provided' });
+    }
+
+    // Merge into existing JSONB settings
+    const result = await db.query(`
+      UPDATE pharmacies
+      SET settings = COALESCE(settings, '{}'::jsonb) || $1::jsonb,
+          updated_at = NOW()
+      WHERE pharmacy_id = $2
+      RETURNING pharmacy_id, pharmacy_name, settings
+    `, [JSON.stringify(pollingSettings), id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    logger.info('Pharmacy polling settings updated', {
+      pharmacyId: id,
+      pharmacyName: result.rows[0].pharmacy_name,
+      pollingSettings,
+      updatedBy: req.user.userId
+    });
+
+    res.json({
+      success: true,
+      pharmacy: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating pharmacy settings:', error);
+    res.status(500).json({ error: 'Failed to update pharmacy settings' });
+  }
+});
+
 // GET /api/admin/fax-overview - Platform-wide fax stats for admin dashboard
 router.get('/fax-overview', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {

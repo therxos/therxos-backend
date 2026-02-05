@@ -549,7 +549,8 @@ cron.schedule('0 6 * * *', async () => {
   timezone: 'America/New_York'
 });
 
-// Schedule nightly Microsoft/Outcomes poll (6:15 AM daily - for RX30 clients like Aracoma)
+// Schedule nightly Microsoft/Outcomes poll (6:15 AM daily - for RX30 clients)
+// CRITICAL: Only poll pharmacies that have microsoft_polling_enabled = true
 cron.schedule('15 6 * * *', async () => {
   logger.info('Starting scheduled Microsoft/Outcomes poll');
   try {
@@ -563,25 +564,30 @@ cron.schedule('15 6 * * *', async () => {
       return;
     }
 
-    // Get Aracoma pharmacy (RX30 client that receives Outcomes reports)
-    const aracomaResult = await db.query(`
-      SELECT p.pharmacy_id FROM pharmacies p
+    // GUARDRAIL: Only poll pharmacies with microsoft_polling_enabled = true
+    const pharmacies = await db.query(`
+      SELECT p.pharmacy_id, p.pharmacy_name FROM pharmacies p
       JOIN clients c ON c.client_id = p.client_id
       WHERE c.status = 'active'
-      AND p.pharmacy_name ILIKE '%aracoma%'
+      AND (p.settings->>'microsoft_polling_enabled')::boolean = true
     `);
 
-    if (aracomaResult.rows.length === 0) {
-      logger.info('No RX30 pharmacies found for Outcomes poll');
+    if (pharmacies.rows.length === 0) {
+      logger.info('No pharmacies have microsoft_polling_enabled, skipping Outcomes poll');
       return;
     }
 
-    for (const pharmacy of aracomaResult.rows) {
+    logger.info('Microsoft-enabled pharmacies found', {
+      count: pharmacies.rows.length,
+      pharmacies: pharmacies.rows.map(p => p.pharmacy_name)
+    });
+
+    for (const pharmacy of pharmacies.rows) {
       try {
-        logger.info('Polling Outcomes reports for pharmacy', { pharmacyId: pharmacy.pharmacy_id });
+        logger.info('Polling Outcomes reports for pharmacy', { pharmacyId: pharmacy.pharmacy_id, name: pharmacy.pharmacy_name });
         await pollForOutcomesReports({ pharmacyId: pharmacy.pharmacy_id, daysBack: 1 });
       } catch (err) {
-        logger.error('Outcomes poll failed for pharmacy', { pharmacyId: pharmacy.pharmacy_id, error: err.message });
+        logger.error('Outcomes poll failed for pharmacy', { pharmacyId: pharmacy.pharmacy_id, name: pharmacy.pharmacy_name, error: err.message });
       }
     }
     logger.info('Scheduled Microsoft/Outcomes poll completed');
