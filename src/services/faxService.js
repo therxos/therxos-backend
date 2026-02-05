@@ -24,6 +24,34 @@ async function getFaxClient() {
 }
 
 /**
+ * Normalize fax number to E.164 format with +1 for US numbers
+ * @param {string} number - Fax number in any format
+ * @returns {string} Normalized fax number with +1 prefix
+ */
+function normalizeFaxNumber(number) {
+  // Remove all non-digit characters
+  const digits = (number || '').replace(/\D/g, '');
+
+  // If it's 10 digits, assume US and add +1
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+
+  // If it's 11 digits starting with 1, add +
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+${digits}`;
+  }
+
+  // If already has +, return as-is
+  if (number.startsWith('+')) {
+    return number;
+  }
+
+  // Otherwise return with + prefix (international)
+  return `+${digits}`;
+}
+
+/**
  * Run all pre-send safety checks without sending
  * Returns { canSend, warnings[], savedFaxNumber, dailyCount, dailyLimit, cooldownInfo }
  */
@@ -201,7 +229,7 @@ export async function sendFax({
       }],
       recipients: [{
         type: 'fax_number',
-        value: prescriberFaxNumber
+        value: normalizeFaxNumber(prescriberFaxNumber)
       }],
       subject: `Therapeutic Recommendation - ${prescriberName || 'Prescriber'}`,
       header: 'TheRxOS',
