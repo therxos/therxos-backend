@@ -104,17 +104,21 @@ async function getGraphClient() {
 /**
  * Generate OAuth authorization URL for Microsoft
  */
-export function getMicrosoftAuthUrl() {
+export async function getMicrosoftAuthUrl() {
   const msalClient = getMsalClient();
 
   const redirectUri = process.env.MICROSOFT_REDIRECT_URI ||
-    'https://therxos-backend-production.up.railway.app/api/microsoft/callback';
+    'https://therxos-backend-production.up.railway.app/api/automation/microsoft/callback';
 
-  const authUrl = msalClient.getAuthCodeUrl({
+  // MSAL getAuthCodeUrl returns a Promise - must await it
+  const authUrl = await msalClient.getAuthCodeUrl({
     scopes: USER_SCOPES,
     redirectUri: redirectUri,
-    prompt: 'consent'
+    prompt: 'consent',
+    responseMode: 'query'
   });
+
+  logger.info('Generated Microsoft auth URL', { redirectUri, scopes: USER_SCOPES });
 
   return authUrl;
 }
@@ -126,7 +130,7 @@ export async function handleMicrosoftOAuthCallback(code) {
   const msalClient = getMsalClient();
 
   const redirectUri = process.env.MICROSOFT_REDIRECT_URI ||
-    'https://therxos-backend-production.up.railway.app/api/microsoft/callback';
+    'https://therxos-backend-production.up.railway.app/api/automation/microsoft/callback';
 
   const tokenResponse = await msalClient.acquireTokenByCode({
     code: code,
