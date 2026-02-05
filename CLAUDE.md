@@ -106,6 +106,81 @@ TheRxOS is a multi-tenant SaaS platform for independent pharmacies to identify a
 
 ---
 
+## Email Polling Systems (CRITICAL - Read Carefully!)
+
+TheRxOS automatically ingests prescription data via email polling. **EACH PHARMACY USES ONLY ONE POLLING METHOD.** Never mix them.
+
+### Gmail Polling (Pioneer/SPP)
+**For:** Pharmacies using Pioneer PMS
+**Email source:** stan@therxos.com Gmail inbox
+**Sender:** Pioneer SPP nightly export emails
+**Format:** CSV attachments with SPP export columns
+**Service:** `src/services/gmailPoller.js`
+**Cron:** 6:00 AM ET daily
+
+**Settings required:**
+```json
+{
+  "gmail_polling_enabled": true,
+  "spp_report_name": null  // or specific filter like "therxos-pharmacy"
+}
+```
+
+**Current Gmail-enabled pharmacies:**
+- Heights Chemist
+- Bravo Pharmacy
+- Noor Pharmacy (with filter "therxos-noor")
+- Orlando Pharmacy
+
+### Microsoft Polling (RX30/Outcomes)
+**For:** Pharmacies using RX30 PMS with Outcomes integration
+**Email source:** Microsoft 365 Outlook inbox (shared)
+**Sender:** rxinsights_noreply@outcomes.com
+**Format:** ENCRYPTED Purview messages containing CSV attachments
+**Service:** `src/services/microsoftPoller.js`
+**Cron:** 6:15 AM ET daily
+
+**Settings required:**
+```json
+{
+  "microsoft_polling_enabled": true,
+  "gmail_polling_enabled": false  // MUST be false!
+}
+```
+
+**Current Microsoft-enabled pharmacies:**
+- Aracoma Drug
+
+### CRITICAL Rules
+1. **NEVER set both `gmail_polling_enabled` AND `microsoft_polling_enabled` to true** - this causes cross-contamination
+2. **Check the pharmacy's PMS system before enabling polling:**
+   - Pioneer → Gmail polling
+   - RX30/Outcomes → Microsoft polling
+3. **Microsoft tokens are SHARED** - stored in `system_settings` table, not per-pharmacy
+4. **Gmail tokens are SHARED** - stored in `system_settings` table via `gmail_oauth_tokens`
+5. **Processed emails are tracked per-pharmacy** - `processed_emails` table has `pharmacy_id` column
+
+### Debugging Polling Issues
+```sql
+-- Check pharmacy polling settings
+SELECT pharmacy_name,
+       settings->>'gmail_polling_enabled' as gmail,
+       settings->>'microsoft_polling_enabled' as microsoft
+FROM pharmacies WHERE pharmacy_name ILIKE '%name%';
+
+-- Check recent poll runs
+SELECT run_type, pharmacy_id, started_at, summary
+FROM poll_runs ORDER BY started_at DESC LIMIT 10;
+
+-- Check processed emails for a pharmacy
+SELECT source, processed_at, results
+FROM processed_emails
+WHERE pharmacy_id = 'uuid'
+ORDER BY processed_at DESC LIMIT 5;
+```
+
+---
+
 ## Repository Structure
 
 ```
