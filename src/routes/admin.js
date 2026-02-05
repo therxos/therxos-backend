@@ -1002,8 +1002,14 @@ router.get('/triggers', authenticateToken, requireSuperAdmin, async (req, res) =
           'verifiedClaimCount', tbv.verified_claim_count,
           'avgReimbursement', tbv.avg_reimbursement,
           'avgQty', tbv.avg_qty,
-          'bestDrugName', tbv.best_drug_name,
-          'bestNdc', tbv.best_ndc
+          'bestDrugName', COALESCE(CASE WHEN tbv.is_manual_override THEN tbv.manual_drug_name END, tbv.best_drug_name),
+          'bestNdc', COALESCE(CASE WHEN tbv.is_manual_override THEN tbv.manual_ndc END, tbv.best_ndc),
+          'isManualOverride', tbv.is_manual_override,
+          'manualNdc', tbv.manual_ndc,
+          'manualDrugName', tbv.manual_drug_name,
+          'manualGpValue', tbv.manual_gp_value,
+          'manualNote', tbv.manual_note,
+          'mostRecentClaim', tbv.most_recent_claim
         )) FROM trigger_bin_values tbv WHERE tbv.trigger_id = t.trigger_id AND tbv.insurance_bin NOT LIKE 'MEDICARE:%') as bin_values,
         (SELECT json_agg(json_build_object(
           'type', tr.restriction_type,
@@ -2654,7 +2660,7 @@ router.put('/triggers/:id/bin-values/bulk', authenticateToken, requireSuperAdmin
 
     const results = [];
     for (const update of updates) {
-      const { bin, group, gpValue, coverageStatus } = update;
+      const { bin, group, gpValue, coverageStatus, isManualOverride, manualNdc, manualDrugName, manualGpValue, manualNote } = update;
 
       if (!bin) {
         continue; // Skip entries without BIN
@@ -2672,14 +2678,20 @@ router.put('/triggers/:id/bin-values/bulk', authenticateToken, requireSuperAdmin
           UPDATE trigger_bin_values SET
             gp_value = COALESCE($2, gp_value),
             coverage_status = COALESCE($3, coverage_status),
+            is_manual_override = COALESCE($4, is_manual_override),
+            manual_ndc = CASE WHEN $4 = true THEN $5 ELSE manual_ndc END,
+            manual_drug_name = CASE WHEN $4 = true THEN $6 ELSE manual_drug_name END,
+            manual_gp_value = CASE WHEN $4 = true THEN $7 ELSE manual_gp_value END,
+            manual_note = CASE WHEN $4 = true THEN $8 ELSE manual_note END,
+            manual_updated_at = CASE WHEN $4 = true THEN NOW() ELSE manual_updated_at END,
             updated_at = NOW()
           WHERE id = $1 RETURNING *
-        `, [existingRow.rows[0].id, gpValue, coverageStatus || 'unknown']);
+        `, [existingRow.rows[0].id, gpValue, coverageStatus || 'unknown', isManualOverride || false, manualNdc || null, manualDrugName || null, manualGpValue || null, manualNote || null]);
       } else {
         result = await db.query(`
-          INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, coverage_status, updated_at)
-          VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *
-        `, [triggerId, bin, group || null, gpValue, coverageStatus || 'unknown']);
+          INSERT INTO trigger_bin_values (trigger_id, insurance_bin, insurance_group, gp_value, coverage_status, is_manual_override, manual_ndc, manual_drug_name, manual_gp_value, manual_note, manual_updated_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $6 THEN NOW() ELSE NULL END, NOW()) RETURNING *
+        `, [triggerId, bin, group || null, gpValue, coverageStatus || 'unknown', isManualOverride || false, manualNdc || null, manualDrugName || null, manualGpValue || null, manualNote || null]);
       }
 
       results.push(result.rows[0]);

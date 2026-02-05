@@ -287,13 +287,14 @@ async function scanAdminTriggers(pharmacyId, batchId) {
         (SELECT json_agg(json_build_object(
           'insurance_bin', tbv.insurance_bin,
           'insurance_group', tbv.insurance_group,
-          'gp_value', tbv.gp_value,
+          'gp_value', COALESCE(CASE WHEN tbv.is_manual_override THEN tbv.manual_gp_value END, tbv.gp_value),
           'coverage_status', tbv.coverage_status,
           'is_excluded', tbv.is_excluded,
-          'best_ndc', tbv.best_ndc,
-          'best_drug_name', tbv.best_drug_name,
+          'best_ndc', COALESCE(CASE WHEN tbv.is_manual_override THEN tbv.manual_ndc END, tbv.best_ndc),
+          'best_drug_name', COALESCE(CASE WHEN tbv.is_manual_override THEN tbv.manual_drug_name END, tbv.best_drug_name),
           'avg_qty', tbv.avg_qty,
-          'most_recent_claim', tbv.most_recent_claim
+          'most_recent_claim', tbv.most_recent_claim,
+          'is_manual_override', tbv.is_manual_override
         ))
         FROM trigger_bin_values tbv
         WHERE tbv.trigger_id = t.trigger_id
