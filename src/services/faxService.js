@@ -432,11 +432,19 @@ export async function handleWebhook(payload, signatureHeader) {
     return { processed: false, reason: 'No fax ID in payload' };
   }
 
-  // Find the fax log entry by Notifyre ID
-  const result = await db.query(
+  // Find the fax log entry - check both notifyre_fax_id and our fax_id (clientReference)
+  let result = await db.query(
     'SELECT fax_id FROM fax_log WHERE notifyre_fax_id = $1',
     [String(faxId)]
   );
+
+  // If not found by notifyre_fax_id, try our fax_id (Notifyre uses clientReference)
+  if (result.rows.length === 0) {
+    result = await db.query(
+      'SELECT fax_id FROM fax_log WHERE fax_id = $1',
+      [String(faxId)]
+    );
+  }
 
   if (result.rows.length === 0) {
     logger.warn('Webhook for unknown fax ID', { notifyreFaxId: faxId });

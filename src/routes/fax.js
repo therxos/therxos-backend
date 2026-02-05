@@ -436,12 +436,21 @@ router.get('/:faxId/status', authenticateToken, async (req, res) => {
  */
 router.post('/webhook', async (req, res) => {
   try {
+    logger.info('Fax webhook received', {
+      body: req.body,
+      headers: {
+        signature: req.headers['x-notifyre-signature'] || req.headers['x-signature'],
+        contentType: req.headers['content-type']
+      }
+    });
+
     const signatureHeader = req.headers['x-notifyre-signature'] || req.headers['x-signature'];
     const result = await handleWebhook(req.body, signatureHeader);
 
+    logger.info('Fax webhook processed', { result });
     res.status(200).json({ received: true, ...result });
   } catch (error) {
-    logger.error('Fax webhook error', { error: error.message });
+    logger.error('Fax webhook error', { error: error.message, body: req.body });
     // Return 200 to prevent Notifyre from retrying on validation errors
     res.status(200).json({ received: false, error: error.message });
   }
