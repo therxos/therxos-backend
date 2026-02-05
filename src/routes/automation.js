@@ -207,7 +207,8 @@ router.put('/settings', authenticateToken, requireSuperAdmin, async (req, res) =
 // ============================================
 
 // GET /api/automation/microsoft/auth-url - Get Microsoft OAuth authorization URL
-router.get('/microsoft/auth-url', authenticateToken, requireSuperAdmin, async (req, res) => {
+// Temporarily public for re-auth when token expires
+router.get('/microsoft/auth-url', async (req, res) => {
   try {
     const authUrl = await getMicrosoftAuthUrl();
     res.json({ authUrl });
