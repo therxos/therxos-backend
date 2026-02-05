@@ -132,6 +132,43 @@ router.get('/pharmacy-info', authenticateToken, async (req, res) => {
   }
 });
 
+// Update pharmacy contact info
+router.put('/pharmacy-info', authenticateToken, async (req, res) => {
+  try {
+    const { phone, fax, address, city, state, zip } = req.body;
+    const pharmacyId = req.user.pharmacyId;
+
+    // Only allow admins/owners to update
+    if (!['super_admin', 'admin', 'owner'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only admins can update pharmacy info' });
+    }
+
+    const result = await db.query(
+      `UPDATE pharmacies SET
+        phone = COALESCE($2, phone),
+        fax = COALESCE($3, fax),
+        address = COALESCE($4, address),
+        city = COALESCE($5, city),
+        state = COALESCE($6, state),
+        zip = COALESCE($7, zip),
+        updated_at = NOW()
+       WHERE pharmacy_id = $1
+       RETURNING pharmacy_id, pharmacy_name, pharmacy_npi as npi, ncpdp, address, city, state, zip, phone, fax`,
+      [pharmacyId, phone, fax, address, city, state, zip]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Pharmacy not found' });
+    }
+
+    logger.info('Pharmacy info updated', { pharmacyId, updatedBy: req.user.userId });
+    res.json({ pharmacy: result.rows[0] });
+  } catch (error) {
+    logger.error('Update pharmacy info error', { error: error.message });
+    res.status(500).json({ error: 'Failed to update pharmacy info' });
+  }
+});
+
 // Get pharmacy settings
 router.get('/pharmacy/:pharmacyId', authenticateToken, async (req, res) => {
   try {
