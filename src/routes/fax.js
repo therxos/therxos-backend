@@ -244,6 +244,73 @@ router.get('/stats', authenticateToken, async (req, res) => {
 });
 
 /**
+ * GET /api/fax/queue
+ * Get pending/queued faxes for the pharmacy with ETA information
+ */
+router.get('/queue', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+    if (!pharmacyId) {
+      return res.status(400).json({ error: 'No pharmacy associated with user' });
+    }
+
+    const result = await db.query(`
+      SELECT fl.fax_id, fl.fax_status, fl.created_at, fl.prescriber_name,
+             fl.prescriber_fax_number, fl.notifyre_fax_id, fl.failed_reason,
+             fl.current_drug, fl.recommended_drug,
+             p.first_name as patient_first, p.last_name as patient_last
+      FROM fax_log fl
+      LEFT JOIN patients p ON p.patient_id = fl.patient_id
+      WHERE fl.pharmacy_id = $1
+        AND fl.fax_status IN ('queued', 'sending', 'accepted', 'in_progress')
+      ORDER BY fl.created_at DESC
+    `, [pharmacyId]);
+
+    // Add ETA and status description
+    const faxes = result.rows.map(f => {
+      const minutesSinceSent = Math.round((Date.now() - new Date(f.created_at).getTime()) / 60000);
+      let statusDescription = '';
+      let eta = '';
+
+      switch (f.fax_status) {
+        case 'queued':
+          statusDescription = 'Waiting to be processed by fax service';
+          eta = minutesSinceSent < 5 ? 'Should deliver within 1-5 minutes' : 'Processing may be delayed';
+          break;
+        case 'sending':
+          statusDescription = 'Currently being transmitted';
+          eta = 'Should complete within 1-2 minutes';
+          break;
+        case 'in_progress':
+          statusDescription = 'Transmission in progress';
+          eta = 'Should complete shortly';
+          break;
+        default:
+          statusDescription = 'Processing';
+          eta = 'Check back soon';
+      }
+
+      return {
+        ...f,
+        patient_name: f.patient_first && f.patient_last
+          ? `${f.patient_first} ${f.patient_last}` : 'Unknown',
+        minutes_since_sent: minutesSinceSent,
+        status_description: statusDescription,
+        eta: eta
+      };
+    });
+
+    res.json({
+      pending_count: faxes.length,
+      faxes: faxes
+    });
+  } catch (error) {
+    logger.error('Fax queue error', { error: error.message });
+    res.status(500).json({ error: 'Failed to get fax queue' });
+  }
+});
+
+/**
  * GET /api/fax/:faxId
  * Get single fax detail
  */
