@@ -254,28 +254,34 @@ router.get('/queue', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'No pharmacy associated with user' });
     }
 
+    // Include failed faxes from last 24 hours so user can resend
     const result = await db.query(`
       SELECT fl.fax_id, fl.fax_status, fl.created_at, fl.prescriber_name,
              fl.prescriber_fax_number, fl.notifyre_fax_id, fl.failed_reason,
-             fl.current_drug, fl.recommended_drug,
+             fl.current_drug, fl.recommended_drug, fl.opportunity_id,
              p.first_name as patient_first, p.last_name as patient_last
       FROM fax_log fl
       LEFT JOIN patients p ON p.patient_id = fl.patient_id
       WHERE fl.pharmacy_id = $1
-        AND fl.fax_status IN ('queued', 'sending', 'accepted', 'in_progress')
+        AND (
+          fl.fax_status IN ('queued', 'sending', 'accepted', 'in_progress')
+          OR (fl.fax_status = 'failed' AND fl.created_at > NOW() - INTERVAL '24 hours')
+        )
       ORDER BY fl.created_at DESC
     `, [pharmacyId]);
 
-    // Add ETA and status description
+    // Add ETA, status description, and resend capability
     const faxes = result.rows.map(f => {
       const minutesSinceSent = Math.round((Date.now() - new Date(f.created_at).getTime()) / 60000);
       let statusDescription = '';
       let eta = '';
+      let canResend = false;
 
       switch (f.fax_status) {
         case 'queued':
           statusDescription = 'Waiting to be processed by fax service';
           eta = minutesSinceSent < 5 ? 'Should deliver within 1-5 minutes' : 'Processing may be delayed';
+          canResend = minutesSinceSent > 10; // Allow resend if stuck for 10+ minutes
           break;
         case 'sending':
           statusDescription = 'Currently being transmitted';
@@ -284,6 +290,11 @@ router.get('/queue', authenticateToken, async (req, res) => {
         case 'in_progress':
           statusDescription = 'Transmission in progress';
           eta = 'Should complete shortly';
+          break;
+        case 'failed':
+          statusDescription = f.failed_reason || 'Fax delivery failed';
+          eta = 'Click Resend to try again';
+          canResend = true;
           break;
         default:
           statusDescription = 'Processing';
@@ -296,7 +307,8 @@ router.get('/queue', authenticateToken, async (req, res) => {
           ? `${f.patient_first} ${f.patient_last}` : 'Unknown',
         minutes_since_sent: minutesSinceSent,
         status_description: statusDescription,
-        eta: eta
+        eta: eta,
+        can_resend: canResend
       };
     });
 
@@ -307,6 +319,62 @@ router.get('/queue', authenticateToken, async (req, res) => {
   } catch (error) {
     logger.error('Fax queue error', { error: error.message });
     res.status(500).json({ error: 'Failed to get fax queue' });
+  }
+});
+
+/**
+ * POST /api/fax/:faxId/resend
+ * Reset a failed fax so user can resend it
+ */
+router.post('/:faxId/resend', authenticateToken, async (req, res) => {
+  try {
+    const { faxId } = req.params;
+    const pharmacyId = req.user.pharmacyId;
+
+    // Get the failed fax
+    const faxResult = await db.query(`
+      SELECT * FROM fax_log WHERE fax_id = $1 AND pharmacy_id = $2
+    `, [faxId, pharmacyId]);
+
+    if (faxResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Fax not found' });
+    }
+
+    const fax = faxResult.rows[0];
+
+    if (!['failed', 'queued'].includes(fax.fax_status)) {
+      return res.status(400).json({ error: 'Only failed or stuck faxes can be resent' });
+    }
+
+    // Reset the opportunity to Not Submitted so they can fax again
+    if (fax.opportunity_id) {
+      await db.query(`
+        UPDATE opportunities SET
+          status = 'Not Submitted',
+          updated_at = NOW()
+        WHERE opportunity_id = $1
+      `, [fax.opportunity_id]);
+    }
+
+    // Mark old fax as cancelled
+    await db.query(`
+      UPDATE fax_log SET
+        fax_status = 'cancelled',
+        failed_reason = COALESCE(failed_reason, '') || ' - Resend requested',
+        updated_at = NOW()
+      WHERE fax_id = $1
+    `, [faxId]);
+
+    logger.info('Fax reset for resend', { faxId, opportunityId: fax.opportunity_id, userId: req.user.userId });
+
+    res.json({
+      success: true,
+      message: 'Fax reset. You can now resend from the opportunity.',
+      opportunity_id: fax.opportunity_id
+    });
+  } catch (error) {
+    logger.error('Fax resend error', { error: error.message });
+    res.status(500).json({ error: 'Failed to reset fax for resend' });
   }
 });
 
