@@ -353,36 +353,48 @@ export async function checkFaxStatus(faxLogId) {
 
   const faxLog = result.rows[0];
   if (!faxLog) throw new Error('Fax log entry not found');
-  if (!faxLog.notifyre_fax_id) return faxLog; // Can't check without Notifyre ID
 
   try {
     const client = await getFaxClient();
+
+    // Search recent faxes - Notifyre uses our fax_id as clientReference
     const statusResult = await client.listSentFaxes({
-      fromDate: new Date(faxLog.sent_at).toISOString(),
+      fromDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // Last 7 days
       toDate: new Date().toISOString(),
-      limit: 10
+      limit: 50
     });
 
-    // Find our fax in the results
+    // Find our fax by clientReference (our fax_id) or by notifyre_fax_id
     const faxes = statusResult?.payload?.faxes || statusResult?.payload || [];
     const match = Array.isArray(faxes)
-      ? faxes.find(f => String(f.id) === String(faxLog.notifyre_fax_id))
+      ? faxes.find(f =>
+          String(f.clientReference) === String(faxLogId) ||
+          String(f.id) === String(faxLogId) ||
+          (faxLog.notifyre_fax_id && String(f.id) === String(faxLog.notifyre_fax_id))
+        )
       : null;
 
     if (match) {
       const newStatus = match.status || faxLog.fax_status;
+      const failedReason = match.failureReason || null;
+
       await db.query(`
         UPDATE fax_log SET
           fax_status = $2,
-          page_count = COALESCE($3, page_count),
-          cost_cents = COALESCE($4, cost_cents),
+          notifyre_fax_id = COALESCE(notifyre_fax_id, $3),
+          page_count = COALESCE($4, page_count),
+          cost_cents = COALESCE($5, cost_cents),
+          failed_reason = CASE WHEN $2 = 'failed' THEN $6 ELSE failed_reason END,
           delivered_at = CASE WHEN $2 = 'successful' THEN NOW() ELSE delivered_at END,
           last_status_check = NOW(),
           updated_at = NOW()
         WHERE fax_id = $1
-      `, [faxLogId, newStatus, match.pages || null, match.cost ? Math.round(match.cost * 100) : null]);
+      `, [faxLogId, newStatus, String(match.id), match.pages || null, match.cost ? Math.round(match.cost * 100) : null, failedReason]);
 
+      logger.info('Fax status updated from Notifyre', { faxLogId, oldStatus: faxLog.fax_status, newStatus });
       return { ...faxLog, fax_status: newStatus };
+    } else {
+      logger.warn('Fax not found in Notifyre', { faxLogId, searchedFaxes: faxes.length });
     }
   } catch (err) {
     logger.warn('Failed to check fax status from Notifyre', { faxLogId, error: err.message });

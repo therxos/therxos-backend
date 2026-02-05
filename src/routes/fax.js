@@ -431,6 +431,39 @@ router.get('/:faxId/status', authenticateToken, async (req, res) => {
 });
 
 /**
+ * POST /api/fax/refresh-all
+ * Refresh status for all pending faxes from Notifyre
+ */
+router.post('/refresh-all', authenticateToken, async (req, res) => {
+  try {
+    const pharmacyId = req.user.pharmacyId;
+
+    // Get all pending faxes for this pharmacy
+    const pending = await db.query(`
+      SELECT fax_id FROM fax_log
+      WHERE pharmacy_id = $1
+        AND fax_status IN ('queued', 'sending', 'accepted', 'in_progress')
+        AND created_at > NOW() - INTERVAL '7 days'
+    `, [pharmacyId]);
+
+    const results = [];
+    for (const row of pending.rows) {
+      try {
+        const updated = await checkFaxStatus(row.fax_id);
+        results.push({ fax_id: row.fax_id, status: updated.fax_status });
+      } catch (e) {
+        results.push({ fax_id: row.fax_id, error: e.message });
+      }
+    }
+
+    res.json({ refreshed: results.length, results });
+  } catch (error) {
+    logger.error('Refresh all faxes error', { error: error.message });
+    res.status(500).json({ error: 'Failed to refresh fax statuses' });
+  }
+});
+
+/**
  * POST /api/fax/webhook
  * Notifyre delivery callback - no JWT auth, uses signature verification
  */
