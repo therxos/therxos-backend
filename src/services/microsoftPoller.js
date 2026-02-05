@@ -16,19 +16,70 @@ import { autoCompleteOpportunities } from './gmailPoller.js';
 const SCOPES = ['https://graph.microsoft.com/.default'];
 const USER_SCOPES = ['Mail.Read', 'Files.Read', 'Files.ReadWrite', 'offline_access'];
 
-// MSAL configuration
+// Database-backed token cache for MSAL
+class DatabaseTokenCache {
+  constructor() {
+    this.cache = null;
+  }
+
+  async beforeCacheAccess(context) {
+    try {
+      const result = await db.query(
+        "SELECT setting_value FROM system_settings WHERE setting_key = 'msal_token_cache'"
+      );
+      if (result.rows.length > 0 && result.rows[0].setting_value) {
+        context.tokenCache.deserialize(result.rows[0].setting_value);
+      }
+    } catch (e) {
+      logger.error('Failed to load MSAL cache from database', { error: e.message });
+    }
+  }
+
+  async afterCacheAccess(context) {
+    if (context.cacheHasChanged) {
+      try {
+        const serialized = context.tokenCache.serialize();
+        await db.query(`
+          INSERT INTO system_settings (setting_key, setting_value, created_at, updated_at)
+          VALUES ('msal_token_cache', $1, NOW(), NOW())
+          ON CONFLICT (setting_key) DO UPDATE SET setting_value = $1, updated_at = NOW()
+        `, [serialized]);
+      } catch (e) {
+        logger.error('Failed to save MSAL cache to database', { error: e.message });
+      }
+    }
+  }
+}
+
+// Singleton cache plugin
+let cachePlugin = null;
+function getCachePlugin() {
+  if (!cachePlugin) {
+    const cache = new DatabaseTokenCache();
+    cachePlugin = {
+      beforeCacheAccess: (context) => cache.beforeCacheAccess(context),
+      afterCacheAccess: (context) => cache.afterCacheAccess(context)
+    };
+  }
+  return cachePlugin;
+}
+
+// MSAL configuration with cache
 function getMsalConfig() {
   return {
     auth: {
       clientId: process.env.MICROSOFT_CLIENT_ID,
       clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
       authority: `https://login.microsoftonline.com/${process.env.MICROSOFT_TENANT_ID}`
+    },
+    cache: {
+      cachePlugin: getCachePlugin()
     }
   };
 }
 
 /**
- * Create MSAL client application
+ * Create MSAL client application with persistent cache
  */
 function getMsalClient() {
   const config = getMsalConfig();
@@ -36,10 +87,12 @@ function getMsalClient() {
 }
 
 /**
- * Get Microsoft Graph client using stored tokens
+ * Get Microsoft Graph client using MSAL with auto-refresh
  */
 async function getGraphClient() {
-  // Get stored tokens from database
+  const msalClient = getMsalClient();
+
+  // Get account from stored tokens
   const tokenResult = await db.query(
     "SELECT token_data FROM system_settings WHERE setting_key = 'microsoft_oauth_tokens'"
   );
@@ -51,24 +104,40 @@ async function getGraphClient() {
   const tokenData = tokenResult.rows[0].token_data;
   const tokens = typeof tokenData === 'string' ? JSON.parse(tokenData) : tokenData;
 
-  // Check if token needs refresh
-  const msalClient = getMsalClient();
+  let accessToken;
 
-  let accessToken = tokens.accessToken;
+  try {
+    // Try to get token silently (will auto-refresh if needed using MSAL cache)
+    const accounts = await msalClient.getTokenCache().getAllAccounts();
 
-  // If token is expired or will expire in 5 minutes, refresh it
-  const expiresOn = new Date(tokens.expiresOn);
-  const now = new Date();
-  const fiveMinutes = 5 * 60 * 1000;
+    if (accounts.length > 0) {
+      // Use cached account for silent token acquisition
+      const silentResult = await msalClient.acquireTokenSilent({
+        account: accounts[0],
+        scopes: USER_SCOPES
+      });
+      accessToken = silentResult.accessToken;
+      logger.info('Got token silently from MSAL cache');
 
-  if (expiresOn.getTime() - now.getTime() < fiveMinutes) {
-    logger.info('Microsoft token expired or expiring soon, refreshing...');
-
-    try {
+      // Update stored tokens with fresh ones
+      const newTokens = {
+        accessToken: silentResult.accessToken,
+        refreshToken: tokens.refreshToken, // Keep existing refresh token
+        expiresOn: silentResult.expiresOn.toISOString(),
+        account: silentResult.account
+      };
+      await db.query(
+        "UPDATE system_settings SET token_data = $1, updated_at = NOW() WHERE setting_key = 'microsoft_oauth_tokens'",
+        [JSON.stringify(newTokens)]
+      );
+    } else if (tokens.refreshToken) {
+      // Fallback: use refresh token directly if no cached account
+      logger.info('No cached account, using refresh token...');
       const refreshResult = await msalClient.acquireTokenByRefreshToken({
         refreshToken: tokens.refreshToken,
         scopes: USER_SCOPES
       });
+      accessToken = refreshResult.accessToken;
 
       // Update stored tokens
       const newTokens = {
@@ -77,18 +146,24 @@ async function getGraphClient() {
         expiresOn: refreshResult.expiresOn.toISOString(),
         account: refreshResult.account
       };
-
       await db.query(
         "UPDATE system_settings SET token_data = $1, updated_at = NOW() WHERE setting_key = 'microsoft_oauth_tokens'",
         [JSON.stringify(newTokens)]
       );
-
-      accessToken = refreshResult.accessToken;
-      logger.info('Microsoft token refreshed successfully');
-    } catch (refreshError) {
-      logger.error('Failed to refresh Microsoft token', { error: refreshError.message });
-      throw new Error('Microsoft token expired. Please re-authenticate at /api/automation/microsoft/auth-url');
+      logger.info('Token refreshed via refresh token');
+    } else {
+      // No cache and no refresh token - use stored access token if not expired
+      const expiresOn = new Date(tokens.expiresOn);
+      if (expiresOn > new Date()) {
+        accessToken = tokens.accessToken;
+        logger.info('Using stored access token (not expired)');
+      } else {
+        throw new Error('Token expired and no refresh token available');
+      }
     }
+  } catch (silentError) {
+    logger.error('Silent token acquisition failed', { error: silentError.message });
+    throw new Error('Microsoft token expired. Please re-authenticate at /api/automation/microsoft/auth-url');
   }
 
   // Create Graph client with the access token
