@@ -103,11 +103,11 @@ export async function preflightCheck({ pharmacyId, opportunityId, prescriberNpi 
     warnings.push('Opportunity has unresolved data quality issues');
   }
 
-  // Check prescriber NPI exists
+  // Check prescriber NPI exists (warning only - frontend allows manual entry)
   const effectiveNpi = prescriberNpi || opp.prescriber_npi;
   if (!effectiveNpi) {
-    canSend = false;
-    warnings.push('No prescriber NPI available for this opportunity');
+    // Note: Don't block - let frontend require manual NPI entry
+    warnings.push('No prescriber NPI on file - please enter from hardcopy prescription');
   }
 
   // 3. Check daily fax limit
