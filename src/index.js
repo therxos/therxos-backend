@@ -31,6 +31,7 @@ import changelogRoutes from './routes/changelog.js';
 import intakeRoutes from './routes/intake.js';
 import opportunityApprovalRoutes from './routes/opportunity-approval.js';
 import faxRoutes from './routes/fax.js';
+import { checkFaxStatus } from './services/faxService.js';
 import onboardingRoutes from './routes/onboarding.js';
 import ndcReferenceRoutes from './routes/ndc-reference.js';
 import { sendWelcomeEmail } from './services/emailService.js';
@@ -753,6 +754,44 @@ cron.schedule('*/15 * * * *', async () => {
     }
   } catch (error) {
     logger.error('Onboarding email cron error', { error: error.message });
+  }
+}, {
+  timezone: 'America/New_York'
+});
+
+// Poll Notifyre API for fax delivery status updates (every 5 minutes)
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const pending = await db.query(`
+      SELECT fax_id FROM fax_log
+      WHERE fax_status IN ('queued', 'sending', 'accepted', 'in_progress')
+        AND created_at > NOW() - INTERVAL '7 days'
+      ORDER BY created_at DESC
+      LIMIT 50
+    `);
+
+    if (pending.rows.length === 0) return;
+
+    logger.info('Polling Notifyre for fax status updates', { count: pending.rows.length });
+
+    let updated = 0;
+    for (const row of pending.rows) {
+      try {
+        const result = await checkFaxStatus(row.fax_id);
+        if (result.fax_status !== 'queued' && result.fax_status !== 'sending' &&
+            result.fax_status !== 'accepted' && result.fax_status !== 'in_progress') {
+          updated++;
+        }
+      } catch (e) {
+        logger.warn('Failed to poll fax status', { faxId: row.fax_id, error: e.message });
+      }
+    }
+
+    if (updated > 0) {
+      logger.info('Fax status poll complete', { checked: pending.rows.length, updated });
+    }
+  } catch (error) {
+    logger.error('Fax status poll cron error', { error: error.message });
   }
 }, {
   timezone: 'America/New_York'
