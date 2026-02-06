@@ -511,7 +511,19 @@ export async function pollForSPPReports(options = {}) {
     const gmail = await getGmailClient();
 
     // Get pharmacy's SPP report identifier for email filtering
+    // CRITICAL: spp_report_name MUST be set to prevent cross-pharmacy contamination
+    // Without a filter, ALL emails from the shared Gmail inbox would be ingested
     const sppReportName = settings.spp_report_name;
+    if (!sppReportName || !sppReportName.trim()) {
+      logger.error('BLOCKING POLL: spp_report_name is not configured for pharmacy - refusing to poll to prevent cross-pharmacy data contamination', {
+        pharmacyId, pharmacyName
+      });
+      return {
+        success: false,
+        error: 'spp_report_name must be configured before Gmail polling can run. This prevents patient data from one pharmacy being ingested into another.',
+        pharmacyName
+      };
+    }
 
     // Get already processed email IDs FOR THIS PHARMACY (not globally)
     const intervalDays = parseInt(daysBack) + 1;

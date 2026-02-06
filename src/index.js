@@ -510,15 +510,18 @@ app.use((req, res) => {
 cron.schedule('0 6 * * *', async () => {
   logger.info('Starting scheduled Gmail poll');
   try {
-    // GUARDRAIL: Only poll pharmacies with gmail_polling_enabled = true
-    // This prevents data from being sent to wrong pharmacies
+    // GUARDRAIL: Only poll pharmacies with gmail_polling_enabled = true AND spp_report_name set
+    // CRITICAL: spp_report_name is REQUIRED to prevent cross-pharmacy data contamination
+    // Without it, ALL emails from the shared inbox would be ingested into the pharmacy
     const pharmacies = await db.query(`
-      SELECT p.pharmacy_id, p.pharmacy_name FROM pharmacies p
+      SELECT p.pharmacy_id, p.pharmacy_name, p.settings->>'spp_report_name' as spp_filter FROM pharmacies p
       JOIN clients c ON c.client_id = p.client_id
       WHERE c.status = 'active'
       AND p.pharmacy_name NOT ILIKE '%hero%'
       AND p.pharmacy_name NOT ILIKE '%demo%'
       AND (p.settings->>'gmail_polling_enabled')::boolean = true
+      AND p.settings->>'spp_report_name' IS NOT NULL
+      AND TRIM(p.settings->>'spp_report_name') != ''
     `);
 
     if (pharmacies.rows.length === 0) {

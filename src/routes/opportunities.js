@@ -89,6 +89,7 @@ router.get('/', authenticateToken, async (req, res) => {
         LIMIT 1
       ) tbv_bin ON tbv.trigger_id IS NULL
       WHERE o.pharmacy_id = $1
+        AND o.patient_id IS NOT NULL
         AND (o.status != 'Not Submitted' OR o.opportunity_id NOT IN (
           SELECT dqi.opportunity_id FROM data_quality_issues dqi
           WHERE dqi.status = 'pending' AND dqi.opportunity_id IS NOT NULL
