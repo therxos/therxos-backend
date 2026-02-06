@@ -60,7 +60,6 @@ router.get('/', authenticateToken, async (req, res) => {
         COALESCE(o.potential_margin_gain, 0) * COALESCE(t.annual_fills, 12) as annual_margin_gain,
         CASE
           WHEN o.trigger_id IS NULL THEN NULL
-          WHEN tbv.coverage_status = 'excluded' OR tbv.is_excluded = true THEN 'excluded'
           WHEN tbv.coverage_status IN ('verified', 'works') THEN 'verified'
           WHEN tbv.verified_claim_count > 0 THEN 'verified'
           WHEN tbv_bin.coverage_status IN ('verified', 'works') THEN 'likely'
@@ -129,7 +128,17 @@ router.get('/', authenticateToken, async (req, res) => {
       margin: 'o.potential_margin_gain',
       date: 'o.created_at',
       priority: 'o.clinical_priority',
-      type: 'o.opportunity_type'
+      type: 'o.opportunity_type',
+      patient: 'p.last_name',
+      opportunity: 'o.current_drug_name',
+      recommended: 'o.recommended_drug_name',
+      prescriber: 'o.prescriber_name',
+      status: 'o.status',
+      actioned: 'o.actioned_at',
+      qty: 'o.avg_dispensed_qty',
+      gp: 'o.potential_margin_gain',
+      annual: 'o.annual_margin_gain',
+      notes: 'o.staff_notes',
     }[sortBy] || 'o.potential_margin_gain';
 
     query += ` ORDER BY ${sortColumn} ${sortOrder === 'asc' ? 'ASC' : 'DESC'} NULLS LAST`;
