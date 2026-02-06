@@ -342,7 +342,7 @@ router.post('/:faxId/resend', authenticateToken, async (req, res) => {
 
     const fax = faxResult.rows[0];
 
-    if (!['failed', 'queued', 'resent'].includes(fax.fax_status)) {
+    if (!['failed', 'queued', 'resent', 'cancelled', 'no_answer', 'busy'].includes(fax.fax_status)) {
       return res.status(400).json({ error: 'Only failed or stuck faxes can be resent' });
     }
 
