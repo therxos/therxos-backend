@@ -342,7 +342,7 @@ router.post('/:faxId/resend', authenticateToken, async (req, res) => {
 
     const fax = faxResult.rows[0];
 
-    if (!['failed', 'queued'].includes(fax.fax_status)) {
+    if (!['failed', 'queued', 'resent'].includes(fax.fax_status)) {
       return res.status(400).json({ error: 'Only failed or stuck faxes can be resent' });
     }
 
@@ -356,10 +356,10 @@ router.post('/:faxId/resend', authenticateToken, async (req, res) => {
       `, [fax.opportunity_id]);
     }
 
-    // Mark old fax as cancelled
+    // Mark old fax as resent
     await db.query(`
       UPDATE fax_log SET
-        fax_status = 'cancelled',
+        fax_status = 'resent',
         failed_reason = COALESCE(failed_reason, '') || ' - Resend requested',
         updated_at = NOW()
       WHERE fax_id = $1

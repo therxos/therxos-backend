@@ -105,6 +105,7 @@ const PMS_COLUMN_MAPPINGS = {
     quantity_dispensed: ['QUANT', 'Quantity', 'Qty'],
     days_supply: ['DAYS', 'Days Supply', 'DaysSupply'],
     daw_code: ['DAW', 'DAW Code'],
+    prescriber_npi: ['PRESNPI', 'Prescriber NPI'],
     prescriber_name: ['PRESNAME', 'Prescriber Name'],
     prescriber_fax: ['PRESFAXNO#', 'PRESFAXNO', 'Prescriber Fax'],
     patient_full_name: ['PATIENTNAME', 'Patient Name'],
@@ -112,8 +113,10 @@ const PMS_COLUMN_MAPPINGS = {
     insurance_bin: ['PRIINSBINNO', 'BIN', 'Insurance BIN'],
     insurance_group: ['PRIINSPATGROUP', 'Group', 'Group Number'],
     insurance_name: ['PRIINS', 'Insurance', 'Plan Name'],
+    patient_pay: ['TOTALPATIENTPAY', 'Patient Pay', 'Copay'],
     insurance_pay: ['TOTALINSPAID', 'Insurance Pay', 'Ins Pay'],
     acquisition_cost: ['TOTALCOST', 'Cost', 'Acquisition Cost'],
+    gross_profit: ['TOTALPROFIT', 'Gross Profit', 'Profit'],
     therapeutic_class: ['DRUGTHERAPY', 'Therapeutic Class', 'Drug Class'],
     package_size: ['PACKAGESIZE', 'Package Size'],
     diag_code: ['DIAGCODE1', 'Diagnosis Code'],
@@ -217,10 +220,18 @@ async function parseCSV(buffer, options = {}) {
 function detectPMSSystem(headers) {
   const headerSet = new Set(headers.map(h => h.toLowerCase().trim()));
 
+  // Check for PrimeRx-specific columns (check BEFORE spp since both share PRESNPI)
+  // PrimeRx has unique columns like RXNO, PATIENTNAME, PRIINSBINNO, DRUGTHERAPY
+  if (headerSet.has('rxno') || headerSet.has('priinsbinno') ||
+      headerSet.has('priins') || headerSet.has('drugtherapy') ||
+      headerSet.has('presfaxno#') || headerSet.has('priinspatgroup')) {
+    return 'primerx';
+  }
+
   // Check for SPP Report format (Pioneer nightly export)
-  // SPP has unique columns like PatLastName, PatFirstName, PresNPI, Primary_PBM_BIN
+  // SPP has unique columns like PatLastName, PatFirstName, Primary_PBM_BIN
   if (headerSet.has('patlastname') || headerSet.has('patfirstname') ||
-      headerSet.has('presnpi') || headerSet.has('primary_pbm_bin') ||
+      headerSet.has('primary_pbm_bin') ||
       headerSet.has('refdate') || headerSet.has('recdate')) {
     return 'spp';
   }
@@ -230,14 +241,6 @@ function detectPMSSystem(headers) {
   if (headerSet.has('customer name') || headerSet.has('quantity dispensed') ||
       headerSet.has('plan paid amount - total')) {
     return 'outcomes';
-  }
-
-  // Check for PrimeRx-specific columns
-  // PrimeRx has unique columns like RXNO, PATIENTNAME, PRIINSBINNO, DRUGTHERAPY
-  if (headerSet.has('rxno') || headerSet.has('priinsbinno') ||
-      headerSet.has('priins') || headerSet.has('drugtherapy') ||
-      headerSet.has('presfaxno#') || headerSet.has('priinspatgroup')) {
-    return 'primerx';
   }
 
   // Check for Rx30/Aracoma-specific columns
@@ -319,7 +322,12 @@ function normalizeNDC(ndc) {
 function parseDate(dateStr) {
   if (!dateStr) return null;
 
-  const str = dateStr.toString().trim();
+  let str = dateStr.toString().trim();
+
+  // Handle PrimeRx "filled \ ordered" format: "1-13-2026 \ 5-12-2025" → take fill date
+  if (str.includes('\\')) {
+    str = str.split('\\')[0].trim();
+  }
 
   // Handle SPP format: YYYYMMDD or YYYYMMDDHHMMSS (e.g., "20251226" or "20251226012332")
   if (/^\d{8,14}$/.test(str)) {
@@ -498,6 +506,11 @@ export async function ingestCSV(buffer, options = {}) {
               const [lastName, firstName] = fullName.split(',').map(s => s.trim());
               patientFirst = firstName || '';
               patientLast = lastName || '';
+            } else if (fullName.includes(' . ') || fullName.includes('. ')) {
+              // PrimeRx format: "LAST . FIRST" or "LAST. FIRST"
+              const dotParts = fullName.split(/\.\s*/).map(s => s.trim());
+              patientLast = dotParts[0] || '';
+              patientFirst = dotParts[1] || '';
             } else {
               // Fallback: split by whitespace (assumes "FIRST LAST")
               const nameParts = fullName.trim().split(/\s+/);
@@ -658,7 +671,12 @@ export async function ingestCSV(buffer, options = {}) {
             acquisition_cost, sig, dispensed_date, written_date, refills_remaining,
             source, source_file, raw_data
           ) VALUES ${valuePlaceholders.join(', ')}
-          ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO NOTHING
+          ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO UPDATE SET
+            patient_pay = COALESCE(EXCLUDED.patient_pay, prescriptions.patient_pay),
+            insurance_pay = COALESCE(EXCLUDED.insurance_pay, prescriptions.insurance_pay),
+            acquisition_cost = COALESCE(EXCLUDED.acquisition_cost, prescriptions.acquisition_cost),
+            prescriber_npi = COALESCE(EXCLUDED.prescriber_npi, prescriptions.prescriber_npi),
+            prescriber_name = COALESCE(EXCLUDED.prescriber_name, prescriptions.prescriber_name)
         `, values);
         insertedCount += result.rowCount || batch.length;
       } catch (error) {
@@ -674,7 +692,12 @@ export async function ingestCSV(buffer, options = {}) {
                 acquisition_cost, sig, dispensed_date, written_date, refills_remaining,
                 source, source_file, raw_data
               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
-              ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO NOTHING
+              ON CONFLICT (pharmacy_id, rx_number, dispensed_date) DO UPDATE SET
+                patient_pay = COALESCE(EXCLUDED.patient_pay, prescriptions.patient_pay),
+                insurance_pay = COALESCE(EXCLUDED.insurance_pay, prescriptions.insurance_pay),
+                acquisition_cost = COALESCE(EXCLUDED.acquisition_cost, prescriptions.acquisition_cost),
+                prescriber_npi = COALESCE(EXCLUDED.prescriber_npi, prescriptions.prescriber_npi),
+                prescriber_name = COALESCE(EXCLUDED.prescriber_name, prescriptions.prescriber_name)
             `, [
               rx.prescription_id, rx.pharmacy_id, rx.patient_id, rx.rx_number, rx.ndc, rx.drug_name,
               rx.quantity_dispensed, rx.days_supply, rx.daw_code, rx.prescriber_npi, rx.prescriber_name,
