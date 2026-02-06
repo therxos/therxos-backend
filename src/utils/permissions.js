@@ -116,8 +116,8 @@ export const CONFIGURABLE_PERMISSIONS = {
 // Default pharmacy settings
 export const DEFAULT_PHARMACY_SETTINGS = {
   fax_limits: {
-    max_per_day: 10,
-    same_prescriber_cooldown_days: 7,
+    max_per_day: 50,
+    same_prescriber_cooldown_days: 0,
     require_approval_for_technicians: true,
   },
   permission_overrides: {
