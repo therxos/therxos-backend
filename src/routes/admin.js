@@ -1623,7 +1623,7 @@ router.put('/triggers/:id', authenticateToken, requireSuperAdmin, async (req, re
 
     // Update BIN values if provided
     if (binValues !== undefined) {
-      await db.query('DELETE FROM trigger_bin_values WHERE trigger_id = $1', [id]);
+      await db.query('DELETE FROM trigger_bin_values WHERE trigger_id = $1 AND (is_manual_override = false OR is_manual_override IS NULL)', [id]);
       for (const bv of binValues) {
         await db.query(`
           INSERT INTO trigger_bin_values (trigger_id, insurance_bin, gp_value, is_excluded)
@@ -2167,10 +2167,10 @@ router.post('/triggers/:id/verify-coverage', authenticateToken, requireSuperAdmi
     const matches = await db.query(matchQuery, matchParams);
     console.log(`Found ${matches.rows.length} BIN/Group combinations for "${recommendedDrug}"`);
 
-    // Clear stale BIN values from previous scans (preserve manually excluded entries)
+    // Clear stale BIN values from previous scans (preserve manually excluded and manual override entries)
     await db.query(`
       DELETE FROM trigger_bin_values
-      WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL)
+      WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL) AND (is_manual_override = false OR is_manual_override IS NULL)
     `, [triggerId]);
 
     // Insert into trigger_bin_values with verified status and best drug/NDC
@@ -2592,10 +2592,10 @@ router.post('/triggers/scan-all', authenticateToken, requireSuperAdmin, async (r
       try {
         const matches = await db.query(matchQuery, matchParams);
 
-        // Clear stale BIN values from previous scans (preserve manually excluded entries)
+        // Clear stale BIN values from previous scans (preserve manually excluded and manual override entries)
         await db.query(`
           DELETE FROM trigger_bin_values
-          WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL)
+          WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL) AND (is_manual_override = false OR is_manual_override IS NULL)
         `, [trigger.trigger_id]);
 
         // Insert matches with best drug name and NDC
@@ -4844,10 +4844,10 @@ router.post('/triggers/:triggerId/scan-coverage', authenticateToken, requireSupe
       WHERE trigger_id = $1
     `, [triggerId, medianGP]);
 
-    // Clear stale BIN values from previous scans (preserve manually excluded entries)
+    // Clear stale BIN values from previous scans (preserve manually excluded and manual override entries)
     await db.query(`
       DELETE FROM trigger_bin_values
-      WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL)
+      WHERE trigger_id = $1 AND (is_excluded = false OR is_excluded IS NULL) AND (is_manual_override = false OR is_manual_override IS NULL)
     `, [triggerId]);
 
     // Store bin values in trigger_bin_values table (with best drug name + NDC)
