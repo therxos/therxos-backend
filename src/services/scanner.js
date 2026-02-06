@@ -329,9 +329,11 @@ async function scanAdminTriggers(pharmacyId, batchId) {
         NULLIF(REPLACE(pr.raw_data->>'AdjProfit', ',', '')::numeric, 0),
         NULLIF(REPLACE(pr.raw_data->>'Adjusted Profit', ',', '')::numeric, 0),
         NULLIF(REPLACE(pr.raw_data->>'adjusted_profit', ',', '')::numeric, 0),
+        NULLIF(REPLACE(pr.raw_data->>'TOTALPROFIT', ',', '')::numeric, 0),
+        NULLIF(REPLACE(pr.raw_data->>'TotalProfit', ',', '')::numeric, 0),
         NULLIF(
-          REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', '')::numeric
-          - REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', '')::numeric,
+          REPLACE(REPLACE(COALESCE(pr.raw_data->>'Price','0'), '$', ''), ',', '')::numeric
+          - REPLACE(REPLACE(COALESCE(pr.raw_data->>'Actual Cost','0'), '$', ''), ',', '')::numeric,
         0)
       ) as profit,
       p.chronic_conditions
