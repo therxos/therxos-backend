@@ -569,7 +569,9 @@ async function scanAdminTriggers(pharmacyId, batchId) {
   }
 
   // Filter to best-only and check DB for existing opps
-  // CRITICAL: A patient should NEVER have multiple ACTIVE opps for the same recommended drug
+  // CRITICAL: A patient should NEVER have multiple ACTIVE opps for the same TRIGGER
+  // Uses trigger_id (not drug name) to prevent duplicates from drug name formatting variants
+  // DB constraint idx_opps_unique_patient_trigger enforces this at the database level
   // - If no existing opp: create new one
   // - If existing 'Not Submitted' opp: update it with better values (always keep best)
   // - If existing 'Denied'/'Declined' opp: create new (they said no before, but new option may work)
@@ -579,7 +581,8 @@ async function scanAdminTriggers(pharmacyId, batchId) {
       SELECT opportunity_id, status, annual_margin_gain
       FROM opportunities
       WHERE pharmacy_id = $1 AND patient_id = $2
-        AND UPPER(COALESCE(recommended_drug_name, '')) = UPPER(COALESCE($3, ''))
+        AND trigger_id = $3
+        AND is_duplicate = false
       ORDER BY
         CASE
           WHEN status IN ('Submitted', 'Pending', 'Approved', 'Completed', 'Flagged', 'Didn''t Work') THEN 0
@@ -588,7 +591,7 @@ async function scanAdminTriggers(pharmacyId, batchId) {
         END,
         created_at DESC
       LIMIT 1
-    `, [pharmacyId, opp.patient_id, opp.recommended_drug_name]);
+    `, [pharmacyId, opp.patient_id, opp.trigger_id]);
 
     if (existing.rows.length === 0) {
       // No existing opp - create new
@@ -602,17 +605,19 @@ async function scanAdminTriggers(pharmacyId, batchId) {
           await db.query(`
             UPDATE opportunities SET
               recommended_ndc = COALESCE($1, recommended_ndc),
-              avg_dispensed_qty = COALESCE($2, avg_dispensed_qty),
-              potential_margin_gain = GREATEST($3, potential_margin_gain),
-              annual_margin_gain = GREATEST($4, annual_margin_gain),
-              trigger_id = COALESCE($5, trigger_id),
-              prescription_id = COALESCE($6, prescription_id),
-              current_ndc = COALESCE($7, current_ndc),
-              current_drug_name = COALESCE($8, current_drug_name),
+              recommended_drug_name = COALESCE($2, recommended_drug_name),
+              avg_dispensed_qty = COALESCE($3, avg_dispensed_qty),
+              potential_margin_gain = GREATEST($4, potential_margin_gain),
+              annual_margin_gain = GREATEST($5, annual_margin_gain),
+              trigger_id = COALESCE($6, trigger_id),
+              prescription_id = COALESCE($7, prescription_id),
+              current_ndc = COALESCE($8, current_ndc),
+              current_drug_name = COALESCE($9, current_drug_name),
               updated_at = NOW()
-            WHERE opportunity_id = $9
+            WHERE opportunity_id = $10
           `, [
             opp.recommended_ndc,
+            opp.recommended_drug_name,
             opp.avg_dispensed_qty,
             opp.potential_margin_gain,
             opp.annual_margin_gain,
