@@ -568,6 +568,58 @@ async function scanAdminTriggers(pharmacyId, batchId) {
     }
   }
 
+  // Resolve conflicts between combo triggers and component-switch triggers
+  // Example: Amlodipine-Atorvastatin combo vs Atorvastatin->Pitavastatin switch
+  // A combo needs the component drug to stay; a switch removes it. Mutually exclusive.
+  // Keep whichever has higher profit.
+  const triggerMap = new Map(triggers.map(t => [t.trigger_id, t]));
+  const patientGroups = new Map();
+  for (const [key, opp] of bestOppsMap) {
+    if (!patientGroups.has(opp.patient_id)) patientGroups.set(opp.patient_id, []);
+    patientGroups.get(opp.patient_id).push({ key, opp });
+  }
+
+  let conflictsResolved = 0;
+  for (const entries of patientGroups.values()) {
+    if (entries.length < 2) continue;
+
+    const comboEntries = entries.filter(e => e.opp.opportunity_type === 'combo_therapy');
+    if (comboEntries.length === 0) continue;
+
+    for (const combo of comboEntries) {
+      if (!bestOppsMap.has(combo.key)) continue;
+      const trigger = triggerMap.get(combo.opp.trigger_id);
+      if (!trigger?.if_has_keywords?.length) continue;
+
+      // Drugs the combo requires the patient to have (these get combined into one pill)
+      const comboComponents = trigger.if_has_keywords.map(k => k.toUpperCase());
+
+      for (const entry of entries) {
+        if (entry === combo || !bestOppsMap.has(entry.key)) continue;
+
+        const otherDrugName = (entry.opp.current_drug_name || '').toUpperCase();
+
+        // Does this opp target a drug the combo needs to keep?
+        const conflicts = comboComponents.some(comp => otherDrugName.includes(comp));
+
+        if (conflicts) {
+          // Keep higher profit, remove lower
+          if (combo.opp.potential_margin_gain >= entry.opp.potential_margin_gain) {
+            bestOppsMap.delete(entry.key);
+          } else {
+            bestOppsMap.delete(combo.key);
+            break; // combo removed, stop checking it
+          }
+          conflictsResolved++;
+        }
+      }
+    }
+  }
+
+  if (conflictsResolved > 0) {
+    logger.info(`Resolved ${conflictsResolved} combo vs switch trigger conflicts (kept higher profit)`, { batchId });
+  }
+
   // Filter to best-only and check DB for existing opps
   // CRITICAL: A patient should NEVER have multiple ACTIVE opps for the same TRIGGER
   // Uses trigger_id (not drug name) to prevent duplicates from drug name formatting variants
